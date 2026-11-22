@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.0">
+<meta name="version" content="1.5.1">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2781,7 +2781,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.1</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -7478,6 +7478,13 @@
           }
         });
       }, 6000);
+    });
+    // 安装完成后立即收起引导，避免重复提示；下次从桌面图标直接进入
+    window.addEventListener('appinstalled', function () {
+      markShown();
+      if (typeof window.__lnToast === 'function') {
+        window.__lnToast('已安装到主屏幕，下次可从桌面直接打开');
+      }
     });
     var ua = navigator.userAgent || '';
     var iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

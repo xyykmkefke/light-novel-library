@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.5.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 158/158）
+- 当前状态：**v1.5.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 163/163）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.5.0（已达成，功能：阅读统计的我的书评汇总）
+- 目标版本：v1.5.1（已达成，功能：PWA 桌面快捷方式与安装完成提示）
 
 ## 1. 目标与边界
 
@@ -147,7 +147,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v16` |
+| SW 缓存 | `yuc-ln-shell-v17` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v16`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v17`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：158/158）
+### Step 5 验收（已完成：163/163）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -490,6 +490,15 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.0；SW 缓存名升到 `yuc-ln-shell-v16`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 158/158（新增过滤排序、统计卡摘要、点击打开详情 3 项）。
 - 来源：<https://roadmap.thestorygraph.com/fr>、<https://www.goodreads.com/genres/reference-on-my-shelves>、<https://roadmap.thestorygraph.com/requests-ideas/posts/confirmation-when-leaving-review-page-in-app>。
+
+## 9.17 v1.5.1 功能记录（2026-11-23）
+
+- 参考 web.dev 的 Manifest shortcuts 与 Chrome 安装体验建议，`manifest.webmanifest` 新增稳定 `id`、`categories` 与 3 个桌面快捷方式：我的阅读（`#tab=mine`）、阅读统计（`#tab=stats`）、高分佳作（`#tab=all&o=score`）。
+- 快捷方式复用现有 hash 路由，不新增页面、不改数据与同步协议；长按已安装图标即可直接进入对应视图。
+- 安装完成后监听 `appinstalled`：写入本会话提示标记并轻提示「已安装到主屏幕」，避免后续重复弹出安装引导。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.1；SW 缓存名升到 `yuc-ln-shell-v17`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 163/163（新增稳定 id、快捷方式数量/名称/hash 路由、安装完成收起引导 5 项）。
+- 来源：<https://web.dev/articles/manifest-shortcuts>、<https://developer.mozilla.org/en-US/docs/Web/Manifest/id>、<https://developer.mozilla.org/en-US/docs/Web/API/Window/appinstalled_event>、<https://web.dev/articles/install-criteria>。
 
 ## 10. 已知风险与决策
 

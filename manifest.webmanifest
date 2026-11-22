@@ -1,12 +1,14 @@
 {
+  "id": "./",
   "name": "轻小说库 · 我的阅读",
   "short_name": "轻小说库",
   "description": "本地优先的轻小说浏览与阅读记录",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "categories": ["books", "lifestyle"],
   "background_color": "#0a0b0d",
   "theme_color": "#0a0b0d",
   "icons": [
@@ -34,7 +36,25 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "我的阅读",
+      "short_name": "我的阅读",
+      "description": "查看想读、在读与读完的书目",
+      "url": "./#tab=mine"
+    },
+    {
+      "name": "阅读统计",
+      "short_name": "统计",
+      "description": "年度目标、阅读节奏与打卡记录",
+      "url": "./#tab=stats"
+    },
+    {
+      "name": "高分佳作",
+      "short_name": "高分",
+      "description": "按评分排序浏览全部轻小说",
+      "url": "./#tab=all&o=score"
+    }
   ]
 }
-
-

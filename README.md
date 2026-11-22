@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」标签条目 4007 条，无账号、无后端。
 
-状态：**v1.5.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 158 项）
+状态：**v1.5.1 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 163 项）
+
+v1.5.1：PWA 安装体验补全：manifest 声明稳定 `id` 与桌面快捷方式（我的阅读 / 阅读统计 / 高分佳作），长按图标可直接进入对应视图；安装完成后自动收起引导并轻提示。
 
 v1.5.0：阅读统计新增「我的书评」汇总卡：集中列出写过短评或笔记的书，按书评更新时间倒序显示最近 6 条，含摘要、我的评分与日期，点击可直接打开详情。
 
@@ -68,14 +70,14 @@ npm run clean-series  # 用本地缓存离线重算子卷
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（158 项）
+npm run verify        # 无头浏览器自动化验收（163 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v16`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v17`。
 
 ## 部署
 
