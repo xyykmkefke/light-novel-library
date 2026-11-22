@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.0.1 完成**（数据、页面、个人数据、Gist 同步、PWA、自动化验收 79/79）
+- 当前状态：**v1.1.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 112/112）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.0.1（已达成，补丁版：无新增功能块）
+- 目标版本：v1.1.0（已达成，次版本：书评与统计功能块）
 
 ## 1. 目标与边界
 
@@ -144,7 +144,8 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 备份时间 | `yuc_ln_backup_v1` |
 | 待备份改动 | `yuc_ln_dirty_v1` |
 | 备份提醒 | `yuc_ln_backup_warn_v1` |
-| SW 缓存 | `yuc-ln-shell-v2` |
+| 年度目标 | `yuc_ln_goal_v1` |
+| SW 缓存 | `yuc-ln-shell-v3` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -156,22 +157,27 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
   vol: 0,        // 已读到第几卷，范围 0..v；v=0 时隐藏进度输入
   t: 0,          // 加入时间戳
   u: 0,          // 更新时间戳
-  f: 0           // 读完时间戳，未读完为 0
+  f: 0,          // 读完时间戳，未读完为 0
+  r: 0,          // 我的评分 0–10，0 表示未评分
+  rv: '',        // 短评，≤140 字
+  nt: '',        // 笔记，≤1000 字
+  rvU: 0         // 书评更新时间戳，独立于状态合并
 }
 ```
 
 - 状态文案：想读 / 在读 / 读完 / 弃读
 - 状态改为 `done` 时自动 `f = Date.now()` 且 `vol = v`；离开 `done` 保留 `vol`，`f` 置 0
-- 合并规则：同一条目按 `u` 取新；`vol` 取两者较大值；删除用墓碑（保留 180 天）
-- 导出 JSON：
+- 合并规则：同一条目按 `u` 取新；`vol` 取两者较大值；书评按 `rvU` 单独取新；删除用墓碑（保留 180 天）
+- 导出 / Gist payload（version 2）：
 
 ```json
 {
   "app": "yuc-light-novel-list",
-  "version": 1,
+  "version": 2,
   "exportedAt": "2026-11-22T00:00:00.000Z",
   "items": [
-    { "id": 499, "status": "done", "vol": 8, "addedAt": 0, "updatedAt": 0, "finishedAt": 0 }
+    { "id": 499, "status": "done", "vol": 8, "addedAt": 0, "updatedAt": 0, "finishedAt": 0,
+      "rating": 9, "review": "短评", "note": "笔记", "reviewUpdatedAt": 0 }
   ]
 }
 ```
@@ -263,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v2`，SHELL 包含 `./data/light-novels.js`。
+1. `sw.js` 缓存名 `yuc-ln-shell-v3`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：79/79）
+### Step 5 验收（已完成：112/112）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -338,6 +344,19 @@ PWA / 移动端：
 - PWA：缓存名升级 `yuc-ln-shell-v2`；检测到新版本接管时提示「刷新」。
 - 验收：`check-data` 0；`test-merge` 13/13；`verify` 79/79（新增加权排序、日文首字母、年份提示、首屏耗时 4 条）。
 - 体积：`index.html` 约 197 KB，`data/light-novels.js` 约 1.4 MB。
+
+## 9.3 v1.1.0 功能记录（2026-11-23）
+
+- 我的书评：详情内 1–10 分评分（即时保存）、140 字短评、1000 字笔记；未收藏时提示先加入阅读。
+- 卡片展示 `★ 评分` 角标；详情元信息增加「我的评分」；CSV 增加评分/短评/笔记列；Markdown 增加评分列与「短评与笔记」章节。
+- 同步协议升级 version 2：新增 `rating` / `review` / `note` / `reviewUpdatedAt`；书评按 `rvU` 单独取新，旧客户端只改状态不会清空书评；导入兼容旧版与书评字段。
+- 阅读统计标签页：收藏/读完/在读/已读卷总览、年度目标与进度条、历年读完、今年月度分布、题材偏好、常读作者、已评分与平均分；目标存 `yuc_ln_goal_v1`。
+- 高级搜索：`作者:`、`年:2020`、`年:2010-2020`、`分:>=8`、`题材:奇幻`，可与关键词、`-词` 排除组合；高亮与相关度只使用普通关键词。
+- 排序新增「按卷数」「按我的评分」；hash 与本地偏好同步。
+- 键盘新增 J/K 上下移动卡片焦点；帮助面板补充搜索语法。
+- 性能：卡片 `content-visibility: auto`；封面缓存上限 400 张自动清理；安装引导（`beforeinstallprompt` + iOS 分享提示，每会话一次）。
+- 测试：`test-merge` 20 项；`verify` 112 项（新增书评、统计、高级搜索、卷数排序、J/K、移动端统计与 390/430 宽度）。
+- 截图：新增 `screenshots/mobile-stats.png`。
 
 ## 10. 已知风险与决策
 

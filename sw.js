@@ -1,6 +1,19 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-ln-shell-v2';
+var CACHE = 'yuc-ln-shell-v3';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/light-novels.js'];
+var IMG_LIMIT = 400;
+
+// 封面缓存有上限：超出后按插入顺序清理最旧的，避免长期使用占满配额
+function trimImageCache(cache) {
+  return cache.keys().then(function (keys) {
+    var imgs = keys.filter(function (req) {
+      return req.destination === 'image' || /bgmimg|anibt/.test(req.url);
+    });
+    if (imgs.length <= IMG_LIMIT) return null;
+    var drop = imgs.slice(0, imgs.length - IMG_LIMIT);
+    return Promise.all(drop.map(function (req) { return cache.delete(req); }));
+  }).catch(function () {});
+}
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
@@ -43,7 +56,9 @@ self.addEventListener('fetch', function (e) {
           // 封面多为跨域 opaque 响应（status 0），同样可以缓存供离线使用
           if (res.ok || res.type === 'opaque') {
             var copy = res.clone();
-            caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
+            caches.open(CACHE).then(function (cache) {
+              return cache.put(req, copy).then(function () { return trimImageCache(cache); });
+            });
           }
           return res;
         });

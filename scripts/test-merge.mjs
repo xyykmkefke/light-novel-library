@@ -132,12 +132,86 @@ test('兼容旧版 ep 字段作为进度', () => {
 });
 
 test('重复合并相同数据不产生变化', () => {
-  const map = { 1: { s: 'doing', t: 100, vol: 2, u: 300, f: 0 } };
+  const map = { 1: { s: 'doing', t: 100, vol: 2, u: 300, f: 0, r: 8, rv: '不错', nt: '记一笔', rvU: 300 } };
   const remote = {
-    items: [{ id: 1, status: 'doing', addedAt: 100, vol: 2, updatedAt: 300 }],
+    items: [{ id: 1, status: 'doing', addedAt: 100, vol: 2, updatedAt: 300, rating: 8, review: '不错', note: '记一笔', reviewUpdatedAt: 300 }],
   };
   assert(mergeRemoteState(map, {}, remote, totalOf) === 0, '首次不应变化');
   assert(mergeRemoteState(map, {}, remote, totalOf) === 0, '重复合并不应变化');
+});
+
+test('远端书评随较新记录合并', () => {
+  const map = { 1: { s: 'done', t: 100, vol: 1, u: 200, f: 0, r: 6, rv: '还行', nt: '', rvU: 200 } };
+  mergeRemoteState(map, {}, {
+    items: [{
+      id: 1, status: 'done', addedAt: 100, vol: 1, updatedAt: 300,
+      rating: 9, review: '非常好', note: '第二卷期待', reviewUpdatedAt: 300,
+    }],
+  }, totalOf);
+  assert(map['1'].r === 9, `评分=${map['1'].r}`);
+  assert(map['1'].rv === '非常好', `短评=${map['1'].rv}`);
+  assert(map['1'].nt === '第二卷期待', `笔记=${map['1'].nt}`);
+});
+
+test('旧客户端只更新状态不会清空书评', () => {
+  const map = { 1: { s: 'done', t: 100, vol: 1, u: 200, f: 0, r: 9, rv: '神作', nt: '写了很久', rvU: 500 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'doing', addedAt: 100, vol: 1, updatedAt: 800 }],
+  }, totalOf);
+  assert(map['1'].rv === '神作', `短评=${map['1'].rv}`);
+  assert(map['1'].nt === '写了很久', `笔记=${map['1'].nt}`);
+  assert(map['1'].r === 9, `评分=${map['1'].r}`);
+  assert(map['1'].s === 'doing', `状态=${map['1'].s}`);
+});
+
+test('明确清空书评会同步到另一端', () => {
+  const map = { 1: { s: 'done', t: 100, vol: 1, u: 200, f: 0, r: 7, rv: '旧短评', nt: '', rvU: 200 } };
+  mergeRemoteState(map, {}, {
+    items: [{
+      id: 1, status: 'done', addedAt: 100, vol: 1, updatedAt: 900,
+      rating: 0, review: '', note: '', reviewUpdatedAt: 900,
+    }],
+  }, totalOf);
+  assert(map['1'].rv === '', `短评=${map['1'].rv}`);
+  assert(map['1'].r === 0, `评分=${map['1'].r}`);
+});
+
+test('评分越界会被限制', () => {
+  const map = {};
+  mergeRemoteState(map, {}, {
+    items: [
+      { id: 1, status: 'done', addedAt: 100, vol: 0, updatedAt: 100, rating: 99 },
+      { id: 3, status: 'done', addedAt: 100, vol: 0, updatedAt: 100, rating: -5 },
+    ],
+  }, totalOf);
+  assert(map['1'].r === 10, `上界=${map['1'].r}`);
+  assert(map['3'].r === 0, `下界=${map['3'].r}`);
+});
+
+test('过长书评会被截断', () => {
+  const map = {};
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'done', addedAt: 100, vol: 0, updatedAt: 100, review: 'a'.repeat(200), note: 'b'.repeat(1200) }],
+  }, totalOf);
+  assert(map['1'].rv.length === 140, `短评长度=${map['1'].rv.length}`);
+  assert(map['1'].nt.length === 1000, `笔记长度=${map['1'].nt.length}`);
+});
+
+test('无书评时间戳的旧数据仍能合并', () => {
+  const map = { 1: { s: 'want', t: 100, vol: 0, u: 200, f: 0, r: 0, rv: '', nt: '', rvU: 0 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'done', addedAt: 100, vol: 0, updatedAt: 300, rating: 8, review: '旧版书评' }],
+  }, totalOf);
+  assert(map['1'].s === 'done', `状态=${map['1'].s}`);
+  assert(map['1'].rv === '旧版书评', `短评=${map['1'].rv}`);
+});
+
+test('书评字段缺失时保持空字符串', () => {
+  const map = {};
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'done', addedAt: 100, vol: 0, updatedAt: 100 }],
+  }, totalOf);
+  assert(map['1'].rv === '' && map['1'].nt === '' && map['1'].r === 0, '默认值不符');
 });
 
 test('未知状态回退为读完', () => {

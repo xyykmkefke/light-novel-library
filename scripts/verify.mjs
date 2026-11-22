@@ -359,6 +359,37 @@ async function main() {
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0, kanaPy);
     await setSearch('');
 
+    // ---- 高级搜索语法 ----
+    await setSearch('分:>=9');
+    const scoreExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+    const scoreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && x.s != null && x.s >= 9).length)()`);
+    check('分:>=9 搜索生效', scoreExprCount === scoreExprExpected, `${scoreExprCount}/${scoreExprExpected}`);
+    check('分: 语法不参与标题高亮', (await count('.title mark')) === 0);
+
+    await setSearch('题材:奇幻');
+    const genreExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+    const genreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && (x.tg || []).includes('fan')).length)()`);
+    check('题材:奇幻 搜索生效', genreExprCount === genreExprExpected, `${genreExprCount}/${genreExprExpected}`);
+
+    await setSearch('年:2020');
+    const yearExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+    const yearExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && String(x.d || '').startsWith('2020')).length)()`);
+    check('年:2020 搜索生效', yearExprCount === yearExprExpected, `${yearExprCount}/${yearExprExpected}`);
+
+    const authorName = await cdp.evaluate(`(() => {
+      const x = window.LN_DATA.find((v) => v.au && !v.c);
+      return String(x.au).split(/[\\/、,，&]/)[0].trim();
+    })()`);
+    await setSearch('作者:' + authorName);
+    check('作者: 搜索有结果',
+      (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0, authorName);
+
+    await setSearch('分:>=8 题材:恋爱');
+    check('字段与关键词可组合',
+      (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0);
+    await setSearch('');
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+
     // ---- 排序 ----
     await cdp.evaluate(`(() => {
       const el = document.getElementById('sort');
@@ -387,6 +418,33 @@ async function main() {
     check('评分排序使用加权分数', String(shownScoreFirst) === String(scoreFirst.id),
       `${shownScoreFirst} / ${scoreFirst.id}（s=${scoreFirst.s}, h=${scoreFirst.h}）`);
     check('加权后榜首具备足够收藏量', (scoreFirst.h || 0) >= 300, `h=${scoreFirst.h}`);
+
+    // 卷数排序
+    await cdp.evaluate(`(() => {
+      const el = document.getElementById('sort');
+      el.value = 'vol';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await sleep(250);
+    const maxVol = await cdp.evaluate(`(() => Math.max(...window.LN_DATA.filter((x) => !x.c).map((x) => Number(x.v) || 0)))()`);
+    const firstVol = await cdp.evaluate(`(() => {
+      const id = document.querySelector('.card')?.dataset.id;
+      const x = window.LN_DATA.find((v) => String(v.i) === id);
+      return Number(x?.v) || 0;
+    })()`);
+    check('按卷数排序生效', firstVol === maxVol, `${firstVol} / ${maxVol}`);
+
+    // 键盘 J/K 移动焦点
+    const keyboardNav = await cdp.evaluate(`(() => {
+      const cards = [...document.querySelectorAll('.card')];
+      if (cards.length < 2) return false;
+      const first = cards[0].querySelector('.card-link');
+      first.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+      const active = document.activeElement.closest('.card');
+      return active === cards[1];
+    })()`);
+    check('J 键移动到下一张卡片', keyboardNav === true);
     await click('#clearFiltersBtn');
 
     // ---- 我的阅读 ----
@@ -436,6 +494,52 @@ async function main() {
     check('详情提供 Bangumi 链接',
       /bgm\.tv\/subject\//.test(await cdp.evaluate(`(() => document.getElementById('detailLink').href)()`)));
     check('详情有相似推荐', (await count('#detailSimilar .sim-card')) > 0);
+
+    // 切换阅读状态会关闭详情，重新打开后继续测书评
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
+    await sleep(300);
+
+    // ---- 我的书评：评分 / 短评 / 笔记 ----
+    check('详情显示 10 档评分', (await count('#detailReview [data-rate]')) === 10);
+    await cdp.evaluate(`(() => document.querySelector('#detailReview [data-rate="9"]').click())()`);
+    await sleep(200);
+    await cdp.evaluate(`(() => {
+      const shortEl = document.getElementById('reviewShort');
+      const noteEl = document.getElementById('reviewNote');
+      shortEl.value = '测试短评';
+      shortEl.dispatchEvent(new Event('input', { bubbles: true }));
+      noteEl.value = '测试笔记';
+      noteEl.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('reviewSave').click();
+    })()`);
+    await sleep(300);
+    const reviewEntry = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(pick.id)}])()`);
+    check('评分写入阅读记录', Number(reviewEntry?.r) === 9, `r=${reviewEntry?.r}`);
+    check('短评写入阅读记录', reviewEntry?.rv === '测试短评', reviewEntry?.rv);
+    check('笔记写入阅读记录', reviewEntry?.nt === '测试笔记', reviewEntry?.nt);
+    check('详情元信息显示我的评分',
+      /我的评分/.test(await cdp.evaluate(`(() => document.getElementById('detailMeta').textContent)()`)));
+    check('卡片显示我的评分角标', (await count('.badge.myrating')) > 0);
+    check('书评时间戳单独记录', Number(reviewEntry?.rvU) > 0);
+
+    // 导出内容应包含书评字段（拦截 Blob 读取，不真正下载）
+    await cdp.evaluate(`(() => {
+      window.__lnExported = null;
+      const orig = URL.createObjectURL;
+      URL.createObjectURL = function (blob) { window.__lnExported = blob; return 'blob:verify'; };
+      document.getElementById('exportBtn').click();
+      URL.createObjectURL = orig;
+    })()`);
+    await sleep(200);
+    const exportedText = await cdp.evaluate(`(async () => (window.__lnExported ? await window.__lnExported.text() : ''))()`);
+    let exportedJson = null;
+    try { exportedJson = JSON.parse(exportedText); } catch {}
+    const exportedItem = exportedJson && Array.isArray(exportedJson.items)
+      ? exportedJson.items.find((it) => String(it.id) === String(pick.id)) : null;
+    check('导出 JSON 版本升级为 2', exportedJson?.version === 2, String(exportedJson?.version));
+    check('导出 JSON 含评分与短评',
+      exportedItem?.rating === 9 && exportedItem?.review === '测试短评',
+      JSON.stringify({ r: exportedItem?.rating, rv: exportedItem?.review }));
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(300);
 
@@ -478,7 +582,7 @@ async function main() {
         version: 1,
         items: [
           { id: ${JSON.stringify(importTarget.id)}, status: 'done', vol: ${importTarget.v},
-            addedAt: 1, updatedAt: 2, finishedAt: 3 },
+            addedAt: 1, updatedAt: 2, finishedAt: 3, rating: 8, review: '导入短评', note: '导入笔记' },
           { id: 999999999, status: 'want' }
         ]
       };
@@ -494,6 +598,35 @@ async function main() {
     check('导入还原卷进度', Number(imported[importTarget.id]?.vol) === importTarget.v,
       `${imported[importTarget.id]?.vol}/${importTarget.v}`);
     check('导入跳过未知条目', Object.keys(imported).length === 2, Object.keys(imported).join(','));
+    check('导入还原书评字段',
+      imported[importTarget.id]?.r === 8 && imported[importTarget.id]?.rv === '导入短评' &&
+      imported[importTarget.id]?.nt === '导入笔记',
+      JSON.stringify({ r: imported[importTarget.id]?.r, rv: imported[importTarget.id]?.rv }));
+
+    // ---- 阅读统计 ----
+    await click('.tab[data-tab="stats"]');
+    await sleep(300);
+    check('统计页显示统计卡片',
+      (await cdp.evaluate(`(() => !document.getElementById('statsPanel').hidden)()`)) === true &&
+      (await count('#statsPanel .stat-card')) >= 4);
+    check('统计页显示年度目标',
+      /年目标/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    await cdp.evaluate(`(() => {
+      const el = document.getElementById('goalInput');
+      el.value = '12';
+      document.querySelector('#statsPanel [data-stats="goal"]').click();
+    })()`);
+    await sleep(250);
+    const goalStored = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_goal_v1') || '{}'))()`);
+    check('年度目标写入本地', Number(goalStored.target) === 12, JSON.stringify(goalStored));
+    check('统计页汇总已评分数量',
+      /已评分/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    check('统计页显示常读作者',
+      /常读作者/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    await cdp.evaluate(`(() => { location.hash = 'tab=mine'; })()`);
+    await sleep(300);
+    check('hash 可直达统计以外的标签页',
+      (await cdp.evaluate(`(() => document.querySelector('.tab.active')?.dataset.tab)()`)) === 'mine');
 
     // ---- 命令面板 ----
     await cdp.evaluate(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); })()`);
@@ -535,7 +668,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.0.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.0.1'));
+    check('页脚版本为 v1.1.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -572,11 +705,18 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.0.1', manifest.version === '1.0.1');
+    check('manifest 版本为 1.1.0', manifest.version === '1.1.0');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v2'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v3'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
+    check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
+    const indexTxt = await (await fetch(`http://127.0.0.1:${PORT}/index.html`)).text();
+    check('包含安装引导', indexTxt.includes('beforeinstallprompt') && indexTxt.includes('添加到主屏幕'));
+    check('帮助面板写明高级搜索语法', indexTxt.includes('作者:米泽穗信'));
+    check('卡片启用 content-visibility',
+      (await cdp.evaluate(`(() => getComputedStyle(document.querySelector('.card')).contentVisibility)()`)) === 'auto');
+    check('统计标签入口存在', (await count('.tab[data-tab="stats"]')) === 1);
 
     // ---- 无障碍 ----
     check('存在跳过头部链接', (await count('#skipLink')) === 1);
@@ -621,6 +761,35 @@ async function main() {
       await writeFile(path.join(SHOT_DIR, 'mobile.png'), Buffer.from(sheetShot.result.data, 'base64'));
     }
     await click('#filterDone');
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
+
+    // ---- 移动端统计页与不同宽度 ----
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 375, height: 812, deviceScaleFactor: 2, mobile: true,
+    });
+    await cdp.evaluate(`(() => { location.hash = 'tab=stats'; })()`);
+    await sleep(400);
+    const mobileStats = await cdp.evaluate(`(() => ({
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      cards: document.querySelectorAll('#statsPanel .stat-card').length,
+    }))()`);
+    check('移动端统计页无横向滚动', mobileStats.overflow <= 1, `${mobileStats.overflow}px`);
+    check('移动端统计页渲染卡片', mobileStats.cards >= 4, String(mobileStats.cards));
+    const statsShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    if (statsShot.result?.data) {
+      await writeFile(path.join(SHOT_DIR, 'mobile-stats.png'), Buffer.from(statsShot.result.data, 'base64'));
+    }
+    await cdp.evaluate(`(() => { location.hash = 'tab=all'; })()`);
+    await sleep(300);
+
+    for (const width of [390, 430]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width, height: 900, deviceScaleFactor: 2, mobile: true,
+      });
+      await sleep(250);
+      const overflow = await cdp.evaluate(`(() => document.documentElement.scrollWidth - window.innerWidth)()`);
+      check(`移动端 ${width}px 无横向滚动`, overflow <= 1, `${overflow}px`);
+    }
     await cdp.send('Emulation.clearDeviceMetricsOverride');
 
     // ---- 控制台错误 ----
