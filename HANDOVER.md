@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.8 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 141/141）
+- 当前状态：**v1.1.9 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 146/146）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.8（已达成，补丁：长列表封面 sizes 与渲染尺寸记忆）
+- 目标版本：v1.1.9（已达成，补丁：搜索联想与组合框语义）
 
 ## 1. 目标与边界
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v11`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v12`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：141/141）
+### Step 5 验收（已完成：146/146）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -438,6 +438,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.8；SW 缓存名升到 `yuc-ln-shell-v11`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 141/141（新增列表 sizes、看板 sizes、渲染尺寸记忆 3 项）。
 - 来源：<https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Lazy_loading>、<https://webperfclinic.com/article/css-content-visibility-rendering-performance-guide>、<https://handoff.design/css-performance/content-visibility/>。
+
+## 9.12 v1.1.9 补丁记录（2026-11-23）
+
+- 参考 Calibre-Web 的 typeahead 与 WAI-ARIA combobox 模式，搜索框输入两个字符后浮出书名 / 作者联想（最多 6 条，按书名前缀、原名前缀、作者命中、书名包含排序，按「标题 + 作者」去重）。
+- 联想与「最近搜索」共用浮层：有输入时显示建议，空输入时显示历史；`作者:` 等字段语法或单字符输入不触发联想，避免遮挡筛选结果。
+- 交互：↑/↓ 在建议间移动高亮（`aria-activedescendant`），回车或点击回填完整书名并写入搜索历史，回填后面板收起；焦点始终留在输入框。
+- 无障碍：搜索框补 `role="combobox"`、`aria-autocomplete="list"`、`aria-haspopup="listbox"`、`aria-expanded`，建议列表使用 `listbox` / `option` 语义。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.9；SW 缓存名升到 `yuc-ln-shell-v12`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 146/146（新增联想浮出、listbox 语义、combobox 语义、方向键高亮、点击回填 5 项）。
+- 来源：<https://deepwiki.com/janeczku/calibre-web/6-external-integrations>、<https://accessibility.build/guides/accessible-combobox>、<https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-autocomplete-list/>、<https://developer.mozilla.org/zh-CN/docs/Web/Accessibility/ARIA/Reference/Roles/combobox_role>。
 
 ## 10. 已知风险与决策
 

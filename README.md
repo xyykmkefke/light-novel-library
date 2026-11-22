@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」标签条目 4007 条，无账号、无后端。
 
-状态：**v1.1.8 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 141 项）
+状态：**v1.1.9 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 146 项）
+
+v1.1.9：搜索框输入两个字符后浮出书名 / 作者联想（最多 6 条），支持方向键高亮、回车或点击回填；搜索框补齐 `combobox` / `listbox` 语义与 `aria-activedescendant`，屏幕阅读器可感知建议列表。
 
 v1.1.8：列表与看板视图按真实封面宽度声明 `sizes`，长列表中不再误取 400w 大图；卡片改用 `contain-intrinsic-size: auto`，浏览器记住已渲染尺寸，滚动时减少占位跳动。
 
@@ -58,7 +60,7 @@ npm run clean-series  # 用本地缓存离线重算子卷
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（138 项）
+npm run verify        # 无头浏览器自动化验收（146 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。

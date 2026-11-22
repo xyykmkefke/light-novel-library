@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.1.8">
+<meta name="version" content="1.1.9">
 <style>
   :root {
     --bg: #0d0f14;
@@ -127,6 +127,64 @@
 
   .search input::placeholder { color: var(--muted-2); }
   .search input:focus { border-color: rgba(255, 107, 157, 0.5); }
+
+  /* 搜索联想：输入关键词时浮出书名/作者建议，沿用历史面板容器 */
+  .searchhist.sugmode {
+    display: block;
+    padding: 8px;
+  }
+
+  .searchhist.sugmode .hlabel {
+    display: block;
+    margin: 2px 4px 6px;
+  }
+
+  .suglist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sug {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .sug:hover,
+  .sug.active {
+    border-color: rgba(255, 107, 157, 0.5);
+    background: rgba(255, 107, 157, 0.14);
+  }
+
+  .sug .sug-t {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sug .sug-m {
+    margin-left: auto;
+    color: var(--muted-2);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  html[data-theme="light"] .sug:hover,
+  html[data-theme="light"] .sug.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
 
   /* 搜索历史：聚焦空搜索框时浮出最近关键词 */
   .searchhist {
@@ -2428,7 +2486,7 @@
           <circle cx="11" cy="11" r="7"></circle>
           <path d="m20 20-3.5-3.5"></path>
         </svg>
-        <input id="search" type="search" placeholder="搜索书名、作者或拼音；支持 作者: 出版社: 年: 分: 题材:" autocomplete="off" aria-label="搜索书名">
+        <input id="search" type="search" placeholder="搜索书名、作者或拼音；支持 作者: 出版社: 年: 分: 题材:" autocomplete="off" aria-label="搜索书名" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="searchHist">
         <div class="searchhist" id="searchHist" hidden></div>
       </div>
       <nav class="tabs" aria-label="主要视图">
@@ -2590,7 +2648,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.8</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.9</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3191,6 +3249,9 @@
   // ---- 搜索历史：最多保留 8 条，去重且最近使用排前 ----
   var searchHist = loadHist();
   var histIndex = -1;
+  var sugIndex = -1;
+  var sugMuted = false;
+  var SUG_MAX = 6;
 
   function loadHist() {
     if (!canStore) return [];
@@ -3220,14 +3281,68 @@
     renderHist();
   }
 
+  // 联想仅在普通关键词下工作，字符过少或使用「作者:」等字段语法时让位给历史
+  function canSuggest(q) {
+    return q.length >= 2 && !/(作者|出版社|书系|pub|line|tag|年|分|题材)[:：]/i.test(q);
+  }
+
+  // 搜索联想：书名前缀 > 原名前缀 > 作者命中 > 书名包含，去重后取前 6 条
+  function suggestItems(q) {
+    var needle = q.toLowerCase();
+    var buckets = [[], [], [], []];
+    var seen = {};
+    for (var i = 0; i < DATA.length; i += 1) {
+      var x = DATA[i];
+      var title = String(x.cn || x.n || '').trim();
+      if (!title) continue;
+      var t = title.toLowerCase();
+      var n = String(x.n || '').toLowerCase();
+      var au = String(x.au || '');
+      var rank = -1;
+      if (t.indexOf(needle) === 0) rank = 0;
+      else if (n.indexOf(needle) === 0) rank = 1;
+      else if (au.toLowerCase().indexOf(needle) >= 0) rank = 2;
+      else if (t.indexOf(needle) >= 0) rank = 3;
+      if (rank < 0) continue;
+      var key = title + '|' + au;
+      if (seen[key]) continue;
+      seen[key] = 1;
+      buckets[rank].push({
+        q: title,
+        meta: [au, yearOf(x.d)].filter(Boolean).join(' · ')
+      });
+    }
+    return buckets[0].concat(buckets[1], buckets[2], buckets[3]).slice(0, SUG_MAX);
+  }
+
   function renderHist() {
     var box = $('searchHist');
     if (!box) return;
-    var open = searchHist.length > 0 &&
-      document.activeElement === searchEl &&
-      !searchEl.value.trim();
-    box.hidden = !open;
-    if (!open) { histIndex = -1; return; }
+    var qv = searchEl.value.trim();
+    var focused = document.activeElement === searchEl;
+    var sug = focused && !sugMuted && canSuggest(qv) ? suggestItems(qv) : [];
+    var mode = sug.length ? 'sug' : (focused && !qv && searchHist.length ? 'hist' : '');
+    box.hidden = !mode;
+    box.classList.toggle('sugmode', mode === 'sug');
+    searchEl.setAttribute('aria-expanded', mode ? 'true' : 'false');
+    if (mode === 'sug') {
+      if (sugIndex >= sug.length) sugIndex = -1;
+      var sugHtml = '<span class="hlabel" id="sugLabel">搜索建议</span>' +
+        '<ul class="suglist" role="listbox" aria-label="搜索建议">';
+      sugHtml += sug.map(function (s, i) {
+        return '<li class="sug' + (i === sugIndex ? ' active' : '') + '" role="option" id="sugOpt' + i +
+          '" aria-selected="' + (i === sugIndex ? 'true' : 'false') + '" data-q="' + escapeHtml(s.q) + '">' +
+          '<span class="sug-t">' + escapeHtml(s.q) + '</span>' +
+          (s.meta ? '<span class="sug-m">' + escapeHtml(s.meta) + '</span>' : '') + '</li>';
+      }).join('');
+      box.innerHTML = sugHtml + '</ul>';
+      if (sugIndex >= 0) searchEl.setAttribute('aria-activedescendant', 'sugOpt' + sugIndex);
+      else searchEl.removeAttribute('aria-activedescendant');
+      return;
+    }
+    sugIndex = -1;
+    searchEl.removeAttribute('aria-activedescendant');
+    if (mode !== 'hist') { histIndex = -1; return; }
     if (histIndex >= searchHist.length) histIndex = -1;
     var html = '<span class="hlabel">最近搜索</span>';
     html += searchHist.map(function (q, i) {
@@ -3244,8 +3359,21 @@
   // 选用一条历史词：回填输入框并立即搜索
   function applyHistQuery(q) {
     histIndex = -1;
+    sugMuted = true;
     searchEl.value = q;
     state.q = q;
+    render();
+    searchEl.focus();
+    renderHist();
+  }
+
+  // 选用一条联想：回填完整书名并搜索，收起面板避免反复弹出
+  function applySuggestion(q) {
+    sugIndex = -1;
+    sugMuted = true;
+    searchEl.value = q;
+    state.q = q;
+    pushHist(q);
     render();
     searchEl.focus();
     renderHist();
@@ -5339,6 +5467,7 @@
 
   var searchTimer = null;
   searchEl.addEventListener('input', function () {
+    sugMuted = false;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () {
       state.q = searchEl.value;
@@ -5353,12 +5482,22 @@
   searchEl.addEventListener('keydown', function (e) {
     // 中文输入法组词中的 Enter / Esc 由输入法处理，不触发搜索或清空
     if (e.isComposing) return;
-    // 历史面板展开时，↑/↓ 在历史词间移动高亮，回车回填并搜索
+    // 弹出层展开时，↑/↓ 在联想项或历史词间移动高亮（焦点始终留在输入框）
     var histBox = $('searchHist');
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && histBox && !histBox.hidden) {
       e.preventDefault();
-      var n = searchHist.length;
       var step = e.key === 'ArrowDown' ? 1 : -1;
+      if (histBox.classList.contains('sugmode')) {
+        var opts = histBox.querySelectorAll('.sug');
+        var ns = opts.length;
+        if (!ns) return;
+        sugIndex = sugIndex < 0
+          ? (step > 0 ? 0 : ns - 1)
+          : (sugIndex + step + ns) % ns;
+        renderHist();
+        return;
+      }
+      var n = searchHist.length;
       histIndex = histIndex < 0
         ? (step > 0 ? 0 : n - 1)
         : (histIndex + step + n) % n;
@@ -5375,6 +5514,14 @@
       return;
     }
     if (e.key === 'Enter') {
+      if (histBox && histBox.classList.contains('sugmode') && sugIndex >= 0) {
+        var activeOpt = histBox.querySelectorAll('.sug')[sugIndex];
+        if (activeOpt) {
+          e.preventDefault();
+          applySuggestion(activeOpt.dataset.q);
+          return;
+        }
+      }
       if (histIndex >= 0 && searchHist[histIndex]) {
         e.preventDefault();
         applyHistQuery(searchHist[histIndex]);
@@ -5388,6 +5535,8 @@
   });
   searchEl.addEventListener('focus', function () {
     histIndex = -1;
+    sugIndex = -1;
+    sugMuted = false;
     renderHist();
   });
   searchEl.addEventListener('blur', function () {
@@ -5396,8 +5545,9 @@
   });
 
   $('searchHist').addEventListener('mousedown', function (e) {
-    // 阻止输入框失焦，保证点击历史词/删除按钮能先生效
-    if (e.target.closest('.hchip') || e.target.closest('.hdel') || e.target.closest('.hclear')) e.preventDefault();
+    // 阻止输入框失焦，保证点击历史词/联想项/删除按钮能先生效
+    if (e.target.closest('.hchip') || e.target.closest('.hdel') || e.target.closest('.hclear') ||
+      e.target.closest('.sug')) e.preventDefault();
   });
   $('searchHist').addEventListener('click', function (e) {
     var del = e.target.closest('.hdel');
@@ -5412,6 +5562,11 @@
       searchHist = [];
       saveHist();
       renderHist();
+      return;
+    }
+    var sug = e.target.closest('.sug');
+    if (sug) {
+      applySuggestion(sug.dataset.q);
       return;
     }
     var chip = e.target.closest('.hchip');

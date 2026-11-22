@@ -879,10 +879,71 @@ async function main() {
     check('清除筛选后恢复列表',
       (await cdp.evaluate(`(() => document.querySelectorAll('.card').length)()`)) > 0);
 
+    // ---- 搜索联想 ----
+    const sugTitle = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => !v.c && (v.cn || v.n) &&
+        String(v.cn || v.n).length >= 4 && String(v.cn || v.n).indexOf(' ') < 0);
+      return x ? String(x.cn || x.n) : '';
+    })()`);
+    await cdp.evaluate(`(() => document.getElementById('search').focus())()`);
+    await setSearch(sugTitle.slice(0, 2));
+    await sleep(250);
+    const sugPanel = await cdp.evaluate(`(() => {
+      const box = document.getElementById('searchHist');
+      const list = box.querySelector('.suglist');
+      return {
+        open: !box.hidden,
+        sugmode: box.classList.contains('sugmode'),
+        n: box.querySelectorAll('.sug').length,
+        role: list ? list.getAttribute('role') : '',
+        expanded: document.getElementById('search').getAttribute('aria-expanded'),
+      };
+    })()`);
+    check('输入关键词浮出搜索联想', sugPanel.open && sugPanel.sugmode && sugPanel.n > 0,
+      JSON.stringify(sugPanel));
+    check('联想列表具备 listbox 语义', sugPanel.role === 'listbox' && sugPanel.expanded === 'true');
+    check('搜索框声明组合框语义', (await cdp.evaluate(`(() => {
+      const s = document.getElementById('search');
+      return s.getAttribute('role') === 'combobox' && s.getAttribute('aria-autocomplete') === 'list';
+    })()`)) === true);
+    await cdp.evaluate(`(() => {
+      document.getElementById('search').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    })()`);
+    await sleep(200);
+    const sugActive = await cdp.evaluate(`(() => ({
+      ad: document.getElementById('search').getAttribute('aria-activedescendant'),
+      active: document.querySelectorAll('#searchHist .sug.active').length,
+    }))()`);
+    check('方向键高亮联想项', /^sugOpt\d+$/.test(sugActive.ad || '') && sugActive.active === 1,
+      JSON.stringify(sugActive));
+    const sugPick = await cdp.evaluate(`(() => {
+      const el = document.querySelector('#searchHist .sug');
+      if (!el) return '';
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return el.dataset.q;
+    })()`);
+    await sleep(400);
+    const sugAfter = await cdp.evaluate(`(() => ({
+      q: document.getElementById('search').value,
+      cards: document.querySelectorAll('.card').length,
+      open: !document.getElementById('searchHist').hidden,
+    }))()`);
+    check('点击联想项回填并出结果',
+      !!sugPick && sugAfter.q === sugPick && sugAfter.cards > 0 && sugAfter.open === false,
+      JSON.stringify(sugAfter));
+    await cdp.evaluate(`(() => {
+      const s = document.getElementById('search');
+      s.value = '';
+      s.dispatchEvent(new Event('input', { bubbles: true }));
+      s.blur();
+    })()`);
+    await sleep(300);
+
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.8', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.8'));
+    check('页脚版本为 v1.1.9', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.9'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -919,7 +980,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.8', manifest.version === '1.1.8');
+    check('manifest 版本为 1.1.9', manifest.version === '1.1.9');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -932,7 +993,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v11'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v12'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
