@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.3.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 151/151）
+- 当前状态：**v1.4.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 155/155）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.3.0（已达成，功能：我的阅读的继续阅读快捷条）
+- 目标版本：v1.4.0（已达成，功能：阅读统计的阅读打卡连续天数）
 
 ## 1. 目标与边界
 
@@ -145,7 +145,9 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 待备份改动 | `yuc_ln_dirty_v1` |
 | 备份提醒 | `yuc_ln_backup_warn_v1` |
 | 年度目标 | `yuc_ln_goal_v1` |
-| SW 缓存 | `yuc-ln-shell-v9` |
+| 书评草稿 | `yuc_ln_draft_v1` |
+| 打卡日期 | `yuc_ln_days_v1` |
+| SW 缓存 | `yuc-ln-shell-v15` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -269,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v14`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v15`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：151/151）
+### Step 5 验收（已完成：155/155）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -468,6 +470,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.3.0；SW 缓存名升到 `yuc-ln-shell-v14`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 151/151（新增过滤排序、快捷条渲染、一键加卷 3 项）。
 - 来源：<https://wiki.kavitareader.com/en/guides/get-started-using-your-library>、<https://deepwiki.com/Kareadita/Kavita/1.2-key-features>、<https://apps.apple.com/uy/app/booklore-book-tracker/id6784735724>。
+
+## 9.15 v1.4.0 功能记录（2026-11-23）
+
+- 参考 StoryGraph 的 daily streak，阅读统计页新增「阅读打卡」卡片：连续天数、最长连续、近 7 天打卡格与今日状态。
+- 记录方式：在标记状态、加入收藏、更新卷进度、保存评分 / 书评时写入当天日期（`yuc_ln_days_v1`，最多保留 400 天）；统计时再合并已有记录的更新时间 `u` 与读完时间 `f`，老用户无需额外操作也能看到历史连击。
+- 续接规则：当天有记录从今天起算；当天还没记录但昨天有记录时，保留昨天为止的连击，避免一天未读就提前归零；两天以上空白才归零（与 StoryGraph 的可补记区间思路一致）。
+- 实现为纯函数 `readingStreak(days, entries, now)` 并挂到 `window.__lnReadingStreak`，按本地日历增减天数，规避夏令时下 24 小时不等于一天的问题。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.4.0；SW 缓存名升到 `yuc-ln-shell-v15`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 155/155（新增连续天数计算、当天未打卡不归零、统计卡片与近 7 天、打卡日期落盘 4 项）。
+- 来源：<https://roadmap.thestorygraph.com/changelog/streaks->、<https://roadmap.thestorygraph.com/features>、<https://thestorygraph.freshdesk.com/support/solutions/articles/79000145752-how-to-fix-your-streak>。
 
 ## 10. 已知风险与决策
 

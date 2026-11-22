@@ -832,6 +832,35 @@ async function main() {
     })()`);
     check('统计页显示读完率与平均读完天数',
       /读完率/.test(paceDom) && /平均读完天数/.test(paceDom) && /\d+%/.test(paceDom), paceDom);
+    // 阅读打卡：连续天数（参考 StoryGraph 的 daily streak）
+    const streakSample = await cdp.evaluate(`(() => {
+      const d = (y, m, day) => new Date(y, m - 1, day, 12, 0, 0).getTime();
+      return window.__lnReadingStreak(
+        ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23'],
+        [{ e: { u: d(2026, 11, 18), f: 0 } }, { e: { u: 0, f: d(2026, 11, 19) } }],
+        new Date(2026, 10, 23, 12, 0, 0));
+    })()`);
+    check('打卡按自然日合并记录并计算连续天数',
+      streakSample && streakSample.current === 6 && streakSample.longest === 6 &&
+      streakSample.week === 6 && streakSample.today === true, JSON.stringify(streakSample));
+    const streakGrace = await cdp.evaluate(
+      `(() => window.__lnReadingStreak(['2026-11-21', '2026-11-22'], [], new Date(2026, 10, 23, 12, 0, 0)))()`);
+    check('当天未打卡时连续天数不归零',
+      streakGrace && streakGrace.current === 2 && streakGrace.today === false, JSON.stringify(streakGrace));
+    const streakDom = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#statsPanel .stat-card'))
+        .find((el) => /阅读打卡/.test(el.textContent));
+      return card ? {
+        text: card.textContent,
+        dots: card.querySelectorAll('.week-dots span').length,
+        on: card.querySelectorAll('.week-dots span.on').length,
+      } : null;
+    })()`);
+    check('统计页显示阅读打卡卡片与近 7 天',
+      !!streakDom && /连续天数/.test(streakDom.text) && /近 7 天/.test(streakDom.text) &&
+      streakDom.dots === 7, JSON.stringify(streakDom));
+    const daysStored = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_days_v1') || '[]'))()`);
+    check('阅读动作写入打卡日期', Array.isArray(daysStored) && daysStored.length >= 1, JSON.stringify(daysStored));
     const statsDesktopShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     if (statsDesktopShot.result?.data) {
       await writeFile(path.join(SHOT_DIR, 'desktop-stats.png'), Buffer.from(statsDesktopShot.result.data, 'base64'));
@@ -992,7 +1021,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.3.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.3.0'));
+    check('页脚版本为 v1.4.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.4.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1029,7 +1058,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.3.0', manifest.version === '1.3.0');
+    check('manifest 版本为 1.4.0', manifest.version === '1.4.0');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -1042,7 +1071,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v14'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v15'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
