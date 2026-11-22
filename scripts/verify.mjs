@@ -871,7 +871,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.6', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.6'));
+    check('页脚版本为 v1.1.7', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.7'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -908,7 +908,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.6', manifest.version === '1.1.6');
+    check('manifest 版本为 1.1.7', manifest.version === '1.1.7');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -921,7 +921,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v9'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v10'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
@@ -940,6 +940,29 @@ async function main() {
       (await cdp.evaluate(`(() => document.querySelector('.modal-panel').getAttribute('aria-modal'))()`)) === 'true');
     check('卡片可通过键盘聚焦',
       (await cdp.evaluate(`(() => { const el = document.querySelector('.card-link[tabindex="0"]'); return !!el; })()`)) === true);
+    const liveRegion = await cdp.evaluate(`(() => {
+      const el = document.getElementById('resultAnnounce');
+      return el ? { role: el.getAttribute('role'), live: el.getAttribute('aria-live'), atomic: el.getAttribute('aria-atomic') } : null;
+    })()`);
+    check('结果数通过礼貌级 live region 播报',
+      !!liveRegion && liveRegion.role === 'status' && liveRegion.live === 'polite' && liveRegion.atomic === 'true',
+      JSON.stringify(liveRegion));
+    await cdp.evaluate(`(() => {
+      const s = document.getElementById('search');
+      s.value = '播报测试';
+      s.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(900);
+    const announced = await cdp.evaluate(`(() => document.getElementById('resultAnnounce').textContent)()`);
+    check('筛选变化后播报结果数', announced.includes('筛选后') && announced.includes('条全库搜索结果'), announced);
+    await cdp.evaluate(`(() => {
+      const s = document.getElementById('search');
+      s.value = '';
+      s.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(300);
+    check('当前视图标记 aria-current',
+      (await cdp.evaluate(`(() => { const t = document.querySelector('.tab.active'); return t ? t.getAttribute('aria-current') : ''; })()`)) === 'page');
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
     await sleep(250);
     await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);

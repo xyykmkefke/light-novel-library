@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.6 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 135/135）
+- 当前状态：**v1.1.7 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 138/138）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.6（已达成，补丁：离线缓存概览与更新检查时机）
+- 目标版本：v1.1.7（已达成，补丁：筛选结果无障碍播报与当前视图标记）
 
 ## 1. 目标与边界
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v9`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v10`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：135/135）
+### Step 5 验收（已完成：138/138）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -421,6 +421,15 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.6；SW 缓存名升到 `yuc-ln-shell-v9`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 135/135（新增离线缓存占用、清理封面、meta 版本一致、SW 主动更新检查 4 项）。
 - 来源：<https://web.dev/learn/pwa/update?hl=zh-cn>、<https://web.developers.google.cn/articles/service-worker-lifecycle>、<https://learn.microsoft.com/ga-ie/microsoft-edge/progressive-web-apps/how-to/offline>、<https://blog.hashhackers.com/blog/storage-quota-management/>。
+
+## 9.10 v1.1.7 补丁记录（2026-11-23）
+
+- 参考 W3C ARIA22 与电商筛选无障碍实践，新增屏幕阅读器专用 live region（`#resultAnnounce`，`role="status"` + `aria-live="polite"` + `aria-atomic="true"`）：筛选、搜索或切换视图后，朗读「筛选后 N 本 · 年份」等结果数，500ms 节流避免连续输入时反复打断。
+- 顶部视图标签（全部轻小说 / 我的阅读 / 阅读统计）随激活状态同步 `aria-current="page"`，`.tabs` 补充 `aria-label="主要视图"`，便于辅助技术识别当前所在视图。
+- 新增 `.sr-only` 工具类，仅用于对屏幕阅读器可见的文本，不影响视觉布局。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.7；SW 缓存名升到 `yuc-ln-shell-v10`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 138/138（新增 live region 属性、筛选播报内容、aria-current 3 项）。
+- 来源：<https://w3c.github.io/wcag/techniques/aria/ARIA22>、<https://getadjustable.com/en/blog/e-commerce-accessibility-product-cards-filters-checkout>、<https://accessibility-test.org/blog/compliance/accessibility-for-e-commerce-product-filtering-and-faceted-search/>、<https://www.equalweb.com/academy/learn/lessons/live-regions.html>。
 
 ## 10. 已知风险与决策
 

@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.1.6">
+<meta name="version" content="1.1.7">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1388,6 +1388,19 @@
 
   .skip-link:focus { left: 20px; }
 
+  /* 屏幕阅读器专用文本：用于播报筛选后的结果数 */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   #grid:focus { outline: none; }
   #grid:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 6px; border-radius: 8px; }
 
@@ -2412,8 +2425,8 @@
         <input id="search" type="search" placeholder="搜索书名、作者或拼音；支持 作者: 出版社: 年: 分: 题材:" autocomplete="off" aria-label="搜索书名">
         <div class="searchhist" id="searchHist" hidden></div>
       </div>
-      <nav class="tabs">
-        <button class="tab active" data-tab="all"><span class="tl">全部轻小说</span><span class="ts">全部</span></button>
+      <nav class="tabs" aria-label="主要视图">
+        <button class="tab active" data-tab="all" aria-current="page"><span class="tl">全部轻小说</span><span class="ts">全部</span></button>
         <button class="tab" data-tab="mine"><span class="tl">我的阅读</span><span class="ts">我的</span><span class="count" id="mineCount">0</span></button>
         <button class="tab" data-tab="stats"><span class="tl">阅读统计</span><span class="ts">统计</span></button>
       </nav>
@@ -2546,6 +2559,7 @@
 
   <div class="statusrow" id="statusRow" hidden></div>
 
+  <div class="sr-only" id="resultAnnounce" role="status" aria-live="polite" aria-atomic="true"></div>
   <div class="resultbar" id="resultbar">
     <b id="resultCount">0</b><span id="resultLabel"></span>
     <select class="viewselect" id="viewSelect" aria-label="视图" title="切换视图">
@@ -2570,7 +2584,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.6</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.7</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3338,7 +3352,10 @@
       hideMineBtn.classList.toggle('primary', state.hideMine);
     }
     document.querySelectorAll('.tab').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.tab === state.tab);
+      var on = b.dataset.tab === state.tab;
+      b.classList.toggle('active', on);
+      if (on) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
     });
     syncViewSelect();
     renderYears();
@@ -4287,6 +4304,20 @@
     }
   });
 
+  // 无障碍：筛选结果变化后，用礼貌级 live region 朗读结果数；节流避免连续输入时反复打断
+  var announceTimer = 0;
+  var lastAnnounce = '';
+  function announceResults(count, labelText, filterCount) {
+    var text = (filterCount > 0 ? '筛选后 ' : '') + count + ' ' + labelText;
+    if (text === lastAnnounce) return;
+    lastAnnounce = text;
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(function () {
+      var el = $('resultAnnounce');
+      if (el) el.textContent = text;
+    }, 500);
+  }
+
   function render() {
     // 状态筛选只在「我的阅读」或搜索时生效，其他场景静默清掉，避免出现无效条件
     if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
@@ -4362,6 +4393,7 @@
     }
     $('resultCount').textContent = countText;
     $('resultLabel').textContent = labelText;
+    announceResults(list.length, labelText, filterCount);
     syncViewSelect();
 
     var board = state.tab === 'mine' && state.view === 'board';
