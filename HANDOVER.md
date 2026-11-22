@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.2.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 148/148）
+- 当前状态：**v1.3.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 151/151）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.2.0（已达成，功能：阅读统计的阅读节奏）
+- 目标版本：v1.3.0（已达成，功能：我的阅读的继续阅读快捷条）
 
 ## 1. 目标与边界
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v13`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v14`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：148/148）
+### Step 5 验收（已完成：151/151）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -458,6 +458,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.2.0；SW 缓存名升到 `yuc-ln-shell-v13`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 148/148（新增阅读节奏计算、统计页卡片展示 2 项）。
 - 来源：<https://roadmap.thestorygraph.com/requests-ideas/posts/stat-pages-per-day-per-book>、<https://roadmap.thestorygraph.com/requests-ideas/posts/stat-average-time-to-finish-on-book-s-page->、<https://cjrthebrit.com/2026/06/04/storygraph-monthly-stats-may-2026/>。
+
+## 9.14 v1.3.0 功能记录（2026-11-23）
+
+- 参考 Kavita 的 Continue Reading 与 BookLore 的 Reading 书架，在「我的阅读」顶部新增「继续阅读」横向快捷条。
+- 取数规则：只列状态为「在读」且已读卷数小于总卷数的书，按最近一次进度更新时间倒序，最多 8 本；有搜索词、状态筛选、批量模式或看板视图时隐藏，避免与当前视图重复。
+- 交互：点封面或书名进入详情；点「＋1 卷」直接记录下一卷，读满后自动转为「读完」并移出快捷条。
+- 实现为纯函数 `continueItems(items, mine, limit)` 并挂到 `window.__lnContinueList`，便于验收断言过滤与排序。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.3.0；SW 缓存名升到 `yuc-ln-shell-v14`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 151/151（新增过滤排序、快捷条渲染、一键加卷 3 项）。
+- 来源：<https://wiki.kavitareader.com/en/guides/get-started-using-your-library>、<https://deepwiki.com/Kareadita/Kavita/1.2-key-features>、<https://apps.apple.com/uy/app/booklore-book-tracker/id6784735724>。
 
 ## 10. 已知风险与决策
 

@@ -756,6 +756,39 @@ async function main() {
     check('我的阅读可按阅读进度排序', (await setMineSort('progress')) === importTarget.id);
     check('我的阅读可按最近更新排序', (await setMineSort('updated')) === pick.id);
 
+    // ---- 继续阅读快捷条（参考 Kavita Continue Reading）----
+    const contPure = await cdp.evaluate(`(() => window.__lnContinueList && window.__lnContinueList([
+      { i: 1, v: 5 }, { i: 2, v: 3 }, { i: 3, v: 4 }, { i: 4, v: 2 }
+    ], {
+      1: { s: 'doing', vol: 2, u: 10 },
+      2: { s: 'done', vol: 3, u: 20 },
+      3: { s: 'doing', vol: 2, u: 30 },
+      4: { s: 'want', vol: 0, u: 40 }
+    }, 5).map(function (o) { return o.x.i; }))()`);
+    check('继续阅读只取在读未读满并按时更新排序',
+      JSON.stringify(contPure) === '[3,1]', JSON.stringify(contPure));
+    const contDom = await cdp.evaluate(`(() => ({
+      hidden: document.getElementById('continueRow').hidden,
+      n: document.querySelectorAll('#continueList .cont-card').length,
+      id: document.querySelector('#continueList .cont-open')?.dataset.id || '',
+      meta: document.querySelector('#continueList .cont-meta')?.textContent || '',
+    }))()`);
+    check('我的阅读显示继续阅读快捷条',
+      contDom.hidden === false && contDom.n === 1 && contDom.id === pick.id &&
+      contDom.meta === '第 ' + (pick.v - 1) + ' / ' + pick.v + ' 卷', JSON.stringify(contDom));
+    await cdp.evaluate(`(() => { document.querySelector('#continueList [data-cont="next"]').click(); })()`);
+    await sleep(350);
+    const contAfter = await cdp.evaluate(`(() => ({
+      entry: JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(pick.id)}],
+      hidden: document.getElementById('continueRow').hidden,
+      n: document.querySelectorAll('#continueList .cont-card').length,
+      toast: document.getElementById('toast').textContent,
+    }))()`);
+    check('继续阅读一键加一卷并自动读完',
+      Number(contAfter.entry?.vol) === pick.v && contAfter.entry?.s === 'done' &&
+      contAfter.hidden === true && contAfter.n === 0 && /第 \d+ 卷/.test(contAfter.toast),
+      JSON.stringify(contAfter));
+
     // ---- 阅读统计 ----
     await click('.tab[data-tab="stats"]');
     await sleep(300);
@@ -959,7 +992,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.2.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.2.0'));
+    check('页脚版本为 v1.3.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.3.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -996,7 +1029,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.2.0', manifest.version === '1.2.0');
+    check('manifest 版本为 1.3.0', manifest.version === '1.3.0');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -1009,7 +1042,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v13'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v14'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
