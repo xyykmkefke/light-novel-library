@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.0.0">
+<meta name="version" content="1.1.6">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1627,6 +1627,15 @@
     font-size: 13px;
   }
   .setting-row > span { color: var(--muted); }
+  .cache-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .cache-info .cache-text { color: var(--muted-2); font-size: 12.5px; }
+  .cache-info .btn { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12px; }
   .seg {
     display: inline-flex;
     border: 1px solid var(--line-strong);
@@ -2561,7 +2570,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.5</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.6</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2640,6 +2649,13 @@
       <div class="seg" id="motionSeg">
         <button type="button" data-motion="system">跟随系统</button>
         <button type="button" data-motion="reduce">减少</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span>离线缓存</span>
+      <div class="cache-info">
+        <span class="cache-text" id="offlineInfo" title="应用壳与全库数据已缓存，离线可打开；封面缓存最多保留 400 张">统计中…</span>
+        <button class="btn" id="clearImgCache" type="button">清理封面</button>
       </div>
     </div>
     <p class="hint">设置只保存在本机，不参与云同步。</p>
@@ -5766,6 +5782,67 @@
 
   $('themeBtn').addEventListener('click', toggleTheme);
 
+  // ---- 离线缓存概览：设置面板展示封面缓存数量与占用，并可清理封面 ----
+  var IMG_CACHE_RE = /bgmimg|anibt/;
+
+  function listCachedImages() {
+    var out = [];
+    if (!('caches' in window)) return Promise.resolve(out);
+    return caches.keys().then(function (keys) {
+      var mine = keys.filter(function (k) { return k.indexOf('yuc-ln-') === 0; });
+      return Promise.all(mine.map(function (k) {
+        return caches.open(k).then(function (cache) { return cache.keys(); });
+      })).then(function (lists) {
+        lists.forEach(function (reqs) {
+          reqs.forEach(function (r) { if (IMG_CACHE_RE.test(r.url)) out.push(r); });
+        });
+        return out;
+      });
+    }).catch(function () { return out; });
+  }
+
+  function fmtBytes(n) {
+    if (!n) return '0 B';
+    if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function refreshOfflineInfo() {
+    var el = $('offlineInfo');
+    if (!el) return;
+    var est = (navigator.storage && navigator.storage.estimate)
+      ? navigator.storage.estimate().catch(function () { return null; })
+      : Promise.resolve(null);
+    Promise.all([listCachedImages(), est]).then(function (res) {
+      var imgs = res[0] || [];
+      var usage = (res[1] && res[1].usage) || 0;
+      el.textContent = '封面 ' + imgs.length + ' 张 · 占用 ' + fmtBytes(usage);
+      window.__lnOfflineInfo = { imgs: imgs.length, usage: usage };
+    }).catch(function () { el.textContent = '离线可用：全库数据'; });
+  }
+
+  function clearImageCache() {
+    if (!('caches' in window)) { toast('当前浏览器不支持离线缓存'); return; }
+    listCachedImages().then(function (reqs) {
+      if (!reqs.length) {
+        toast('已清理 0 张封面缓存');
+        refreshOfflineInfo();
+        return null;
+      }
+      return caches.keys().then(function (keys) {
+        var mine = keys.filter(function (k) { return k.indexOf('yuc-ln-') === 0; });
+        return Promise.all(mine.map(function (k) {
+          return caches.open(k).then(function (cache) {
+            return Promise.all(reqs.map(function (r) { return cache.delete(r); }));
+          });
+        }));
+      }).then(function () {
+        toast('已清理 ' + reqs.length + ' 张封面缓存');
+        refreshOfflineInfo();
+      });
+    }).catch(function () { toast('清理失败，请稍后重试'); });
+  }
+
   function syncSettingsUI() {
     [['font', 'fontSeg'], ['density', 'densitySeg'], ['motion', 'motionSeg']].forEach(function (pair) {
       var seg = $(pair[1]);
@@ -5781,6 +5858,7 @@
   function openSettings() {
     syncSettingsUI();
     $('settingsModal').hidden = false;
+    refreshOfflineInfo();
     var first = $('settingsModal').querySelector('button');
     if (first) first.focus();
   }
@@ -5794,6 +5872,10 @@
   $('settingsModal').addEventListener('click', function (e) {
     if (e.target.closest('[data-settings-close]') || e.target.closest('#settingsClose')) {
       closeSettings();
+      return;
+    }
+    if (e.target.closest('#clearImgCache')) {
+      clearImageCache();
       return;
     }
     if (e.target.closest('#settingsReset')) {
@@ -6770,9 +6852,17 @@
         window.__lnToast('已更新到新版本', { label: '刷新', fn: function () { location.reload(); } });
       }
     });
-    window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function () {});
-    });
+    // 脚本在 body 末尾，直接注册即可；不再等 load，避免远程封面拖慢首次安装
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      // 暴露注册对象，便于调试与验收
+      window.__lnSwReg = reg;
+      // 页面重新可见时主动检查一次更新（参考 web.dev 的 Service Worker 生命周期建议）
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') return;
+        if (navigator.onLine === false) return;
+        reg.update().catch(function () {});
+      });
+    }).catch(function () {});
   }
 
   // 安装引导：Android/桌面走系统安装事件，iOS 给出「分享 → 添加到主屏幕」提示

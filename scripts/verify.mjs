@@ -801,6 +801,24 @@ async function main() {
     await sleep(200);
     await click('#fontSeg [data-font="lg"]');
     check('设置字号生效', (await cdp.evaluate(`(() => document.documentElement.getAttribute('data-font'))()`)) === 'lg');
+    await sleep(500);
+    const offlineInfo = await cdp.evaluate(`(() => ({
+      text: document.getElementById('offlineInfo').textContent,
+      exposed: !!(window.__lnOfflineInfo && typeof window.__lnOfflineInfo.imgs === 'number'),
+    }))()`);
+    check('设置面板显示离线缓存占用',
+      /封面 \d+ 张 · 占用/.test(offlineInfo.text) && offlineInfo.exposed, offlineInfo.text);
+    await cdp.evaluate(`(() => document.getElementById('clearImgCache').click())()`);
+    await sleep(700);
+    const clearedCache = await cdp.evaluate(`(() => ({
+      text: document.getElementById('offlineInfo').textContent,
+      toast: document.getElementById('toast').textContent,
+      imgs: window.__lnOfflineInfo ? window.__lnOfflineInfo.imgs : -1,
+    }))()`);
+    check('清理封面缓存后统计归零',
+      clearedCache.imgs === 0 && /封面 0 张/.test(clearedCache.text) &&
+      /已清理 \d+ 张封面缓存/.test(clearedCache.toast),
+      `${clearedCache.text} / ${clearedCache.toast}`);
     await click('#settingsClose');
     const themeBefore = await cdp.evaluate(`(() => document.documentElement.getAttribute('data-theme'))()`);
     await click('#themeBtn');
@@ -853,7 +871,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.5', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.5'));
+    check('页脚版本为 v1.1.6', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.6'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -890,9 +908,20 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.5', manifest.version === '1.1.5');
+    check('manifest 版本为 1.1.6', manifest.version === '1.1.6');
+    const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
+    check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
+    const swReg = await cdp.evaluate(`(async () => {
+      for (let i = 0; i < 40; i += 1) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) return { reg: true, fn: !!(window.__lnSwReg && typeof window.__lnSwReg.update === 'function') };
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return { reg: false, fn: false };
+    })()`);
+    check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v8'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v9'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

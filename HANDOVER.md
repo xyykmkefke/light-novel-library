@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.5 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 131/131）
+- 当前状态：**v1.1.6 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 135/135）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.5（已达成，补丁：出版社 / 书系搜索与标签跳转）
+- 目标版本：v1.1.6（已达成，补丁：离线缓存概览与更新检查时机）
 
 ## 1. 目标与边界
 
@@ -145,7 +145,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 待备份改动 | `yuc_ln_dirty_v1` |
 | 备份提醒 | `yuc_ln_backup_warn_v1` |
 | 年度目标 | `yuc_ln_goal_v1` |
-| SW 缓存 | `yuc-ln-shell-v6` |
+| SW 缓存 | `yuc-ln-shell-v9` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v6`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v9`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：124/124）
+### Step 5 验收（已完成：135/135）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -326,6 +326,8 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 PWA / 移动端：
 
 - [x] 离线重开可用（SHELL + 全库数据缓存）
+- [x] 设置面板显示封面缓存张数与占用，可一键清理
+- [x] Service Worker 立即注册，页面重新可见时主动检查更新
 - [x] iOS 添加到主屏幕全屏启动
 - [x] 375×812 筛选抽屉、44px 触控、无横向滚动
 
@@ -409,6 +411,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.5；SW 缓存名升到 `yuc-ln-shell-v8`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 131/131（新增出版社搜索、书系搜索、出版社标签跳转 3 项）。
 - 来源：<https://manual.calibre-ebook.com/searching.html>、<https://calibre.posixlycorrect.com/advsearch>、<https://wiki.kavitareader.com/guides/features/filtering/>。
+
+## 9.9 v1.1.6 补丁记录（2026-11-23）
+
+- 参考 web.dev 的 Service Worker 生命周期建议，注册不再等 `window.load`（远程封面可能拖慢 load），改为脚本末尾立即注册。
+- 页面重新可见（`visibilitychange`）且在线时调用 `reg.update()` 主动检查更新；接管提示沿用原有 `controllerchange`。
+- 参考 Edge 离线存储文档与缓存配额实践，设置面板新增「离线缓存」一行：展示封面缓存张数与 `navigator.storage.estimate()` 占用，并提供「清理封面」按钮（只清理本项目 `yuc-ln-` 缓存中的封面请求，不影响应用壳与全库数据）。
+- 修正 `<meta name="version">` 仍是 `1.0.0` 的遗留问题，现与 manifest、页脚、package.json 同步为 1.1.6。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.6；SW 缓存名升到 `yuc-ln-shell-v9`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 135/135（新增离线缓存占用、清理封面、meta 版本一致、SW 主动更新检查 4 项）。
+- 来源：<https://web.dev/learn/pwa/update?hl=zh-cn>、<https://web.developers.google.cn/articles/service-worker-lifecycle>、<https://learn.microsoft.com/ga-ie/microsoft-edge/progressive-web-apps/how-to/offline>、<https://blog.hashhackers.com/blog/storage-quota-management/>。
 
 ## 10. 已知风险与决策
 

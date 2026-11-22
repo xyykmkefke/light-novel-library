@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」标签条目 4007 条，无账号、无后端。
 
-状态：**v1.1.5 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 131 项）
+状态：**v1.1.6 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 135 项）
+
+v1.1.6：设置面板新增离线缓存概览（封面缓存张数与占用），可一键清理封面缓存；Service Worker 改为立即注册，并在页面重新可见时主动检查更新。
 
 v1.1.5：高级搜索新增 `出版社:` 与 `书系:` 字段；详情页的出版社、书系标签可一键跳转到对应全库筛选。
 
@@ -31,7 +33,7 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - **详情**：作者、插图、出版社、书系、册数、发售日、题材、评分、相似推荐、Bangumi 链接；卷进度一键记录，作者、题材、出版社、书系标签可一键筛选
 - **数据**：JSON / CSV / Markdown 导出，JSON 导入合并，清空可撤销
 - **云同步**：GitHub Gist 双向合并，删除墓碑，失败退避重试（Token 仅存本机）
-- **PWA**：iOS 添加到主屏幕、安装引导、离线缓存、封面缓存上限、明暗主题
+- **PWA**：iOS 添加到主屏幕、安装引导、离线缓存、封面缓存上限与清理、离线占用统计、明暗主题
 - **无障碍**：跳过头部、焦点陷阱、Esc 归焦、状态播报、J/K 键盘导航、44px 触控目标
 
 ## 数据
@@ -52,14 +54,14 @@ npm run clean-series  # 用本地缓存离线重算子卷
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（131 项）
+npm run verify        # 无头浏览器自动化验收（135 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`；Service Worker 缓存名 `yuc-ln-shell-v8`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`；Service Worker 缓存名 `yuc-ln-shell-v9`。
 
 ## 部署
 
