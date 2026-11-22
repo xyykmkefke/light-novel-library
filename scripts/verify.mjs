@@ -783,6 +783,22 @@ async function main() {
       /已评分/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
     check('统计页显示常读作者',
       /常读作者/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    // 阅读节奏：读完率与平均读完天数（参考 StoryGraph 的平均读完用时统计）
+    const paceSample = await cdp.evaluate(`(() => window.__lnReadingPace && window.__lnReadingPace([
+      { e: { s: 'done', t: 1000, f: 1000 + 3 * 86400000 } },
+      { e: { s: 'done', t: 1000, f: 1000 + 5 * 86400000 } },
+      { e: { s: 'want', t: 1000, f: 0 } },
+    ]))()`);
+    check('阅读节奏按加入与读完时间计算',
+      paceSample && paceSample.rate === 67 && paceSample.avgDays === 4 && paceSample.sampled === 2,
+      JSON.stringify(paceSample));
+    const paceDom = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#statsPanel .stat-card'))
+        .find((el) => /阅读节奏/.test(el.textContent));
+      return card ? card.textContent : '';
+    })()`);
+    check('统计页显示读完率与平均读完天数',
+      /读完率/.test(paceDom) && /平均读完天数/.test(paceDom) && /\d+%/.test(paceDom), paceDom);
     const statsDesktopShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     if (statsDesktopShot.result?.data) {
       await writeFile(path.join(SHOT_DIR, 'desktop-stats.png'), Buffer.from(statsDesktopShot.result.data, 'base64'));
@@ -943,7 +959,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.9', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.9'));
+    check('页脚版本为 v1.2.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.2.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -980,7 +996,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.9', manifest.version === '1.1.9');
+    check('manifest 版本为 1.2.0', manifest.version === '1.2.0');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -993,7 +1009,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v12'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v13'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

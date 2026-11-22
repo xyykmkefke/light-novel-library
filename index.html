@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.1.9">
+<meta name="version" content="1.2.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2648,7 +2648,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.9</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.2.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4319,6 +4319,34 @@
   }
   window.__lnGoalPace = goalPace;
 
+  // 阅读节奏：读完率与平均读完天数（参考 StoryGraph 的平均读完用时统计）
+  // 平均天数只统计同时有加入时间 t 与读完时间 f 的记录，按自然日取整后再求平均
+  function readingPace(entries) {
+    var list = entries || [];
+    var total = list.length;
+    var done = 0;
+    var sum = 0;
+    var sampled = 0;
+    list.forEach(function (o) {
+      var e = (o && o.e) || o || {};
+      if (e.s === 'done') done += 1;
+      var t = Number(e.t) || 0;
+      var f = Number(e.f) || 0;
+      if (t > 0 && f >= t) {
+        sum += Math.round((f - t) / 86400000);
+        sampled += 1;
+      }
+    });
+    return {
+      total: total,
+      done: done,
+      rate: total ? Math.round((done / total) * 100) : 0,
+      avgDays: sampled ? Math.round((sum / sampled) * 10) / 10 : null,
+      sampled: sampled
+    };
+  }
+  window.__lnReadingPace = readingPace;
+
   function barRows(pairs, emptyText) {
     if (!pairs.length) return '<div class="review-hint">' + emptyText + '</div>';
     var max = pairs[0][1] || 1;
@@ -4375,6 +4403,7 @@
         .sort(function (a, b) { return b[1] - a[1]; }).slice(0, 8);
     };
     var finishedThisYear = byYear[year] || 0;
+    var pace = readingPace(entries);
     var goal = loadGoal();
     var goalPct = goal.target > 0 ? Math.min(100, Math.round((finishedThisYear / goal.target) * 100)) : 0;
     var yearKeys = Object.keys(byYear).map(Number).sort(function (a, b) { return a - b; }).slice(-6);
@@ -4416,6 +4445,13 @@
           '<div class="stat-num"><b>' + rated.length + '</b><span>已评分</span></div>' +
           '<div class="stat-num"><b>' + (avgRating ? avgRating.toFixed(1) : '—') + '</b><span>平均分</span></div>' +
         '</div></div>' +
+        '<div class="stat-card"><h3>阅读节奏</h3><div class="stat-nums">' +
+          '<div class="stat-num"><b>' + pace.rate + '%</b><span>读完率</span></div>' +
+          '<div class="stat-num"><b>' + (pace.avgDays == null ? '—' : pace.avgDays) +
+            '</b><span>平均读完天数</span></div>' +
+        '</div><div class="goal-meta">' + (pace.sampled
+          ? '平均用时按 ' + pace.sampled + ' 本有加入与读完时间的记录计算'
+          : '记录加入与读完时间后可统计平均用时') + '</div></div>' +
       '</div>' +
       '<div class="stats-grid">' +
         '<div class="stat-card"><h3>历年读完</h3>' + barRows(yearPairs, '还没有读完记录') + '</div>' +

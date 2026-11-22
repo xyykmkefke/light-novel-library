@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.9 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 146/146）
+- 当前状态：**v1.2.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 148/148）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.9（已达成，补丁：搜索联想与组合框语义）
+- 目标版本：v1.2.0（已达成，功能：阅读统计的阅读节奏）
 
 ## 1. 目标与边界
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v12`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v13`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：146/146）
+### Step 5 验收（已完成：148/148）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -448,6 +448,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.9；SW 缓存名升到 `yuc-ln-shell-v12`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 146/146（新增联想浮出、listbox 语义、combobox 语义、方向键高亮、点击回填 5 项）。
 - 来源：<https://deepwiki.com/janeczku/calibre-web/6-external-integrations>、<https://accessibility.build/guides/accessible-combobox>、<https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-autocomplete-list/>、<https://developer.mozilla.org/zh-CN/docs/Web/Accessibility/ARIA/Reference/Roles/combobox_role>。
+
+## 9.13 v1.2.0 功能记录（2026-11-23）
+
+- 参考 StoryGraph 的「平均读完用时」统计思路，阅读统计页新增「阅读节奏」卡片。
+- 读完率：读完条目 ÷ 收藏总数，整数百分比。
+- 平均读完天数：只统计同时有加入时间 `t` 与读完时间 `f` 的记录，按自然日取整后求平均，保留一位小数；无样本显示「—」，并在卡片底部注明参与统计的本数。
+- 实现为纯函数 `readingPace(entries)` 并挂到 `window.__lnReadingPace`，便于验收直接断言边界数据。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.2.0；SW 缓存名升到 `yuc-ln-shell-v13`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 148/148（新增阅读节奏计算、统计页卡片展示 2 项）。
+- 来源：<https://roadmap.thestorygraph.com/requests-ideas/posts/stat-pages-per-day-per-book>、<https://roadmap.thestorygraph.com/requests-ideas/posts/stat-average-time-to-finish-on-book-s-page->、<https://cjrthebrit.com/2026/06/04/storygraph-monthly-stats-may-2026/>。
 
 ## 10. 已知风险与决策
 
