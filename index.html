@@ -4349,6 +4349,14 @@
     if (collected && myMap[id].r) {
       pairs.push(['我的评分', myMap[id].r + ' / 10']);
     }
+    // 作者单独渲染成可点击标签，一键筛选该作者的全部作品
+    pairs = pairs.filter(function (p) { return p[0] !== '作者'; });
+    var authorHtml = String(item.au || '').split(/[\/、,，&]/).map(function (name) {
+      var n = name.trim();
+      if (!n) return '';
+      return '<button class="chip chipbtn" type="button" data-jump-author="' + escapeHtml(n) +
+        '" title="查看该作者的全部作品"><i>作者</i>' + escapeHtml(n) + ' ›</button>';
+    }).join('');
     var jumpHtml = yearOf(item.d)
       ? '<button class="chipjump" type="button" data-jump-year="' + yearOf(item.d) +
         '" title="查看 ' + yearOf(item.d) + ' 年的全部书目">' + yearOf(item.d) + ' 年 ›</button>'
@@ -4363,7 +4371,7 @@
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
       return '<span class="chip">' + label + '</span>';
-    }).join('') + jumpHtml + genreHtml;
+    }).join('') + jumpHtml + authorHtml + genreHtml;
     var opts = $('statusOpts');
     opts.hidden = !collected;
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
@@ -5622,8 +5630,8 @@
     state.year = opts.year || 'all';
     state.kind = opts.kind || 'all';
     state.genre = opts.genre || 'all';
-    state.q = '';
-    searchEl.value = '';
+    state.q = opts.q || '';
+    searchEl.value = state.q;
     state.status = 'all';
     state.onlyMine = false;
     state.highScore = false;
@@ -5647,6 +5655,12 @@
       var gid = genreBtn.dataset.jumpGenre;
       jumpToAll({ genre: gid },
         '已筛选全部「' + (GENRE_LABEL[gid] || gid) + '」书目');
+      return;
+    }
+    var authorBtn = e.target.closest('[data-jump-author]');
+    if (authorBtn && authorBtn.dataset.jumpAuthor) {
+      var name = authorBtn.dataset.jumpAuthor;
+      jumpToAll({ q: '作者:' + name }, '已筛选作者：' + name);
     }
   });
 

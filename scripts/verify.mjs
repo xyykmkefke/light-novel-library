@@ -495,6 +495,27 @@ async function main() {
       /bgm\.tv\/subject\//.test(await cdp.evaluate(`(() => document.getElementById('detailLink').href)()`)));
     check('详情有相似推荐', (await count('#detailSimilar .sim-card')) > 0);
 
+    // 点击作者标签跳到该作者的全库筛选
+    const authorJumpName = await cdp.evaluate(`(() => {
+      const btn = document.querySelector('#detailMeta [data-jump-author]');
+      if (!btn) return '';
+      const name = btn.dataset.jumpAuthor;
+      btn.click();
+      return name;
+    })()`);
+    await sleep(350);
+    const authorJumpState = await cdp.evaluate(`(() => ({
+      modalClosed: document.getElementById('modal').hidden,
+      q: document.getElementById('search').value,
+      count: Number(document.getElementById('resultCount').textContent),
+    }))()`);
+    const authorJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && String(x.au || '').includes(${JSON.stringify(authorJumpName)})).length)()`);
+    check('作者标签跳转全库筛选',
+      !!authorJumpName && authorJumpState.modalClosed && authorJumpState.q === '作者:' + authorJumpName &&
+      authorJumpState.count === authorJumpExpected,
+      `${authorJumpName} ${authorJumpState.count}/${authorJumpExpected}`);
+    await setSearch('');
+
     // 切换阅读状态会关闭详情，重新打开后继续测书评
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
     await sleep(300);
@@ -519,6 +540,7 @@ async function main() {
     check('笔记写入阅读记录', reviewEntry?.nt === '测试笔记', reviewEntry?.nt);
     check('详情元信息显示我的评分',
       /我的评分/.test(await cdp.evaluate(`(() => document.getElementById('detailMeta').textContent)()`)));
+    await click('.tab[data-tab="mine"]');
     check('卡片显示我的评分角标', (await count('.badge.myrating')) > 0);
     check('书评时间戳单独记录', Number(reviewEntry?.rvU) > 0);
 
