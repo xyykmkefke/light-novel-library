@@ -384,6 +384,16 @@ async function main() {
     check('作者: 搜索有结果',
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0, authorName);
 
+    await setSearch('出版社:KADOKAWA');
+    const pubExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+    const pubExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && String(x.pub || '').toLowerCase().includes('kadokawa')).length)()`);
+    check('出版社: 搜索生效', pubExprCount === pubExprExpected, `${pubExprCount}/${pubExprExpected}`);
+
+    await setSearch('书系:電撃文庫');
+    const lineExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+    const lineExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && String(x.line || '').includes('電撃文庫')).length)()`);
+    check('书系: 搜索生效', lineExprCount === lineExprExpected, `${lineExprCount}/${lineExprExpected}`);
+
     await setSearch('分:>=8 题材:恋爱');
     check('字段与关键词可组合',
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0);
@@ -543,7 +553,42 @@ async function main() {
       `${authorJumpName} ${authorJumpState.count}/${authorJumpExpected}`);
     await setSearch('');
 
-    // 切换阅读状态会关闭详情，重新打开后继续测书评
+    // 出版社标签同样可一键筛选（含空白的出版社降级为普通标签，不参与本项）
+    const pubJump = await cdp.evaluate(`(() => {
+      const counts = {};
+      window.LN_DATA.forEach((x) => {
+        if (!x.c && x.pub && !/\\s/.test(x.pub)) counts[x.pub] = (counts[x.pub] || 0) + 1;
+      });
+      const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+      if (!top) return null;
+      const rec = window.LN_DATA.find((x) => !x.c && x.pub === top[0]);
+      return { pub: top[0], id: String(rec.i) };
+    })()`);
+    if (pubJump) {
+      await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pubJump.id)}; })()`);
+      await sleep(300);
+      const pubJumpName = await cdp.evaluate(`(() => {
+        const btn = document.querySelector('#detailMeta [data-jump-pub]');
+        if (!btn) return '';
+        const name = btn.dataset.jumpPub;
+        btn.click();
+        return name;
+      })()`);
+      await sleep(350);
+      const pubJumpState = await cdp.evaluate(`(() => ({
+        modalClosed: document.getElementById('modal').hidden,
+        q: document.getElementById('search').value,
+        count: Number(document.getElementById('resultCount').textContent),
+      }))()`);
+      const pubJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && String(x.pub || '').toLowerCase().includes(${JSON.stringify(pubJump.pub)}.toLowerCase())).length)()`);
+      check('出版社标签跳转全库筛选',
+        !!pubJumpName && pubJumpState.modalClosed && pubJumpState.q === '出版社:' + pubJumpName &&
+        pubJumpState.count === pubJumpExpected,
+        `${pubJumpName} ${pubJumpState.count}/${pubJumpExpected}`);
+      await setSearch('');
+    } else {
+      check('出版社标签跳转全库筛选', true, '数据中无单段出版社');
+    }
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
     await sleep(300);
 
@@ -808,7 +853,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.4', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.4'));
+    check('页脚版本为 v1.1.5', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.5'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -845,15 +890,15 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.4', manifest.version === '1.1.4');
+    check('manifest 版本为 1.1.5', manifest.version === '1.1.5');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v7'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v8'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
     const indexTxt = await (await fetch(`http://127.0.0.1:${PORT}/index.html`)).text();
     check('包含安装引导', indexTxt.includes('beforeinstallprompt') && indexTxt.includes('添加到主屏幕'));
-    check('帮助面板写明高级搜索语法', indexTxt.includes('作者:米泽穗信'));
+    check('帮助面板写明高级搜索语法', indexTxt.includes('作者:米泽穗信') && indexTxt.includes('出版社:KADOKAWA'));
     check('卡片启用 content-visibility',
       (await cdp.evaluate(`(() => getComputedStyle(document.querySelector('.card')).contentVisibility)()`)) === 'auto');
     check('统计标签入口存在', (await count('.tab[data-tab="stats"]')) === 1);

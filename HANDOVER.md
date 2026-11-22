@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.4 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 128/128）
+- 当前状态：**v1.1.5 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 131/131）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.4（已达成，补丁：书评草稿自动保留）
+- 目标版本：v1.1.5（已达成，补丁：出版社 / 书系搜索与标签跳转）
 
 ## 1. 目标与边界
 
@@ -399,6 +399,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.4；SW 缓存名升到 `yuc-ln-shell-v7`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 128/128（新增草稿暂存、重开恢复、草稿提示、保存后清除 4 项）。
 - 来源：<https://roadmap.thestorygraph.com/requests-ideas/posts/add-spoiler-tag-to-reviews>、<https://roadmap.thestorygraph.com/changelog>、<https://hardcover.app/blog/hardcover-report-for-september-2026>。
+
+## 9.8 v1.1.5 补丁记录（2026-11-23）
+
+- 参考 Calibre 的 `字段:值` 搜索语法与 Kavita 元数据筛选字段（Publisher / Imprint），把库里已有的 `pub`（出版社）与 `line`（书系）纳入高级搜索。
+- 新增搜索字段 `出版社:` / `书系:`（兼容别名 `pub:` / `line:`），值为不区分大小写的包含匹配，可与关键词、`年:`、`分:`、`题材:`、`-词` 组合使用。
+- 详情页的出版社、书系由纯文本标签改为可点击标签：点击后按 `出版社:` / `书系:` 跳转全库筛选；含空白的值无法用单个搜索词表达，降级为普通标签仅展示。
+- 帮助面板、搜索框占位与 README 同步补充新语法。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.5；SW 缓存名升到 `yuc-ln-shell-v8`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 131/131（新增出版社搜索、书系搜索、出版社标签跳转 3 项）。
+- 来源：<https://manual.calibre-ebook.com/searching.html>、<https://calibre.posixlycorrect.com/advsearch>、<https://wiki.kavitareader.com/guides/features/filtering/>。
 
 ## 10. 已知风险与决策
 

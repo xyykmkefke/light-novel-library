@@ -2400,7 +2400,7 @@
           <circle cx="11" cy="11" r="7"></circle>
           <path d="m20 20-3.5-3.5"></path>
         </svg>
-        <input id="search" type="search" placeholder="搜索书名、作者或拼音；支持 作者: 年: 分: 题材:" autocomplete="off" aria-label="搜索书名">
+        <input id="search" type="search" placeholder="搜索书名、作者或拼音；支持 作者: 出版社: 年: 分: 题材:" autocomplete="off" aria-label="搜索书名">
         <div class="searchhist" id="searchHist" hidden></div>
       </div>
       <nav class="tabs">
@@ -2561,7 +2561,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.4</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.5</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2611,7 +2611,7 @@
       <li><kbd>?</kbd><span>打开 / 关闭本帮助</span></li>
       <li><kbd>长按</kbd><span>快捷菜单；Ctrl K 打开命令面板</span></li>
     </ul>
-    <p class="hint">搜索支持字段：<code>作者:米泽穗信</code>、<code>年:2020</code>（区间 <code>年:2010-2020</code>）、<code>分:&gt;=8</code>、<code>题材:奇幻</code>；<code>-词</code> 用于排除。</p>
+    <p class="hint">搜索支持字段：<code>作者:米泽穗信</code>、<code>出版社:KADOKAWA</code>、<code>书系:電撃文庫</code>、<code>年:2020</code>（区间 <code>年:2010-2020</code>）、<code>分:&gt;=8</code>、<code>题材:奇幻</code>；<code>-词</code> 用于排除。</p>
     <button class="btn primary" id="helpClose" type="button">知道了</button>
   </div>
 </div>
@@ -3511,12 +3511,12 @@
       (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
   }
 
-  // 高级搜索字段：作者:、年:、分:、题材:（也接受全角冒号）
+  // 高级搜索字段：作者:、出版社:、书系:、年:、分:、题材:（也接受全角冒号）
   function parseSearchFields(tokens) {
     var fields = [];
     var rest = [];
     tokens.forEach(function (t) {
-      var m = t.match(/^(作者|年|分|题材|tag)[:：](.+)$/i);
+      var m = t.match(/^(作者|出版社|书系|年|分|题材|pub|line|tag)[:：](.+)$/i);
       if (!m) { rest.push(t); return; }
       fields.push({ k: m[1].toLowerCase(), v: m[2].trim() });
     });
@@ -3583,6 +3583,12 @@
       if (f.k === '作者') {
         var au = f.v.toLowerCase();
         list = list.filter(function (x) { return String(x.au || '').toLowerCase().indexOf(au) >= 0; });
+      } else if (f.k === '出版社' || f.k === 'pub') {
+        var pub = f.v.toLowerCase();
+        list = list.filter(function (x) { return String(x.pub || '').toLowerCase().indexOf(pub) >= 0; });
+      } else if (f.k === '书系' || f.k === 'line') {
+        var line = f.v.toLowerCase();
+        list = list.filter(function (x) { return String(x.line || '').toLowerCase().indexOf(line) >= 0; });
       } else if (f.k === '年') {
         list = list.filter(function (x) { return matchYear(x.d, f.v); });
       } else if (f.k === '分') {
@@ -4497,14 +4503,27 @@
     if (collected && myMap[id].r) {
       pairs.push(['我的评分', myMap[id].r + ' / 10']);
     }
-    // 作者单独渲染成可点击标签，一键筛选该作者的全部作品
-    pairs = pairs.filter(function (p) { return p[0] !== '作者'; });
+    // 作者、出版社、书系单独渲染成可点击标签，一键筛选同一来源的作品
+    pairs = pairs.filter(function (p) {
+      return p[0] !== '作者' && p[0] !== '出版社' && p[0] !== '书系';
+    });
     var authorHtml = String(item.au || '').split(/[\/、,，&]/).map(function (name) {
       var n = name.trim();
       if (!n) return '';
       return '<button class="chip chipbtn" type="button" data-jump-author="' + escapeHtml(n) +
         '" title="查看该作者的全部作品"><i>作者</i>' + escapeHtml(n) + ' ›</button>';
     }).join('');
+    // 出版社 / 书系含空白时无法用单个搜索词表达，降级为普通标签只作展示
+    function jumpChip(attr, label, value, title) {
+      if (!value) return '';
+      if (/\s/.test(value)) {
+        return '<span class="chip"><i>' + label + '</i>' + escapeHtml(value) + '</span>';
+      }
+      return '<button class="chip chipbtn" type="button" data-' + attr + '="' + escapeHtml(value) +
+        '" title="' + title + '"><i>' + label + '</i>' + escapeHtml(value) + ' ›</button>';
+    }
+    var pubHtml = jumpChip('jump-pub', '出版社', item.pub, '查看该出版社的全部作品');
+    var lineHtml = jumpChip('jump-line', '书系', item.line, '查看该文库 / 书系的全部作品');
     var jumpHtml = yearOf(item.d)
       ? '<button class="chipjump" type="button" data-jump-year="' + yearOf(item.d) +
         '" title="查看 ' + yearOf(item.d) + ' 年的全部书目">' + yearOf(item.d) + ' 年 ›</button>'
@@ -4519,7 +4538,7 @@
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
       return '<span class="chip"' + (p[0] === '进度' ? ' data-chip="progress"' : '') + '>' + label + '</span>';
-    }).join('') + jumpHtml + authorHtml + genreHtml;
+    }).join('') + jumpHtml + authorHtml + genreHtml + pubHtml + lineHtml;
     var opts = $('statusOpts');
     opts.hidden = !collected;
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
@@ -5857,6 +5876,18 @@
     if (authorBtn && authorBtn.dataset.jumpAuthor) {
       var name = authorBtn.dataset.jumpAuthor;
       jumpToAll({ q: '作者:' + name }, '已筛选作者：' + name);
+      return;
+    }
+    var pubBtn = e.target.closest('[data-jump-pub]');
+    if (pubBtn && pubBtn.dataset.jumpPub) {
+      var pub = pubBtn.dataset.jumpPub;
+      jumpToAll({ q: '出版社:' + pub }, '已筛选出版社：' + pub);
+      return;
+    }
+    var lineBtn = e.target.closest('[data-jump-line]');
+    if (lineBtn && lineBtn.dataset.jumpLine) {
+      var line = lineBtn.dataset.jumpLine;
+      jumpToAll({ q: '书系:' + line }, '已筛选书系：' + line);
     }
   });
 
