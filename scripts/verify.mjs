@@ -652,6 +652,28 @@ async function main() {
       imported[importTarget.id]?.nt === '导入笔记',
       JSON.stringify({ r: imported[importTarget.id]?.r, rv: imported[importTarget.id]?.rv }));
 
+    // ---- 我的阅读排序（参考 Bangumi 客户端收藏列表的评分 / 进度 / 最近更新排序）----
+    const setMineSort = async (value) => {
+      await cdp.evaluate(`(() => {
+        const el = document.getElementById('mineSort');
+        el.value = ${JSON.stringify(value)};
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await sleep(250);
+      return cdp.evaluate(`(() => document.querySelector('.card')?.dataset.id)()`);
+    };
+    check('我的阅读可按我的评分排序', (await setMineSort('rating')) === pick.id);
+    // 把 pick 回退一卷，制造与导入条目（读满）不同的进度比例
+    await cdp.evaluate(`(() => {
+      const el = document.querySelector('.card[data-id="' + ${JSON.stringify(pick.id)} + '"] .epin');
+      if (!el) return;
+      el.value = String(Math.max(0, ${pick.v} - 1));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await sleep(250);
+    check('我的阅读可按阅读进度排序', (await setMineSort('progress')) === importTarget.id);
+    check('我的阅读可按最近更新排序', (await setMineSort('updated')) === pick.id);
+
     // ---- 阅读统计 ----
     await click('.tab[data-tab="stats"]');
     await sleep(300);
@@ -760,7 +782,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.2'));
+    check('页脚版本为 v1.1.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.3'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -797,9 +819,9 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.2', manifest.version === '1.1.2');
+    check('manifest 版本为 1.1.3', manifest.version === '1.1.3');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v5'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v6'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
