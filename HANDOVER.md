@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.7 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 138/138）
+- 当前状态：**v1.1.8 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 141/141）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.7（已达成，补丁：筛选结果无障碍播报与当前视图标记）
+- 目标版本：v1.1.8（已达成，补丁：长列表封面 sizes 与渲染尺寸记忆）
 
 ## 1. 目标与边界
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v10`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v11`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：138/138）
+### Step 5 验收（已完成：141/141）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -430,6 +430,14 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.7；SW 缓存名升到 `yuc-ln-shell-v10`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 138/138（新增 live region 属性、筛选播报内容、aria-current 3 项）。
 - 来源：<https://w3c.github.io/wcag/techniques/aria/ARIA22>、<https://getadjustable.com/en/blog/e-commerce-accessibility-product-cards-filters-checkout>、<https://accessibility-test.org/blog/compliance/accessibility-for-e-commerce-product-filtering-and-faceted-search/>、<https://www.equalweb.com/academy/learn/lessons/live-regions.html>。
+
+## 9.11 v1.1.8 补丁记录（2026-11-23）
+
+- 参考 MDN 懒加载指南与 `content-visibility` 实践，`cardHtml` 依据当前视图计算封面 `sizes`：网格沿用响应式宽度，列表视图固定 `64px`、看板视图固定 `56px`，使浏览器只选 200w 小图，减少长列表封面流量与解码开销。
+- `.card` 的 `contain-intrinsic-size` 追加 `auto` 关键字（保留原两值写法作兜底）：浏览器记住卡片实际渲染尺寸，长列表滚动时减少占位高度跳动。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.8；SW 缓存名升到 `yuc-ln-shell-v11`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 141/141（新增列表 sizes、看板 sizes、渲染尺寸记忆 3 项）。
+- 来源：<https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Lazy_loading>、<https://webperfclinic.com/article/css-content-visibility-rendering-performance-guide>、<https://handoff.design/css-performance/content-visibility/>。
 
 ## 10. 已知风险与决策
 

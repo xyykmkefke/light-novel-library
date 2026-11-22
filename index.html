@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.1.7">
+<meta name="version" content="1.1.8">
 <style>
   :root {
     --bg: #0d0f14;
@@ -1916,7 +1916,13 @@
   }
 
   /* 卡片：整卡可点 + 独立操作按钮，避免交互元素嵌套 */
-  .card { position: relative; content-visibility: auto; contain-intrinsic-size: 320px 260px; }
+  /* auto 关键字让浏览器记住卡片实际渲染尺寸，长列表滚动时减少占位跳动 */
+  .card {
+    position: relative;
+    content-visibility: auto;
+    contain-intrinsic-size: 320px 260px;
+    contain-intrinsic-size: auto 320px auto 260px;
+  }
   .card-link {
     display: block;
     color: inherit;
@@ -2584,7 +2590,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.7</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.8</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3799,13 +3805,17 @@
     var selecting = state.bulk && state.tab === 'mine';
     var selected = selecting && bulkSel[id];
     var phHue = Number(String(x.i).slice(-3)) % 360;
+    // 按当前视图的真实封面宽度声明 sizes，列表/看板下只取 200w 小图，减少长列表流量
+    var coverSizes = state.view === 'list' ? '64px'
+      : state.view === 'board' && state.tab === 'mine' ? '56px'
+        : '(max-width: 640px) 46vw, 210px';
 
     return '<article class="card' + (picked ? ' picked' : '') + (selected ? ' selected' : '') + '" data-id="' + id + '" title="' + escapeHtml(titleText) + '">' +
       (selecting ? '<button class="selbox" type="button" data-act="select" aria-label="选择《' + escapeHtml(titleText) + '》" aria-pressed="' + !!selected + '">✓</button>' : '') +
       '<a class="card-link" href="#d=' + id + '" tabindex="-1" aria-label="查看《' + escapeHtml(titleText) + '》详情">' +
         '<div class="cover' + (x.img ? '' : ' noimg') + '" style="--phh:' + phHue + '">' +
           (x.img ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' + escapeHtml(x.img) + '"' +
-            (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="(max-width: 640px) 46vw, 210px"' : '') +
+            (coverSrcset(x.img) ? ' srcset="' + coverSrcset(x.img) + '" sizes="' + coverSizes + '"' : '') +
             ' alt="" onload="this.parentElement.classList.add(\'loaded\')" onerror="this.style.display=\'none\';this.parentElement.classList.add(\'noimg\')">' : '') +
           '<span class="ph">' + escapeHtml(initial) + '</span>' +
           (score ? '<span class="badge score">' + score + '</span>' : '<span class="badge score none">暂无</span>') +

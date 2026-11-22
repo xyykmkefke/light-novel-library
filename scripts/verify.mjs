@@ -459,7 +459,7 @@ async function main() {
 
     // ---- 我的阅读 ----
     const pick = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => v.v > 2 && !v.c);
+      const x = (window.LN_DATA || []).find((v) => v.v > 2 && !v.c && v.img);
       return { id: String(x.i), v: x.v, name: x.cn || x.n };
     })()`);
     // 通过详情加入，避免目标条目不在首个分页里导致点击不到
@@ -665,6 +665,15 @@ async function main() {
 
     // ---- 视图与分组 ----
     await click('.tab[data-tab="mine"]');
+    // 列表视图封面仅 64px 宽，sizes 应随之收窄，避免误取 400w 大图
+    await cdp.evaluate(`(() => {
+      const el = document.getElementById('viewSelect');
+      el.value = 'list';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await sleep(250);
+    const listSizes = await cdp.evaluate(`(() => [...document.querySelectorAll('.grid.list .cover img')].map((i) => i.getAttribute('sizes')))()`);
+    check('列表视图封面使用紧凑 sizes', listSizes.length > 0 && listSizes.every((s) => s === '64px'), listSizes.slice(0, 3).join('|'));
     await cdp.evaluate(`(() => {
       const el = document.getElementById('viewSelect');
       el.value = 'board';
@@ -672,6 +681,8 @@ async function main() {
     })()`);
     await sleep(250);
     check('看板视图显示四列', (await count('.board-col')) === 4);
+    const boardSizes = await cdp.evaluate(`(() => [...document.querySelectorAll('.board-list .cover img')].map((i) => i.getAttribute('sizes')))()`);
+    check('看板视图封面使用紧凑 sizes', boardSizes.length > 0 && boardSizes.every((s) => s === '56px'), boardSizes.slice(0, 3).join('|'));
     await cdp.evaluate(`(() => {
       const el = document.getElementById('viewSelect');
       el.value = 'grid';
@@ -693,7 +704,7 @@ async function main() {
 
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && String(v.i) !== ${JSON.stringify(pick.id)});
+      const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && v.img && String(v.i) !== ${JSON.stringify(pick.id)});
       return { id: String(x.i), v: x.v };
     })()`);
     await cdp.evaluate(`(() => {
@@ -871,7 +882,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.7', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.7'));
+    check('页脚版本为 v1.1.8', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.8'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -908,7 +919,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.7', manifest.version === '1.1.7');
+    check('manifest 版本为 1.1.8', manifest.version === '1.1.8');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -921,7 +932,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v10'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v11'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
@@ -930,6 +941,7 @@ async function main() {
     check('帮助面板写明高级搜索语法', indexTxt.includes('作者:米泽穗信') && indexTxt.includes('出版社:KADOKAWA'));
     check('卡片启用 content-visibility',
       (await cdp.evaluate(`(() => getComputedStyle(document.querySelector('.card')).contentVisibility)()`)) === 'auto');
+    check('卡片记录已渲染尺寸减少滚动跳动', indexTxt.includes('contain-intrinsic-size: auto'));
     check('统计标签入口存在', (await count('.tab[data-tab="stats"]')) === 1);
 
     // ---- 无障碍 ----
