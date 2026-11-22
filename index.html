@@ -478,6 +478,50 @@
     font-size: 12px;
   }
 
+  /* 详情内一键记录阅读进度，避免回到列表才能改卷数 */
+  .detail-progress {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+  }
+
+  .detail-progress[hidden] { display: none; }
+
+  .detail-progress .dp-label {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .detail-progress .dp-val {
+    min-width: 74px;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
+  .detail-progress button {
+    height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .detail-progress button:hover:not(:disabled) { border-color: var(--line-strong); }
+  .detail-progress button:disabled { opacity: 0.45; cursor: default; }
+  .detail-progress .dp-done { margin-left: auto; }
+
   .status-opts {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -2514,7 +2558,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.1</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.2</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2530,6 +2574,7 @@
       </div>
       <div class="detail-meta" id="detailMeta"></div>
       <div class="status-opts" id="statusOpts" hidden></div>
+      <div class="detail-progress" id="detailProgress" role="group" aria-label="阅读进度" hidden></div>
       <div class="review" id="detailReview"></div>
       <div class="similar" id="detailSimilar"></div>
       <div class="modal-actions">
@@ -4326,6 +4371,17 @@
     }).slice(0, limit);
   }
 
+  // 详情进度条：已收藏且卷数已知时显示，一键记录读到第几卷
+  function progressHtml(item, entry) {
+    var total = Number(item.v) || 0;
+    var vol = Math.max(0, Number(entry && entry.vol) || 0);
+    return '<span class="dp-label">阅读进度</span>' +
+      '<button type="button" data-prog="-1" aria-label="减少一卷"' + (vol <= 0 ? ' disabled' : '') + '>−</button>' +
+      '<span class="dp-val">第 ' + vol + ' / ' + total + ' 卷</span>' +
+      '<button type="button" data-prog="1" aria-label="读下一卷"' + (vol >= total ? ' disabled' : '') + '>＋</button>' +
+      '<button type="button" class="dp-done" data-prog="done"' + (vol >= total ? ' disabled' : '') + '>读完全部</button>';
+  }
+
   function renderDetail(id) {
     var item = byId.get(id);
     if (!item) return;
@@ -4399,13 +4455,21 @@
     }).join('');
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
-      return '<span class="chip">' + label + '</span>';
+      return '<span class="chip"' + (p[0] === '进度' ? ' data-chip="progress"' : '') + '>' + label + '</span>';
     }).join('') + jumpHtml + authorHtml + genreHtml;
     var opts = $('statusOpts');
     opts.hidden = !collected;
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
       return '<button data-status="' + s + '"' + (myMap[id].s === s ? ' class="active"' : '') + '>' + STATUS[s] + '</button>';
     }).join('') : '';
+    var progBox = $('detailProgress');
+    if (collected && Number(item.v) > 0) {
+      progBox.hidden = false;
+      progBox.innerHTML = progressHtml(item, myMap[id]);
+    } else {
+      progBox.hidden = true;
+      progBox.innerHTML = '';
+    }
     var btn = $('detailToggle');
     btn.textContent = collected ? '移出我的阅读' : '加入我的阅读';
     btn.className = 'btn' + (collected ? ' danger' : ' primary');
@@ -5501,6 +5565,28 @@
     saveMine();
     render();
     renderDetail(id);
+  });
+
+  // 详情内一键进度：局部刷新，避免重建书评输入区丢失未保存草稿
+  $('detailProgress').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-prog]');
+    if (!btn || !modalId || !myMap[modalId]) return;
+    var id = modalId;
+    var item = byId.get(id);
+    var total = Number(item.v) || 0;
+    if (total <= 0) return;
+    if (btn.dataset.prog === 'done') setVol(id, total);
+    else changeVol(id, Number(btn.dataset.prog) || 0);
+    var entry = myMap[id];
+    var vol = Math.max(0, Number(entry.vol) || 0);
+    $('detailProgress').innerHTML = progressHtml(item, entry);
+    var progChip = $('detailMeta').querySelector('[data-chip="progress"]');
+    if (progChip) progChip.innerHTML = '<i>进度</i>第 ' + vol + ' / ' + total + ' 卷';
+    $('statusOpts').querySelectorAll('[data-status]').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.status === entry.s);
+    });
+    toast(entry.s === 'done' ? '已读完：' + (item.cn || item.n)
+      : '进度：第 ' + vol + ' / ' + total + ' 卷');
   });
 
   // 书评：评分即时保存；短评与笔记点「保存书评」提交

@@ -461,6 +461,33 @@ async function main() {
     check('新记录状态为想读', stored[pick.id]?.s === 'want');
     check('我的数量徽标更新',
       (await cdp.evaluate(`(() => document.getElementById('mineCount').textContent)()`)) === '1');
+
+    // 详情内一键记录卷进度（参考 BookLore 的一键进度交互）
+    const progInit = await cdp.evaluate(`(() => {
+      const box = document.getElementById('detailProgress');
+      return {
+        hidden: box.hidden,
+        steps: box.querySelectorAll('[data-prog]').length,
+        minusDisabled: box.querySelector('[data-prog="-1"]')?.disabled,
+      };
+    })()`);
+    check('详情显示卷进度控制',
+      progInit.hidden === false && progInit.steps === 3, JSON.stringify(progInit));
+    check('进度为 0 时不能减卷', progInit.minusDisabled === true);
+    await cdp.evaluate(`(() => document.querySelector('#detailProgress [data-prog="1"]').click())()`);
+    await sleep(300);
+    const progAfter = await cdp.evaluate(`(() => ({
+      entry: JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(pick.id)}],
+      progressText: document.getElementById('detailProgress').textContent,
+      metaText: document.getElementById('detailMeta').textContent,
+    }))()`);
+    check('详情一键记录下一卷',
+      Number(progAfter.entry?.vol) === 1 && progAfter.entry?.s === 'doing',
+      `vol=${progAfter.entry?.vol} s=${progAfter.entry?.s}`);
+    check('详情进度与元信息同步',
+      progAfter.progressText.includes('第 1 / ' + pick.v + ' 卷') &&
+      progAfter.metaText.includes('第 1 / ' + pick.v + ' 卷'),
+      `${progAfter.progressText.slice(0, 40)} / ${progAfter.metaText.slice(0, 40)}`);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(250);
 
@@ -733,7 +760,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.1'));
+    check('页脚版本为 v1.1.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.2'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -770,9 +797,9 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.1', manifest.version === '1.1.1');
+    check('manifest 版本为 1.1.2', manifest.version === '1.1.2');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v4'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v5'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
