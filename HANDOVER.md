@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.5.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 169/169）
+- 当前状态：**v1.6.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 171/171）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.5.3（已达成，功能：详情弹窗背景 inert + 移动端筛选抽屉焦点循环与归还）
+- 目标版本：v1.6.0（已达成，功能：统计页我的评分分布柱状与偏好摘要）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v19`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v20`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：169/169）
+### Step 5 验收（已完成：171/171）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -519,6 +519,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.3；SW 缓存名升到 `yuc-ln-shell-v19`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 169/169（新增详情背景 inert、关闭解除 inert、筛选抽屉焦点循环、关闭归还焦点 4 项）。
 - 来源：<https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/>、<https://www.w3.org/WAI/WCAG21/Techniques/html/H102>。
+
+## 9.20 v1.6.0 功能记录（2026-11-23）
+
+- 参考 Goodreads 书页的星级分布条：统计页「我的评分」卡片在已评分数量与平均分下方新增 1–10 分分布柱，只突出实际使用过的分数，空档保留 2px 基线，保持石墨黑 + 靛蓝的工具风。
+- 新增纯函数 `ratingDist(entries)`（挂到 `window.__lnRatingDist`）：只统计 1–10 分的有效评分，返回各档本数、已评分总数、平均分与最常给分；并列时取较高分数，避免把偏好说得更苛刻。
+- 卡片补充一行摘要：最常给几分与已评分占收藏比例；无评分时提示去详情页打分。柱状容器带完整 `aria-label`（逐档读出「X 分 N 本」），视觉之外的读屏用户也能获取分布。
+- 未新增存储键、未改动数据结构与同步协议；只影响统计页渲染。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.6.0；SW 缓存名升到 `yuc-ln-shell-v20`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 171/171（新增评分纯函数统计、统计页分布柱与偏好摘要 2 项）。
+- 来源：<https://thepublishingtimes.com/blog/goodreads-half-quarter-star-ratings>、<https://apps.apple.com/gr/app/storygraph-reading-tracker/id1570489264>。
 
 ## 10. 已知风险与决策
 

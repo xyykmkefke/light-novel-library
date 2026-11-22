@@ -818,6 +818,27 @@ async function main() {
       JSON.stringify(pace));
     check('统计页汇总已评分数量',
       /已评分/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    // 我的评分分布（参考 Goodreads 书页的星级分布条）
+    const distPure = await cdp.evaluate(`(() => window.__lnRatingDist && window.__lnRatingDist([
+      { e: { r: 9 } }, { e: { r: 9 } }, { e: { r: 10 } }, { e: { r: 0 } }, { e: { r: 7 } }
+    ]))()`);
+    check('评分分布按 1–10 分统计并给出平均与最常分',
+      distPure && distPure.rated === 4 && distPure.counts[8] === 2 && distPure.counts[9] === 1 &&
+      distPure.mode === 9 && distPure.avg === 8.8, JSON.stringify(distPure));
+    const distDom = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#statsPanel .stat-card'))
+        .find((el) => /我的评分/.test(el.textContent));
+      if (!card) return null;
+      return {
+        bars: card.querySelectorAll('.rdist span').length,
+        on: card.querySelectorAll('.rdist span.on').length,
+        aria: card.querySelector('.rdist')?.getAttribute('aria-label') || '',
+        text: card.textContent,
+      };
+    })()`);
+    check('统计页显示评分分布柱与偏好摘要',
+      !!distDom && distDom.bars === 10 && distDom.on === 2 &&
+      /最常给/.test(distDom.text) && /分 \d+ 本/.test(distDom.aria), JSON.stringify(distDom));
     check('统计页显示常读作者',
       /常读作者/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
     // 阅读节奏：读完率与平均读完天数（参考 StoryGraph 的平均读完用时统计）
@@ -1075,7 +1096,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.5.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.3'));
+    check('页脚版本为 v1.6.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.6.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1112,7 +1133,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.5.3', manifest.version === '1.5.3');
+    check('manifest 版本为 1.6.0', manifest.version === '1.6.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1134,7 +1155,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v19'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v20'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

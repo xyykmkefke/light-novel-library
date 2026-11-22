@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.3">
+<meta name="version" content="1.6.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2530,6 +2530,27 @@
   .goal-bar { height: 10px; margin-top: 12px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
   .goal-bar i { display: block; height: 100%; background: var(--accent); }
   .goal-meta { margin-top: 6px; font-size: 11.5px; color: var(--muted-2); }
+  /* 我的评分分布：1–10 分柱状，只突出实际使用过的分数 */
+  .rdist { display: flex; align-items: flex-end; gap: 3px; height: 54px; margin-top: 12px; }
+  .rdist span {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 3px;
+  }
+  .rdist i {
+    display: block;
+    width: 100%;
+    min-height: 2px;
+    border-radius: 2px;
+    background: var(--panel-2);
+  }
+  .rdist span.on i { background: var(--accent); }
+  .rdist b { font-size: 9px; font-weight: 500; line-height: 1; color: var(--muted-2); }
+  .rdist span.on b { color: var(--text); }
   .stat-card.stat-wide { grid-column: 1 / -1; }
   .review-list { display: grid; gap: 7px; }
   .review-item {
@@ -2782,7 +2803,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.3</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4568,6 +4589,35 @@
   }
   window.__lnReadingPace = readingPace;
 
+  // 我的评分分布：统计 1–10 分各有多少本，并给出平均分与最常给的分数
+  // 参考 Goodreads 书页的星级分布条：用柱状而不是只给一个平均分，更容易看出评分偏好
+  function ratingDist(entries) {
+    var counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var sum = 0;
+    var rated = 0;
+    (entries || []).forEach(function (o) {
+      var e = (o && o.e) || o || {};
+      var r = Math.round(Number(e.r) || 0);
+      if (r < 1 || r > 10) return;
+      counts[r - 1] += 1;
+      sum += r;
+      rated += 1;
+    });
+    var mode = 0;
+    var best = 0;
+    // 并列时取较高的分数，避免把偏好说得比实际更苛刻
+    counts.forEach(function (n, i) {
+      if (n >= best && n > 0) { best = n; mode = i + 1; }
+    });
+    return {
+      counts: counts,
+      rated: rated,
+      avg: rated ? Math.round((sum / rated) * 10) / 10 : 0,
+      mode: mode
+    };
+  }
+  window.__lnRatingDist = ratingDist;
+
   // 继续阅读：只取「在读」且尚未读满的书，按最近一次进度更新倒序（参考 Kavita Continue Reading）
   var CONTINUE_LIMIT = 8;
   function continueItems(items, mine, limit) {
@@ -4688,7 +4738,6 @@
     }
     var counts = { want: 0, doing: 0, done: 0, drop: 0 };
     var volSum = 0;
-    var rated = [];
     var byYear = {};
     var byMonth = new Array(12).fill(0);
     var byGenre = {};
@@ -4697,7 +4746,6 @@
       var e = o.e;
       if (counts[e.s] != null) counts[e.s] += 1;
       volSum += Math.max(0, Number(e.vol) || 0);
-      if (e.r) rated.push(e.r);
       if (e.f) {
         var d = new Date(e.f);
         var y = d.getFullYear();
@@ -4724,7 +4772,20 @@
     var yearKeys = Object.keys(byYear).map(Number).sort(function (a, b) { return a - b; }).slice(-6);
     var yearPairs = yearKeys.map(function (y) { return [y + ' 年', byYear[y]]; });
     var maxMonth = Math.max.apply(null, byMonth.concat([1]));
-    var avgRating = rated.length ? (rated.reduce(function (s, n) { return s + n; }, 0) / rated.length) : 0;
+    var dist = ratingDist(entries);
+    var distMax = Math.max.apply(null, dist.counts.concat([1]));
+    var distBars = dist.counts.map(function (n, i) {
+      var score = i + 1;
+      var h = n ? Math.max(3, Math.round((n / distMax) * 34)) : 2;
+      return '<span class="' + (n ? 'on' : '') + '" title="' + score + ' 分 · ' + n + ' 本">' +
+        '<i style="height:' + h + 'px"></i><b>' + score + '</b></span>';
+    }).join('');
+    var distText = dist.rated
+      ? '最常给 ' + dist.mode + ' 分 · 已评分占收藏 ' + Math.round((dist.rated / entries.length) * 100) + '%'
+      : '在详情页给书打分后可看到分布';
+    var distAria = '我的评分分布：' + dist.counts.map(function (n, i) {
+      return (i + 1) + ' 分 ' + n + ' 本';
+    }).join('，');
     var heat = byMonth.map(function (n, i) {
       var lv = n === 0 ? '' : n <= 1 ? ' lv1' : n <= 2 ? ' lv2' : ' lv3';
       return '<span class="' + lv.trim() + '" title="' + (i + 1) + ' 月读完 ' + n + ' 本">' + (n || '') + '</span>';
@@ -4780,9 +4841,10 @@
           })() +
         '</div>' +
         '<div class="stat-card"><h3>我的评分</h3><div class="stat-nums">' +
-          '<div class="stat-num"><b>' + rated.length + '</b><span>已评分</span></div>' +
-          '<div class="stat-num"><b>' + (avgRating ? avgRating.toFixed(1) : '—') + '</b><span>平均分</span></div>' +
-        '</div></div>' +
+          '<div class="stat-num"><b>' + dist.rated + '</b><span>已评分</span></div>' +
+          '<div class="stat-num"><b>' + (dist.avg ? dist.avg.toFixed(1) : '—') + '</b><span>平均分</span></div>' +
+        '</div><div class="rdist" role="img" aria-label="' + escapeHtml(distAria) + '">' + distBars + '</div>' +
+        '<div class="goal-meta">' + distText + '</div></div>' +
         '<div class="stat-card"><h3>阅读节奏</h3><div class="stat-nums">' +
           '<div class="stat-num"><b>' + pace.rate + '%</b><span>读完率</span></div>' +
           '<div class="stat-num"><b>' + (pace.avgDays == null ? '—' : pace.avgDays) +
