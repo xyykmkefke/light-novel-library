@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.5.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 165/165）
+- 当前状态：**v1.5.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 169/169）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.5.2（已达成，功能：相似推荐按同作者 / 同书系 / 同题材排序并标注理由）
+- 目标版本：v1.5.3（已达成，功能：详情弹窗背景 inert + 移动端筛选抽屉焦点循环与归还）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v18`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v19`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：165/165）
+### Step 5 验收（已完成：169/169）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -509,6 +509,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.2；SW 缓存名升到 `yuc-ln-shell-v18`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 165/165（新增推荐理由标签、纯函数排序与跨类型排除 2 项）。
 - 来源：<https://www.goodreads.com/topic/show/23724468-2026-melissa-challenge-tracker>、<https://apps.apple.com/us/app/storygraph-reading-tracker/id1570489264>、<https://bangumi.github.io/api/>。
+
+## 9.19 v1.5.3 功能记录（2026-11-23）
+
+- 参考 WAI-ARIA APG 的 Modal Dialog 模式与 WCAG H102：详情弹窗打开时把 `body > header`、`body > main`、`body > footer` 与回到顶部按钮设为 `inert`，关闭时移除；`aria-modal` 从此与真实行为一致，键盘与屏幕阅读器都无法穿透到背景列表。
+- `inert` 通过特性检测启用（`'inert' in HTMLElement.prototype`），不支持的老浏览器自动跳过，不报错、不影响原有焦点陷阱与 Esc 归焦。
+- 移动端筛选抽屉此前只处理 Esc：本次补上 Tab / Shift+Tab 在面板内循环（复用 `trapModalTab`），关闭时若焦点仍在抽屉内则归还给筛选按钮。
+- 未新增存储键、未改动数据与同步协议；只影响交互与焦点管理。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.3；SW 缓存名升到 `yuc-ln-shell-v19`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 169/169（新增详情背景 inert、关闭解除 inert、筛选抽屉焦点循环、关闭归还焦点 4 项）。
+- 来源：<https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/>、<https://www.w3.org/WAI/WCAG21/Techniques/html/H102>。
 
 ## 10. 已知风险与决策
 

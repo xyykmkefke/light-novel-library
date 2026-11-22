@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.2">
+<meta name="version" content="1.5.3">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2782,7 +2782,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.3</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4988,6 +4988,17 @@
   var pendingDetail = null;
   var lastModalFocus = null;
 
+  // 详情为模态弹窗：打开时把页面主体设为 inert，background 不再接收焦点与读屏
+  var inertSupported = 'inert' in HTMLElement.prototype;
+  function setPageInert(on) {
+    if (!inertSupported) return;
+    var regions = document.querySelectorAll('body > header, body > main, body > footer, #toTop');
+    for (var i = 0; i < regions.length; i += 1) {
+      if (on) regions[i].setAttribute('inert', '');
+      else regions[i].removeAttribute('inert');
+    }
+  }
+
   // 题材重叠数：详情推荐优先展示同题材作品
   function genreOverlap(a, b) {
     var ga = a.tg || [];
@@ -5213,6 +5224,8 @@
     pendingDetail = null;
     renderDetail(id);
     modalEl.hidden = false;
+    // 模态弹窗：背景区域设为 inert，键盘与屏幕阅读器都不会穿透到列表（WAI-ARIA Dialog）
+    setPageInert(true);
     $('detailToggle').focus();
     if (switched) {
       var panel = modalEl.querySelector('.modal-panel');
@@ -5228,6 +5241,7 @@
     lastModalFocus = null;
     modalEl.hidden = true;
     modalId = null;
+    setPageInert(false);
     writeHash();
     // Esc / 关闭后把焦点还给触发卡片，键盘用户不丢失位置
     if (!back || !document.contains(back) || back.offsetParent === null) {
@@ -5460,11 +5474,14 @@
   function closeFilterSheet() {
     var sheet = $('filterSheet');
     if (!sheet || sheet.hidden) return;
+    // 关闭时若焦点还在抽屉里，归还给触发按钮，键盘用户不丢失位置
+    var backToToggle = sheet.contains(document.activeElement);
     $('filters').classList.remove('in-sheet');
     $('filtersSlot').appendChild($('filters'));
     sheet.hidden = true;
     document.body.classList.remove('sheet-open');
     $('filterToggle').setAttribute('aria-expanded', 'false');
+    if (backToToggle) $('filterToggle').focus();
   }
 
   $('advFilterToggle').addEventListener('click', function () {
@@ -6641,6 +6658,9 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         closeFilterSheet();
+      } else if (e.key === 'Tab') {
+        // 移动端筛选抽屉同样是模态：Tab 在面板内循环，不跑到背后的列表
+        trapModalTab($('filterSheet'), e);
       }
       return;
     }

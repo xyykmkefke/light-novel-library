@@ -1075,7 +1075,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.5.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.2'));
+    check('页脚版本为 v1.5.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.3'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1112,7 +1112,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.5.2', manifest.version === '1.5.2');
+    check('manifest 版本为 1.5.3', manifest.version === '1.5.3');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1134,7 +1134,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v18'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v19'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
@@ -1180,10 +1180,19 @@ async function main() {
       (await cdp.evaluate(`(() => { const t = document.querySelector('.tab.active'); return t ? t.getAttribute('aria-current') : ''; })()`)) === 'page');
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
     await sleep(250);
+    const bgInert = await cdp.evaluate(`(() => ({
+      open: !document.getElementById('modal').hidden,
+      main: document.querySelector('main').hasAttribute('inert'),
+      header: document.querySelector('header').hasAttribute('inert'),
+    }))()`);
+    check('详情打开时背景区域 inert',
+      bgInert.open && bgInert.main && bgInert.header, JSON.stringify(bgInert));
     await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
     await sleep(250);
     check('Esc 关闭详情并归还焦点',
       (await cdp.evaluate(`(() => document.getElementById('modal').hidden)()`)) === true);
+    check('关闭详情后解除背景 inert',
+      (await cdp.evaluate(`(() => !document.querySelector('main').hasAttribute('inert'))()`)) === true);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
 
     // ---- 移动端 375×812 ----
@@ -1208,11 +1217,33 @@ async function main() {
     await click('#filterToggle');
     check('移动端筛选抽屉可打开',
       (await cdp.evaluate(`(() => !document.getElementById('filterSheet').hidden)()`)) === true);
+    const sheetTrap = await cdp.evaluate(`(() => {
+      const panel = document.getElementById('filterPanel');
+      const nodes = [...document.querySelectorAll('#filterSheet button, #filterSheet a[href], #filterSheet input, #filterSheet select, #filterSheet textarea, #filterSheet [tabindex]:not([tabindex="-1"])')]
+        .filter((n) => !n.disabled && n.offsetParent !== null);
+      if (nodes.length < 2) return { nodes: nodes.length };
+      const first = nodes[0];
+      nodes[nodes.length - 1].focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      return {
+        nodes: nodes.length,
+        inPanel: panel.contains(document.activeElement),
+        wrapped: document.activeElement === first,
+      };
+    })()`);
+    check('筛选抽屉 Tab 焦点在面板内循环',
+      sheetTrap.nodes >= 2 && sheetTrap.inPanel && sheetTrap.wrapped, JSON.stringify(sheetTrap));
     const sheetShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     if (sheetShot.result?.data) {
       await writeFile(path.join(SHOT_DIR, 'mobile.png'), Buffer.from(sheetShot.result.data, 'base64'));
     }
     await click('#filterDone');
+    const sheetFocus = await cdp.evaluate(`(() => ({
+      hidden: document.getElementById('filterSheet').hidden,
+      focus: document.activeElement ? document.activeElement.id : '',
+    }))()`);
+    check('关闭筛选抽屉归还焦点',
+      sheetFocus.hidden && sheetFocus.focus === 'filterToggle', JSON.stringify(sheetFocus));
     await cdp.send('Emulation.clearDeviceMetricsOverride');
 
     // ---- 移动端统计页与不同宽度 ----
