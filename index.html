@@ -2561,7 +2561,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.3</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.1.4</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2707,6 +2707,7 @@
   var DEL_KEY = 'yuc_ln_deleted_v1';
   var SETTINGS_KEY = 'yuc_ln_settings_v1';
   var GOAL_KEY = 'yuc_ln_goal_v1';
+  var DRAFT_KEY = 'yuc_ln_draft_v1';
   var SETTINGS_DEFAULT = { font: 'md', density: 'std', motion: 'system' };
   var settings = { font: 'md', density: 'std', motion: 'system' };
 
@@ -2895,6 +2896,53 @@
     if (!myDeleted[id]) return;
     delete myDeleted[id];
     persistDeleted();
+  }
+
+  // 书评草稿：输入时暂存本机，关闭详情、切换书目或刷新后仍可恢复
+  function loadDrafts() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+      if (!parsed || typeof parsed !== 'object') return {};
+      var out = {};
+      Object.keys(parsed).forEach(function (id) {
+        if (!/^\d+$/.test(id)) return;
+        var d = parsed[id];
+        if (!d || typeof d !== 'object') return;
+        out[id] = {
+          rv: String(d.rv || '').slice(0, 140),
+          nt: String(d.nt || '').slice(0, 1000),
+          t: Number(d.t) || 0
+        };
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function persistDrafts(drafts) {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts));
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
+
+  // 与已保存内容一致（或已移出收藏）时清掉草稿，避免恢复陈旧文本
+  function saveDraft(id, rv, nt) {
+    var drafts = loadDrafts();
+    var entry = myMap[id];
+    if (!entry || (String(rv).trim() === entry.rv && String(nt).trim() === entry.nt)) {
+      delete drafts[id];
+    } else {
+      drafts[id] = { rv: String(rv), nt: String(nt), t: Date.now() };
+    }
+    persistDrafts(drafts);
+  }
+
+  function clearDraft(id) {
+    var drafts = loadDrafts();
+    if (!drafts[id]) return;
+    delete drafts[id];
+    persistDrafts(drafts);
   }
 
   function saveMine(opts) {
@@ -4497,6 +4545,12 @@
         '<span class="review-hint">加入我的阅读后可评分、写短评与笔记</span></div>';
     } else {
       var mine = myMap[id];
+      var draft = loadDrafts()[id];
+      // 只在草稿晚于最近一次书评保存、且内容确实不同时恢复，避免云端旧数据把草稿带回来
+      var hasDraft = !!(draft && draft.t > (Number(mine.rvU) || 0) &&
+        (draft.rv !== (mine.rv || '') || draft.nt !== (mine.nt || '')));
+      var rvText = hasDraft ? draft.rv : (mine.rv || '');
+      var ntText = hasDraft ? draft.nt : (mine.nt || '');
       var stars = '';
       for (var n = 1; n <= 10; n += 1) {
         stars += '<button type="button" data-rate="' + n + '"' + (mine.r === n ? ' class="on"' : '') +
@@ -4505,14 +4559,15 @@
       if (mine.r) stars += '<button type="button" data-rate="0" title="清除我的评分">清除</button>';
       reviewEl.innerHTML =
         '<div class="review-head"><b>我的书评</b><span class="review-hint">' +
-          (mine.u ? '更新于 ' + fmtDate(mine.u) : '') + '</span></div>' +
+          (hasDraft ? '已恢复未保存草稿 · 保存后写入记录'
+            : (mine.u ? '更新于 ' + fmtDate(mine.u) : '')) + '</span></div>' +
         '<div class="rating-row" role="group" aria-label="我的评分">' + stars + '</div>' +
         '<textarea id="reviewShort" maxlength="140" placeholder="短评（140 字内）" aria-label="短评">' +
-          escapeHtml(mine.rv || '') + '</textarea>' +
+          escapeHtml(rvText) + '</textarea>' +
         '<textarea id="reviewNote" maxlength="1000" placeholder="笔记：剧情、感想、想读的卷……" aria-label="笔记">' +
-          escapeHtml(mine.nt || '') + '</textarea>' +
+          escapeHtml(ntText) + '</textarea>' +
         '<div class="review-foot"><span class="review-count" id="reviewCount">' +
-          (mine.rv || '').length + '/140 · ' + (mine.nt || '').length + '/1000</span>' +
+          rvText.length + '/140 · ' + ntText.length + '/1000</span>' +
           '<button class="btn primary" type="button" id="reviewSave">保存书评</button></div>';
     }
 
@@ -4600,6 +4655,7 @@
     if (myMap[id]) {
       var prev = myMap[id];
       delete myMap[id];
+      clearDraft(id);
       markDeleted(id);
       saveMine();
       render();
@@ -5570,6 +5626,7 @@
     if (!item) return;
     if (myMap[id]) {
       delete myMap[id];
+      clearDraft(id);
       markDeleted(id);
       toast('已移除：' + (item.cn || item.n));
     } else {
@@ -5604,7 +5661,18 @@
       : '进度：第 ' + vol + ' / ' + total + ' 卷');
   });
 
-  // 书评：评分即时保存；短评与笔记点「保存书评」提交
+  // 书评：评分即时保存；短评与笔记输入即存草稿，点「保存书评」正式提交
+  function refreshReviewCount() {
+    var row = $('reviewCount');
+    var rv = $('reviewShort');
+    var nt = $('reviewNote');
+    if (!row || !rv || !nt) return;
+    var entry = modalId ? myMap[modalId] : null;
+    var dirty = !!(entry && (rv.value.trim() !== (entry.rv || '') || nt.value.trim() !== (entry.nt || '')));
+    row.textContent = rv.value.length + '/140 · ' + nt.value.length + '/1000' +
+      (dirty ? ' · 草稿已自动保存' : '');
+  }
+
   $('detailReview').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-rate]');
     if (!btn || !modalId || !myMap[modalId]) return;
@@ -5614,23 +5682,20 @@
     myMap[id].rvU = myMap[id].u;
     saveMine();
     render();
-    var row = $('reviewCount');
-    var rv = $('reviewShort');
-    var nt = $('reviewNote');
     var box = $('detailReview');
     box.querySelectorAll('[data-rate]').forEach(function (b) {
       var on = Number(b.dataset.rate) === myMap[id].r && Number(b.dataset.rate) > 0;
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    if (row && rv && nt) row.textContent = rv.value.length + '/140 · ' + nt.value.length + '/1000';
+    refreshReviewCount();
   });
   $('detailReview').addEventListener('input', function (e) {
     if (!e.target.matches('textarea')) return;
-    var row = $('reviewCount');
     var rv = $('reviewShort');
     var nt = $('reviewNote');
-    if (row && rv && nt) row.textContent = rv.value.length + '/140 · ' + nt.value.length + '/1000';
+    if (modalId && myMap[modalId] && rv && nt) saveDraft(modalId, rv.value, nt.value);
+    refreshReviewCount();
   });
   $('detailReview').addEventListener('click', function (e) {
     if (!e.target.closest('#reviewSave') || !modalId || !myMap[modalId]) return;
@@ -5640,6 +5705,7 @@
     entry.nt = String(($('reviewNote') || {}).value || '').slice(0, 1000).trim();
     entry.u = Date.now();
     entry.rvU = entry.u;
+    clearDraft(id);
     saveMine();
     render();
     renderDetail(id);
@@ -6122,6 +6188,7 @@
     var ts = Date.now();
     ids.forEach(function (id) { myDeleted[id] = ts; });
     myMap = {};
+    persistDrafts({});
     persistDeleted();
     saveMine();
     render();

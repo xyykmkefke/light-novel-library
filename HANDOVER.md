@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 124/124）
+- 当前状态：**v1.1.4 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 128/128）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.3（已达成，补丁：我的阅读排序）
+- 目标版本：v1.1.4（已达成，补丁：书评草稿自动保留）
 
 ## 1. 目标与边界
 
@@ -390,6 +390,15 @@ PWA / 移动端：
 - 版本与缓存：页脚、manifest、package.json 升至 1.1.3；SW 缓存名升到 `yuc-ln-shell-v6`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 124/124（新增我的评分 / 阅读进度 / 最近更新排序 3 项）。
 - 来源：<https://www.raycast.com/maxchang3/bangumi>、<https://bangumi.github.io/api/>、<https://hellogithub.com/repository/f33414cc05504c4685016a1103cda422>、<https://www.juxia.com/sjwy/ruanjian-693739.html>。
+
+## 9.7 v1.1.4 补丁记录（2026-11-23）
+
+- 参考 StoryGraph / Goodreads 对长文本编辑的处理：错按关闭或切换书籍不应丢失正在写的内容，草稿先落本地、正式保存才写入记录。
+- 短评 / 笔记输入时即写入本机 `yuc_ln_draft_v1`（与收藏记录分离，不进入 Gist 同步协议）；详情底部字数提示同时显示「草稿已自动保存」。
+- 重新打开详情时，若草稿时间晚于最近一次书评保存且内容不同，则自动回填并提示「已恢复未保存草稿」；点「保存书评」后清除草稿；移出收藏、清空列表时一并清理对应草稿。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.4；SW 缓存名升到 `yuc-ln-shell-v7`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 128/128（新增草稿暂存、重开恢复、草稿提示、保存后清除 4 项）。
+- 来源：<https://roadmap.thestorygraph.com/requests-ideas/posts/add-spoiler-tag-to-reviews>、<https://roadmap.thestorygraph.com/changelog>、<https://hardcover.app/blog/hardcover-report-for-september-2026>。
 
 ## 10. 已知风险与决策
 

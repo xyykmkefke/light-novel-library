@@ -592,6 +592,32 @@ async function main() {
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(300);
 
+    // ---- 书评草稿：未点保存时本机暂存，重新打开详情自动恢复 ----
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
+    await sleep(300);
+    await cdp.evaluate(`(() => {
+      const el = document.getElementById('reviewShort');
+      el.value = '未保存草稿';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(200);
+    const draftAfterInput = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_draft_v1') || '{}')[${JSON.stringify(pick.id)}])()`);
+    check('未保存书评暂存为草稿', draftAfterInput?.rv === '未保存草稿', draftAfterInput?.rv);
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(300);
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
+    await sleep(300);
+    check('重新打开详情恢复草稿内容',
+      (await cdp.evaluate(`(() => document.getElementById('reviewShort').value)()`)) === '未保存草稿');
+    check('详情提示已恢复草稿',
+      /草稿/.test(await cdp.evaluate(`(() => document.getElementById('detailReview').textContent)()`)));
+    await cdp.evaluate(`(() => document.getElementById('reviewSave').click())()`);
+    await sleep(300);
+    const draftAfterSave = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_draft_v1') || '{}')[${JSON.stringify(pick.id)}])()`);
+    check('保存书评后清除草稿', !draftAfterSave);
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(300);
+
     // ---- 视图与分组 ----
     await click('.tab[data-tab="mine"]');
     await cdp.evaluate(`(() => {
@@ -782,7 +808,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.3'));
+    check('页脚版本为 v1.1.4', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.4'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -819,9 +845,9 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.3', manifest.version === '1.1.3');
+    check('manifest 版本为 1.1.4', manifest.version === '1.1.4');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v6'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v7'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
