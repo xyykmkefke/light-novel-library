@@ -861,10 +861,44 @@ async function main() {
       streakDom.dots === 7, JSON.stringify(streakDom));
     const daysStored = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_days_v1') || '[]'))()`);
     check('阅读动作写入打卡日期', Array.isArray(daysStored) && daysStored.length >= 1, JSON.stringify(daysStored));
+    // 我的书评汇总（参考 StoryGraph / Goodreads 的书评列表）
+    const reviewPure = await cdp.evaluate(`(() => window.__lnRecentReviews && window.__lnRecentReviews([
+      { x: { i: 1, cn: '甲' }, e: { rv: '好', rvU: 20 } },
+      { x: { i: 2, cn: '乙' }, e: { nt: '笔记', u: 30 } },
+      { x: { i: 3, cn: '丙' }, e: { r: 8 } },
+    ], 5).map((o) => [o.i, o.u, o.rv || o.nt]))()`);
+    check('书评汇总只取有短评或笔记并按时更新排序',
+      JSON.stringify(reviewPure) === '[["2",30,"笔记"],["1",20,"好"]]', JSON.stringify(reviewPure));
+    const reviewDom = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#statsPanel .stat-card'))
+        .find((el) => /我的书评/.test(el.textContent));
+      if (!card) return null;
+      return {
+        items: card.querySelectorAll('.review-item').length,
+        excerpt: card.querySelector('.review-excerpt')?.textContent || '',
+        text: card.textContent,
+        id: card.querySelector('.review-item')?.dataset.statsReview || '',
+      };
+    })()`);
+    check('统计页汇总我的书评并显示摘要',
+      !!reviewDom && reviewDom.items >= 1 && !!reviewDom.excerpt && /书评记录/.test(reviewDom.text),
+      JSON.stringify(reviewDom && { n: reviewDom.items, excerpt: reviewDom.excerpt }));
     const statsDesktopShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     if (statsDesktopShot.result?.data) {
       await writeFile(path.join(SHOT_DIR, 'desktop-stats.png'), Buffer.from(statsDesktopShot.result.data, 'base64'));
     }
+    await cdp.evaluate(`(() => { document.querySelector('#statsPanel .review-item').click(); })()`);
+    await sleep(300);
+    const reviewOpen = await cdp.evaluate(`(() => ({
+      modal: !document.getElementById('modal').hidden,
+      title: document.getElementById('modalTitle').textContent,
+      hash: location.hash,
+    }))()`);
+    check('点击书评条目可打开对应详情',
+      reviewOpen.modal && reviewOpen.title.length > 0 && /d=/.test(reviewOpen.hash),
+      JSON.stringify(reviewOpen));
+    await cdp.evaluate(`(() => document.getElementById('modalClose').click())()`);
+    await sleep(200);
     await cdp.evaluate(`(() => { location.hash = 'tab=mine'; })()`);
     await sleep(300);
     check('hash 可直达统计以外的标签页',
@@ -1021,7 +1055,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.4.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.4.0'));
+    check('页脚版本为 v1.5.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1058,7 +1092,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.4.0', manifest.version === '1.4.0');
+    check('manifest 版本为 1.5.0', manifest.version === '1.5.0');
     const pageVersion = await cdp.evaluate(`(() => document.querySelector('meta[name="version"]').getAttribute('content') )()`);
     check('页面 meta 版本与 manifest 一致', pageVersion === manifest.version, `${pageVersion} / ${manifest.version}`);
     const swReg = await cdp.evaluate(`(async () => {
@@ -1071,7 +1105,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v15'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v16'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

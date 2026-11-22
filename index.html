@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.4.0">
+<meta name="version" content="1.5.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2529,6 +2529,49 @@
   .goal-bar { height: 10px; margin-top: 12px; border-radius: 5px; background: var(--panel-2); overflow: hidden; }
   .goal-bar i { display: block; height: 100%; background: var(--accent); }
   .goal-meta { margin-top: 6px; font-size: 11.5px; color: var(--muted-2); }
+  .stat-card.stat-wide { grid-column: 1 / -1; }
+  .review-list { display: grid; gap: 7px; }
+  .review-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .review-item:hover { border-color: var(--accent); }
+  .review-main { flex: 1; min-width: 0; }
+  .review-title {
+    display: block;
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .review-excerpt {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--muted-2);
+  }
+  .review-side {
+    flex: 0 0 auto;
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--muted-2);
+  }
+  .review-side .rs { color: var(--accent); font-weight: 600; }
   .week-dots { display: flex; gap: 6px; margin-top: 12px; }
   .week-dots span {
     width: 24px;
@@ -2738,7 +2781,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.4.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4544,6 +4587,30 @@
   }
   window.__lnContinueList = continueItems;
 
+  // 我的书评汇总：只取写过短评或笔记的记录，按书评更新时间倒序（参考 StoryGraph / Goodreads 的书评列表）
+  function recentReviews(entries, limit) {
+    var max = Number(limit) > 0 ? Number(limit) : 6;
+    var out = [];
+    (entries || []).forEach(function (o) {
+      var x = (o && o.x) || {};
+      var e = (o && o.e) || {};
+      var rv = String(e.rv || '').trim();
+      var nt = String(e.nt || '').trim();
+      if (!rv && !nt) return;
+      out.push({
+        i: String(x.i == null ? '' : x.i),
+        title: x.cn || x.n || '未知书目',
+        r: Number(e.r) || 0,
+        rv: rv,
+        nt: nt,
+        u: Number(e.rvU) || Number(e.u) || Number(e.t) || 0
+      });
+    });
+    out.sort(function (a, b) { return b.u - a.u; });
+    return out.slice(0, max);
+  }
+  window.__lnRecentReviews = recentReviews;
+
   // 我的阅读顶部快捷条：点封面进详情，点「＋1 卷」直接记录下一卷
   function renderContinue() {
     var row = $('continueRow');
@@ -4662,6 +4729,22 @@
       return '<span class="' + lv.trim() + '" title="' + (i + 1) + ' 月读完 ' + n + ' 本">' + (n || '') + '</span>';
     }).join('');
     var streak = readingStreak(loadDays(), entries, new Date());
+    var reviewAll = recentReviews(entries, 9999);
+    var reviews = reviewAll.slice(0, 6);
+    var reviewHtml = reviews.length
+      ? '<div class="review-list">' + reviews.map(function (rv) {
+          var excerpt = rv.rv || rv.nt;
+          var side = (rv.r ? '<span class="rs">★ ' + rv.r + '</span>' : '') +
+            (rv.u ? '<span>' + fmtDate(rv.u) + '</span>' : '');
+          return '<button class="review-item" type="button" data-stats-review="' + escapeHtml(rv.i) +
+            '" title="查看《' + escapeHtml(rv.title) + '》详情">' +
+            '<span class="review-main"><span class="review-title">' + escapeHtml(rv.title) + '</span>' +
+            '<span class="review-excerpt">' + escapeHtml(excerpt) + '</span></span>' +
+            '<span class="review-side">' + side + '</span></button>';
+        }).join('') + '</div>' +
+        '<div class="goal-meta">共 ' + reviewAll.length + ' 条书评记录，显示最近 ' + reviews.length +
+        ' 条 · 点击查看详情</div>'
+      : '<div class="goal-meta">在详情页写下短评或笔记后，会在这里汇总最近的记录</div>';
     var todayDate = new Date();
     var weekDots = streak.cells.map(function (on, i) {
       var dt = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - (6 - i));
@@ -4722,10 +4805,15 @@
       '<div class="stats-grid">' +
         '<div class="stat-card"><h3>题材偏好</h3>' + barRows(sortedPairs(byGenre), '收藏的条目暂无题材数据') + '</div>' +
         '<div class="stat-card"><h3>常读作者</h3>' + barRows(sortedPairs(byAuthor), '收藏的条目暂无作者数据') + '</div>' +
+      '</div>' +
+      '<div class="stats-grid">' +
+        '<div class="stat-card stat-wide"><h3>我的书评</h3>' + reviewHtml + '</div>' +
       '</div>';
   }
 
   $('statsPanel').addEventListener('click', function (e) {
+    var rv = e.target.closest('[data-stats-review]');
+    if (rv && rv.dataset.statsReview) { openDetail(rv.dataset.statsReview); return; }
     var act = e.target.closest('[data-stats]');
     if (!act) return;
     if (act.dataset.stats === 'browse') { setTab('all'); return; }

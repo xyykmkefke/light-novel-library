@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.4.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 155/155）
+- 当前状态：**v1.5.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 158/158）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.4.0（已达成，功能：阅读统计的阅读打卡连续天数）
+- 目标版本：v1.5.0（已达成，功能：阅读统计的我的书评汇总）
 
 ## 1. 目标与边界
 
@@ -147,7 +147,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v15` |
+| SW 缓存 | `yuc-ln-shell-v16` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v15`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v16`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：155/155）
+### Step 5 验收（已完成：158/158）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -480,6 +480,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.4.0；SW 缓存名升到 `yuc-ln-shell-v15`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 155/155（新增连续天数计算、当天未打卡不归零、统计卡片与近 7 天、打卡日期落盘 4 项）。
 - 来源：<https://roadmap.thestorygraph.com/changelog/streaks->、<https://roadmap.thestorygraph.com/features>、<https://thestorygraph.freshdesk.com/support/solutions/articles/79000145752-how-to-fix-your-streak>。
+
+## 9.16 v1.5.0 功能记录（2026-11-23）
+
+- 参考 StoryGraph / Goodreads 的书评管理，阅读统计页新增「我的书评」汇总卡：只列写过短评或笔记的收藏，按书评更新时间倒序显示最近 6 条。
+- 每条显示书名、短评（无短评时取笔记）两行摘要、我的评分与日期；点击可直接打开对应详情，继续编辑书评。
+- 底部说明记录总数与显示条数；没有书评时提示「在详情页写下短评或笔记后，会在这里汇总最近的记录」。
+- 实现为纯函数 `recentReviews(entries, limit)` 并挂到 `window.__lnRecentReviews`，只读现有 `yuc_ln_mine_v1`，不新增存储键、不改同步协议。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.0；SW 缓存名升到 `yuc-ln-shell-v16`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 158/158（新增过滤排序、统计卡摘要、点击打开详情 3 项）。
+- 来源：<https://roadmap.thestorygraph.com/fr>、<https://www.goodreads.com/genres/reference-on-my-shelves>、<https://roadmap.thestorygraph.com/requests-ideas/posts/confirmation-when-leaving-review-page-in-app>。
 
 ## 10. 已知风险与决策
 
