@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.1.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 115/115）
+- 当前状态：**v1.1.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 117/117）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.1.0（已达成，次版本：书评与统计功能块）
+- 目标版本：v1.1.1（已达成，补丁：年度目标节奏）
 
 ## 1. 目标与边界
 
@@ -145,7 +145,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 待备份改动 | `yuc_ln_dirty_v1` |
 | 备份提醒 | `yuc_ln_backup_warn_v1` |
 | 年度目标 | `yuc_ln_goal_v1` |
-| SW 缓存 | `yuc-ln-shell-v3` |
+| SW 缓存 | `yuc-ln-shell-v4` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -269,11 +269,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v3`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v4`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：115/115）
+### Step 5 验收（已完成：117/117）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -364,6 +364,14 @@ PWA / 移动端：
 - 测试：`test-merge` 20 项；`verify` 115 项（新增书评、统计、高级搜索、作者跳转、卷数排序、J/K、浅色主题对比度、移动端统计与 390/430 宽度）。
 - 浅色主题对比度：正文 17.57:1、次要文字 6.02:1（相对卡片底色），均高于 WCAG AA 4.5:1。
 - 截图：新增 `screenshots/mobile-stats.png`、`desktop-stats.png`、`light.png`。
+
+## 9.4 v1.1.1 补丁记录（2026-11-23）
+
+- 参考 Goodreads / StoryGraph 的年度阅读挑战「ahead of schedule」做法，在统计页年度目标卡片增加节奏行。
+- 新增纯函数 `goalPace(finished, target, now)`（`window.__lnGoalPace`）：按当年已过天数占总天数比例估算此刻应读本数，输出领先 / 落后本数、全年进度百分比与剩余天数；未设目标时不显示。
+- 版本与缓存：页脚、manifest、package.json 升至 1.1.1；SW 缓存名升到 `yuc-ln-shell-v4`，确保旧客户端拿到新页面。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 117/117（新增「年度目标显示节奏」「目标节奏按已过天数计算」2 项）。
+- 来源：<https://www.goodreads.com/topic/show/22940342-reading-challenge-progress>、<https://mistysbookspace.wordpress.com/2026/07/08/mid-year-book-freak-out-tag-10/>。
 
 ## 10. 已知风险与决策
 

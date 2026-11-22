@@ -641,6 +641,13 @@ async function main() {
     await sleep(250);
     const goalStored = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_goal_v1') || '{}'))()`);
     check('年度目标写入本地', Number(goalStored.target) === 12, JSON.stringify(goalStored));
+    check('年度目标显示节奏',
+      /节奏：/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)) &&
+      /(领先|落后|正好按时)/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    const pace = await cdp.evaluate(`(() => window.__lnGoalPace(20, 10, new Date('2026-07-02T12:00:00')))()`);
+    check('目标节奏按已过天数计算',
+      pace && pace.expected === 5 && pace.delta === 15 && pace.percentDay === 50,
+      JSON.stringify(pace));
     check('统计页汇总已评分数量',
       /已评分/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
     check('统计页显示常读作者',
@@ -726,7 +733,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.1.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.0'));
+    check('页脚版本为 v1.1.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.1.1'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -763,9 +770,9 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.1.0', manifest.version === '1.1.0');
+    check('manifest 版本为 1.1.1', manifest.version === '1.1.1');
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v3'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v4'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
