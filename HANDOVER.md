@@ -273,17 +273,12 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
 3. 失败截图与日志保留在 `screenshots/`。
 
-### Step 6 部署（待执行：需用户授权推送）
+### Step 6 部署（已完成）
 
-1. 提交后执行：
-
-```bash
-gh repo create xyykmkefke/light-novel-library --public --source . --remote origin --push
-```
-
-2. 开启 Pages：`main` 分支根目录。
-3. 线上复跑验收，记录 URL 与版本。
-4. 本轮按约定未执行 commit / push / deploy。
+1. 仓库：<https://github.com/xyykmkefke/light-novel-library>（public，默认分支 `main`）。
+2. Pages：`main` 分支根目录，已开启；线上地址 <https://xyykmkefke.github.io/light-novel-library/>。
+3. 线上冒烟：240 张卡片、全库 4007 条、页脚 v1.0.1、无脚本错误。
+4. v1.0.1 已推送（commit `ee4242d`）。
 
 ## 9. 验收清单
 
