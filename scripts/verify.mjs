@@ -940,6 +940,60 @@ async function main() {
       JSON.stringify(reviewOpen));
     await cdp.evaluate(`(() => document.getElementById('modalClose').click())()`);
     await sleep(200);
+    // 想读队列（参考 Hikara 的 Up Next queue：没排序时用理由解释下一本读什么）
+    const upPure = await cdp.evaluate(`(() => window.__lnUpNext && window.__lnUpNext([
+      { i: 1, au: '甲', s: 7, v: 10 },
+      { i: 2, au: '甲 / 乙', s: 9, v: 12 },
+      { i: 3, au: '丙', s: 8.6, v: 9 },
+      { i: 4, au: '丁', s: 7.2, v: 2 },
+      { i: 5, au: '戊', s: 6.5, v: 8 },
+      { i: 6, au: '己', s: 9.5, v: 5 }
+    ], {
+      1: { s: 'doing' },
+      2: { s: 'want', t: 500 },
+      3: { s: 'want', t: 400 },
+      4: { s: 'want', t: 300 },
+      5: { s: 'want', t: 200 },
+      6: { s: 'done' }
+    }, 3).map((o) => [String(o.x.i), o.why]))()`);
+    check('想读队列按同作者在读/评分/短篇排序并给出理由',
+      JSON.stringify(upPure) === '[["2","同作者在读"],["3","评分 8.6"],["4","短篇 · 2 卷"]]',
+      JSON.stringify(upPure));
+    await cdp.evaluate(`(() => { location.hash = 'tab=all'; })()`);
+    await sleep(350);
+    const upId = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#grid .card')).find((c) => {
+        const btn = c.querySelector('[data-act="toggle"]');
+        return btn && /加入/.test(btn.textContent);
+      });
+      if (!card) return '';
+      card.querySelector('[data-act="toggle"]').click();
+      return card.dataset.id;
+    })()`);
+    await sleep(350);
+    await cdp.evaluate(`(() => { location.hash = 'tab=stats'; })()`);
+    await sleep(400);
+    const upDom = await cdp.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll('#statsPanel .stat-card'))
+        .find((el) => /想读队列/.test(el.textContent));
+      return card ? {
+        n: card.querySelectorAll('.upnext-item').length,
+        why: card.querySelector('.upnext-why')?.textContent || '',
+        start: card.querySelectorAll('.upnext-start').length,
+      } : null;
+    })()`);
+    check('统计页显示想读队列并给出理由',
+      !!upDom && upDom.n >= 1 && !!upDom.why && upDom.start === upDom.n, JSON.stringify(upDom));
+    await cdp.evaluate(`(() => { document.querySelector('#statsPanel .upnext-start').click(); })()`);
+    await sleep(400);
+    const upStarted = await cdp.evaluate(`(() => ({
+      s: (JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(upId)}] || {}).s,
+      n: document.querySelectorAll('#statsPanel .upnext-item').length,
+      toast: document.getElementById('toast').textContent,
+    }))()`);
+    check('想读队列点「开始读」移到在读',
+      upStarted.s === 'doing' && upStarted.n === 0 && /已标记为「在读」/.test(upStarted.toast),
+      JSON.stringify(upStarted));
     await cdp.evaluate(`(() => { location.hash = 'tab=mine'; })()`);
     await sleep(300);
     check('hash 可直达统计以外的标签页',
@@ -1096,7 +1150,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.6.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.6.0'));
+    check('页脚版本为 v1.7.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.7.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1133,7 +1187,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.6.0', manifest.version === '1.6.0');
+    check('manifest 版本为 1.7.0', manifest.version === '1.7.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1155,7 +1209,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v20'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v21'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

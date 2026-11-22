@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.6.0">
+<meta name="version" content="1.7.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2594,6 +2594,76 @@
     color: var(--muted-2);
   }
   .review-side .rs { color: var(--accent); font-weight: 600; }
+  /* 想读队列：从「想读」里按理由挑出接下来最值得读的几本（参考 Hikara Up Next） */
+  .upnext-list { display: grid; gap: 7px; }
+  .upnext-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel-2);
+  }
+  .upnext-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .upnext-open:hover .upnext-title { color: var(--accent); }
+  .upnext-cover {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 35px;
+    border-radius: 4px;
+    background: var(--panel);
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    color: var(--muted-2);
+  }
+  .upnext-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .upnext-main { flex: 1; min-width: 0; }
+  .upnext-title {
+    display: block;
+    font-size: 12.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .upnext-why {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--panel);
+    font-size: 10.5px;
+    color: var(--muted-2);
+  }
+  .upnext-start {
+    flex: 0 0 auto;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .upnext-start:hover { border-color: var(--accent); color: var(--accent); }
   .week-dots { display: flex; gap: 6px; margin-top: 12px; }
   .week-dots span {
     width: 24px;
@@ -2803,7 +2873,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.6.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.7.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4662,6 +4732,46 @@
   }
   window.__lnRecentReviews = recentReviews;
 
+  // 想读队列：从「想读」里挑出接下来最值得读的几本，并给出推荐理由
+  // 参考 Hikara 的 Up Next queue：没有手动排序时，用「同作者在读 → 高评分 → 短篇 → 加入最早」解释推荐
+  var UPNEXT_LIMIT = 3;
+  function upNextItems(items, mine, limit) {
+    var max = Number(limit) > 0 ? Number(limit) : UPNEXT_LIMIT;
+    var doingAuthor = Object.create(null);
+    var want = [];
+    var splitAuthors = function (au) {
+      return String(au || '').split(/[\/、,，&]/).map(function (n) { return n.trim(); }).filter(Boolean);
+    };
+    (items || []).forEach(function (x) {
+      var e = (mine || {})[String(x.i)];
+      if (!e) return;
+      if (e.s === 'doing') {
+        splitAuthors(x.au).forEach(function (k) { doingAuthor[k] = 1; });
+        return;
+      }
+      if (e.s === 'want') want.push({ x: x, e: e });
+    });
+    want.forEach(function (o) {
+      var score = Number(o.x.s) || 0;
+      var vol = Number(o.x.v) || 0;
+      if (splitAuthors(o.x.au).some(function (k) { return doingAuthor[k]; })) {
+        o.p = 3; o.why = '同作者在读';
+      } else if (score >= 8) {
+        o.p = 2; o.why = '评分 ' + score.toFixed(1);
+      } else if (vol > 0 && vol <= 3) {
+        o.p = 1; o.why = '短篇 · ' + vol + ' 卷';
+      } else {
+        o.p = 0; o.why = '队列最早';
+      }
+    });
+    want.sort(function (a, b) {
+      return b.p - a.p || (Number(b.x.s) || 0) - (Number(a.x.s) || 0) ||
+        (Number(a.e.t) || 0) - (Number(b.e.t) || 0);
+    });
+    return want.slice(0, max).map(function (o) { return { x: o.x, e: o.e, why: o.why }; });
+  }
+  window.__lnUpNext = upNextItems;
+
   // 我的阅读顶部快捷条：点封面进详情，点「＋1 卷」直接记录下一卷
   function renderContinue() {
     var row = $('continueRow');
@@ -4793,6 +4903,30 @@
     var streak = readingStreak(loadDays(), entries, new Date());
     var reviewAll = recentReviews(entries, 9999);
     var reviews = reviewAll.slice(0, 6);
+    var upnext = upNextItems(DATA, myMap, UPNEXT_LIMIT);
+    var upHtml = upnext.length
+      ? '<div class="upnext-list">' + upnext.map(function (o) {
+          var x = o.x;
+          var id = escapeHtml(String(x.i));
+          var title = x.cn || x.n || '未知书目';
+          var initial = String(title).replace(/^[\s「『《【(（"'“]+/, '').charAt(0) || '?';
+          var thumb = x.img ? String(x.img).replace('/r/400/', '/r/200/') : '';
+          return '<div class="upnext-item">' +
+            '<button class="upnext-open" type="button" data-upnext="open" data-id="' + id +
+              '" title="查看《' + escapeHtml(title) + '》详情">' +
+              '<span class="upnext-cover">' +
+                (thumb ? '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="' +
+                  escapeHtml(thumb) + '" alt="" onerror="this.style.display=\'none\'">' : escapeHtml(initial)) +
+              '</span>' +
+              '<span class="upnext-main"><span class="upnext-title">' + escapeHtml(title) + '</span>' +
+                '<span class="upnext-why">' + escapeHtml(o.why) + '</span></span>' +
+            '</button>' +
+            '<button class="upnext-start" type="button" data-upnext="start" data-id="' + id +
+              '" aria-label="开始读《' + escapeHtml(title) + '》">开始读</button>' +
+          '</div>';
+        }).join('') + '</div>' +
+        '<div class="goal-meta">按同作者在读 → 评分 → 卷数排序 · 点「开始读」移到在读</div>'
+      : '<div class="goal-meta">把书标为「想读」后，这里会替你排出接下来读哪本</div>';
     var reviewHtml = reviews.length
       ? '<div class="review-list">' + reviews.map(function (rv) {
           var excerpt = rv.rv || rv.nt;
@@ -4871,12 +5005,21 @@
       '</div>' +
       '<div class="stats-grid">' +
         '<div class="stat-card stat-wide"><h3>我的书评</h3>' + reviewHtml + '</div>' +
+      '</div>' +
+      '<div class="stats-grid">' +
+        '<div class="stat-card stat-wide"><h3>想读队列</h3>' + upHtml + '</div>' +
       '</div>';
   }
 
   $('statsPanel').addEventListener('click', function (e) {
     var rv = e.target.closest('[data-stats-review]');
     if (rv && rv.dataset.statsReview) { openDetail(rv.dataset.statsReview); return; }
+    var up = e.target.closest('[data-upnext]');
+    if (up && up.dataset.id) {
+      if (up.dataset.upnext === 'start') setStatus(up.dataset.id, 'doing');
+      else openDetail(up.dataset.id);
+      return;
+    }
     var act = e.target.closest('[data-stats]');
     if (!act) return;
     if (act.dataset.stats === 'browse') { setTab('all'); return; }

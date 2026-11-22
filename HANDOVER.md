@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.6.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 171/171）
+- 当前状态：**v1.7.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 174/174）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.6.0（已达成，功能：统计页我的评分分布柱状与偏好摘要）
+- 目标版本：v1.7.0（已达成，功能：统计页想读队列与一键开始读）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v20`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v21`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：171/171）
+### Step 5 验收（已完成：174/174）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -529,6 +529,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.6.0；SW 缓存名升到 `yuc-ln-shell-v20`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 171/171（新增评分纯函数统计、统计页分布柱与偏好摘要 2 项）。
 - 来源：<https://thepublishingtimes.com/blog/goodreads-half-quarter-star-ratings>、<https://apps.apple.com/gr/app/storygraph-reading-tracker/id1570489264>。
+
+## 9.21 v1.7.0 功能记录（2026-11-23）
+
+- 参考 Hikara 的 Up Next queue：统计页新增「想读队列」卡片，从「想读」里挑出 3 本，并逐本标注推荐理由——同作者在读 > 评分 ≥ 8 > 短篇（≤ 3 卷）> 加入最早。
+- 新增纯函数 `upNextItems(items, mine, limit)`（挂到 `window.__lnUpNext`）：先收集在读条目的作者，再对想读条目分级；同分时按评分降序、加入时间升序，结果稳定可断言。
+- 每条提供「开始读」按钮，点击复用 `setStatus(id, 'doing')`，条目随即移出队列并计入在读与打卡；点书名可打开详情。
+- 队列为空时显示引导文案；未新增存储键、未改动数据结构与同步协议，只影响统计页渲染。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.7.0；SW 缓存名升到 `yuc-ln-shell-v21`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 174/174（新增队列排序理由、统计页渲染、开始读移出队列 3 项）。
+- 来源：<https://hikara.io/features/tbr-queue>、<https://apps.apple.com/kz/app/goodreads-book-tracker-more/id355833469>。
 
 ## 10. 已知风险与决策
 
