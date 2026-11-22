@@ -531,6 +531,10 @@ async function main() {
     check('详情提供 Bangumi 链接',
       /bgm\.tv\/subject\//.test(await cdp.evaluate(`(() => document.getElementById('detailLink').href)()`)));
     check('详情有相似推荐', (await count('#detailSimilar .sim-card')) > 0);
+    const simWhy = await cdp.evaluate(`(() => Array.from(document.querySelectorAll('#detailSimilar .sim-why')).map((el) => el.textContent))()`);
+    check('相似推荐标注推荐理由',
+      simWhy.length > 0 && simWhy.every((w) => ['同作者', '同书系', '同题材', '评分接近'].includes(w)),
+      simWhy.join('/'));
 
     // 点击作者标签跳到该作者的全库筛选
     const authorJumpName = await cdp.evaluate(`(() => {
@@ -883,6 +887,22 @@ async function main() {
     check('统计页汇总我的书评并显示摘要',
       !!reviewDom && reviewDom.items >= 1 && !!reviewDom.excerpt && /书评记录/.test(reviewDom.text),
       JSON.stringify(reviewDom && { n: reviewDom.items, excerpt: reviewDom.excerpt }));
+    // 相似推荐理由（参考 Goodreads Readers also enjoyed / StoryGraph Browse similar books）
+    const simPure = await cdp.evaluate(`(() => {
+      const item = { i: 1, au: '甲', line: 'L1', tg: ['rom'], s: 8, kind: '' };
+      const pool = [
+        item,
+        { i: 2, au: '甲', line: 'L2', tg: [], s: 5.5, kind: '' },
+        { i: 3, au: '乙', line: 'L1', tg: [], s: 9, kind: '' },
+        { i: 4, au: '丙', line: 'L3', tg: ['rom'], s: 8.4, kind: '' },
+        { i: 5, au: '丁', line: 'L4', tg: ['hor'], s: 8.2, kind: '' },
+        { i: 6, au: '甲', line: 'L1', tg: ['rom'], s: 8.1, kind: 'manga' },
+      ];
+      return window.__lnSimilar ? window.__lnSimilar(item, 4, pool).map((o) => [String(o.x.i), o.why]) : null;
+    })()`);
+    check('相似推荐按同作者/同书系/同题材排序并给出理由',
+      JSON.stringify(simPure) === '[["2","同作者"],["3","同书系"],["4","同题材"],["5","评分接近"]]',
+      JSON.stringify(simPure));
     const statsDesktopShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     if (statsDesktopShot.result?.data) {
       await writeFile(path.join(SHOT_DIR, 'desktop-stats.png'), Buffer.from(statsDesktopShot.result.data, 'base64'));
@@ -1055,7 +1075,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.5.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.1'));
+    check('页脚版本为 v1.5.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.5.2'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1092,7 +1112,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.5.1', manifest.version === '1.5.1');
+    check('manifest 版本为 1.5.2', manifest.version === '1.5.2');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1114,7 +1134,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v17'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v18'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

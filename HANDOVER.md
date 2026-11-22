@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.5.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 163/163）
+- 当前状态：**v1.5.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 165/165）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.5.1（已达成，功能：PWA 桌面快捷方式与安装完成提示）
+- 目标版本：v1.5.2（已达成，功能：相似推荐按同作者 / 同书系 / 同题材排序并标注理由）
 
 ## 1. 目标与边界
 
@@ -16,7 +16,7 @@ v1.0.0 必须包含：
 - 搜索：多关键词交集、`-词` 排除、拼音首字母、标题高亮、搜索历史
 - 我的阅读：想读 / 在读 / 读完 / 弃读；系列条目记录读到第几卷；读完自动记录日期
 - 视图：网格 / 列表 / 看板（按状态四列）；按年份、题材、状态分组
-- 详情：封面、作者、插图、出版社、书系、册数、发售日、题材、评分、Bangumi 链接、同题材推荐
+- 详情：封面、作者、插图、出版社、书系、册数、发售日、题材、评分、Bangumi 链接、相似推荐（同作者 / 同书系 / 同题材 / 评分接近）
 - 数据：JSON / CSV / Markdown 导出；JSON 导入合并（无效条目提示）
 - 云同步：GitHub Gist 双向合并，删除墓碑，失败退避重试
 - PWA：可添加到 iOS 主屏幕，离线可打开
@@ -147,7 +147,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v17` |
+| SW 缓存 | `yuc-ln-shell-v18` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v17`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v18`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：163/163）
+### Step 5 验收（已完成：165/165）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -339,7 +339,7 @@ PWA / 移动端：
 - 新增「隐藏系列子卷」开关，默认开启；关闭后显示全部 4007 条。
 - 类型筛选：`novel` 表示数据中无 `kind` 的普通轻小说。
 - 卷进度仅在 `v > 0` 且条目在「我的阅读」时显示；读满自动转「读完」并写入 `f`。
-- 相似推荐改为同类型 + 题材重叠 + 评分接近。
+- 相似推荐：同类型内按同作者 → 同书系 → 同题材 → 评分接近排序。
 - `npm run check-data` 问题数 0；`npm run verify` 74/74（含离线重开与 JSON 导入）。
 - 截图：`screenshots/desktop.png`、`screenshots/mobile.png`。
 
@@ -499,6 +499,16 @@ PWA / 移动端：
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.1；SW 缓存名升到 `yuc-ln-shell-v17`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 163/163（新增稳定 id、快捷方式数量/名称/hash 路由、安装完成收起引导 5 项）。
 - 来源：<https://web.dev/articles/manifest-shortcuts>、<https://developer.mozilla.org/en-US/docs/Web/Manifest/id>、<https://developer.mozilla.org/en-US/docs/Web/API/Window/appinstalled_event>、<https://web.dev/articles/install-criteria>。
+
+## 9.18 v1.5.2 功能记录（2026-11-23）
+
+- 参考 Goodreads 的「Readers also enjoyed」、StoryGraph 的「Browse similar books」与 Bangumi 条目关联，详情页相似推荐从「同题材 + 评分接近」升级为带理由的排序：同作者 → 同书系 → 同题材 → 评分接近。
+- 作者字段按 `/、,，&` 拆分为多人后逐个比对，合写作品也能命中「同作者」；仍只推荐同类型（轻小说 / 漫画 / 画集 / 指南）条目，避免跨类型噪声。
+- 每张推荐卡新增推荐理由标签（靛蓝强调色），并保留评分与发售日；纯函数 `similarItems(item, limit, pool)` 挂到 `window.__lnSimilar`，可传入自定义候选池做验收。
+- 未新增存储键、未改动同步协议与数据结构；只影响详情页渲染。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.5.2；SW 缓存名升到 `yuc-ln-shell-v18`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 165/165（新增推荐理由标签、纯函数排序与跨类型排除 2 项）。
+- 来源：<https://www.goodreads.com/topic/show/23724468-2026-melissa-challenge-tracker>、<https://apps.apple.com/us/app/storygraph-reading-tracker/id1570489264>、<https://bangumi.github.io/api/>。
 
 ## 10. 已知风险与决策
 

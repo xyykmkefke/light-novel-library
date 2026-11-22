@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」标签条目 4007 条，无账号、无后端。
 
-状态：**v1.5.1 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 163 项）
+状态：**v1.5.2 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 165 项）
+
+v1.5.2：详情页相似推荐升级：按「同作者 → 同书系 → 同题材 → 评分接近」排序，每本推荐标注理由，优先展示同一作者或同一文库的作品。
 
 v1.5.1：PWA 安装体验补全：manifest 声明稳定 `id` 与桌面快捷方式（我的阅读 / 阅读统计 / 高分佳作），长按图标可直接进入对应视图；安装完成后自动收起引导并轻提示。
 
@@ -46,7 +48,7 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - **阅读统计**：收藏与状态总览、年度目标进度与节奏（领先 / 落后）、阅读打卡连续天数、历年与月度读完分布、题材偏好、常读作者
 - **视图**：网格 / 列表 / 看板；按年份、题材、阅读状态分组
 - **排序**：贝叶斯加权评分、热度、发售日、名称、卷数、我的评分
-- **详情**：作者、插图、出版社、书系、册数、发售日、题材、评分、相似推荐、Bangumi 链接；卷进度一键记录，作者、题材、出版社、书系标签可一键筛选
+- **详情**：作者、插图、出版社、书系、册数、发售日、题材、评分、相似推荐（同作者 / 同书系 / 同题材 / 评分接近并标注理由）、Bangumi 链接；卷进度一键记录，作者、题材、出版社、书系标签可一键筛选
 - **数据**：JSON / CSV / Markdown 导出，JSON 导入合并，清空可撤销
 - **云同步**：GitHub Gist 双向合并，删除墓碑，失败退避重试（Token 仅存本机）
 - **PWA**：iOS 添加到主屏幕、安装引导、离线缓存、封面缓存上限与清理、离线占用统计、明暗主题
@@ -70,14 +72,14 @@ npm run clean-series  # 用本地缓存离线重算子卷
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（163 项）
+npm run verify        # 无头浏览器自动化验收（165 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v17`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v18`。
 
 ## 部署
 

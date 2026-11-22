@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.5.1">
+<meta name="version" content="1.5.2">
 <style>
   :root {
     --bg: #0d0f14;
@@ -947,6 +947,7 @@
 
   .sim-card .sim-title { font-size: 12px; font-weight: 600; }
   .sim-card .sim-meta { font-size: 11px; color: var(--muted-2); }
+  .sim-card .sim-why { color: var(--accent); font-weight: 600; }
 
   @media (max-width: 900px) {
     .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2781,7 +2782,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.1</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.5.2</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4997,20 +4998,47 @@
     return n;
   }
 
-  // 相似推荐：题材重叠优先，其次同类型，再按评分接近程度取前 4 本
-  function similarItems(item, limit) {
-    var pid = String(item.i);
-    var base = Number(item.s) || 0;
-    var pool = DATA.filter(function (x) {
-      return String(x.i) !== pid && (x.kind || '') === (item.kind || '');
+  // 作者字段可能是多人合写，拆开后逐个比对，避免「A / B」整串相等才命中
+  function authorNames(value) {
+    return String(value || '').split(/[\/、,，&]/).map(function (s) {
+      return s.trim().toLowerCase();
+    }).filter(function (s) { return s; });
+  }
+
+  // 相似推荐打分：同作者 > 同书系 > 同题材 > 评分接近，并给出推荐理由
+  // 参考 Goodreads「Readers also enjoyed」、StoryGraph「Browse similar books」的推荐理由展示
+  function similarWhy(a, item) {
+    var mine = authorNames(item.au);
+    var sharedAuthor = mine.length > 0 && authorNames(a.au).some(function (n) {
+      return mine.indexOf(n) >= 0;
     });
-    return pool.sort(function (a, b) {
-      var oa = genreOverlap(a, item);
-      var ob = genreOverlap(b, item);
-      if (oa !== ob) return ob - oa;
-      return Math.abs((Number(a.s) || 0) - base) - Math.abs((Number(b.s) || 0) - base);
+    var sameLine = !!(item.line && a.line && String(a.line) === String(item.line));
+    var overlap = genreOverlap(a, item);
+    var score = 0;
+    var why = '';
+    if (sharedAuthor) { score += 100; why = '同作者'; }
+    if (sameLine) { score += 40; if (!why) why = '同书系'; }
+    if (overlap > 0) { score += Math.min(overlap, 3) * 10; if (!why) why = '同题材'; }
+    // 同档位时优先评分接近的，避免把头部大热作品硬塞进推荐
+    score += Math.max(0, 10 - Math.abs((Number(a.s) || 0) - (Number(item.s) || 0)));
+    return { score: score, why: why || '评分接近' };
+  }
+
+  // 相似推荐：只取同类型条目，按推荐理由强弱排序后取前 N 本
+  function similarItems(item, limit, pool) {
+    var pid = String(item.i);
+    var source = pool || DATA;
+    return source.filter(function (x) {
+      return String(x.i) !== pid && (x.kind || '') === (item.kind || '');
+    }).map(function (x) {
+      var r = similarWhy(x, item);
+      return { x: x, score: r.score, why: r.why };
+    }).sort(function (a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(a.x.i) < String(b.x.i) ? -1 : 1;
     }).slice(0, limit);
   }
+  window.__lnSimilar = similarItems;
 
   // 详情进度条：已收藏且卷数已知时显示，一键记录读到第几卷
   function progressHtml(item, entry) {
@@ -5164,11 +5192,13 @@
 
     var sims = similarItems(item, 4);
     $('detailSimilar').innerHTML = sims.length
-      ? '<div class="similar-head">相似推荐 · 同题材</div><div class="similar-list">' +
-        sims.map(function (x) {
+      ? '<div class="similar-head">相似推荐 · 同作者 / 同书系优先</div><div class="similar-list">' +
+        sims.map(function (o) {
+          var x = o.x;
           return '<button class="sim-card" type="button" data-sim="' + x.i + '">' +
             '<span class="sim-title">' + escapeHtml(x.cn || x.n || '未知书目') + '</span>' +
-            '<span class="sim-meta">' + (x.s ? Number(x.s).toFixed(1) : '暂无') +
+            '<span class="sim-meta"><b class="sim-why">' + escapeHtml(o.why) + '</b> · ' +
+            (x.s ? Number(x.s).toFixed(1) : '暂无') +
             (x.d ? ' · ' + escapeHtml(x.d) : '') + '</span></button>';
         }).join('') + '</div>'
       : '';
