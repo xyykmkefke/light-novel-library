@@ -623,6 +623,10 @@ async function main() {
       /已评分/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
     check('统计页显示常读作者',
       /常读作者/.test(await cdp.evaluate(`(() => document.getElementById('statsPanel').textContent)()`)));
+    const statsDesktopShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    if (statsDesktopShot.result?.data) {
+      await writeFile(path.join(SHOT_DIR, 'desktop-stats.png'), Buffer.from(statsDesktopShot.result.data, 'base64'));
+    }
     await cdp.evaluate(`(() => { location.hash = 'tab=mine'; })()`);
     await sleep(300);
     check('hash 可直达统计以外的标签页',
@@ -653,6 +657,38 @@ async function main() {
     await click('#themeBtn');
     const themeAfter = await cdp.evaluate(`(() => document.documentElement.getAttribute('data-theme'))()`);
     check('明暗主题可切换', themeBefore !== themeAfter, `${themeBefore} → ${themeAfter}`);
+
+    // 浅色主题对比度审计：正文与次要文字相对卡片背景 ≥ 4.5:1
+    const lightTheme = await cdp.evaluate(`(() => {
+      const el = document.querySelector('.card .title') || document.querySelector('.card');
+      const muted = document.querySelector('.card .meta') || el;
+      const panel = document.querySelector('.card-link') || el;
+      const parse = (c) => { const m = c.match(/[\\d.]+/g).map(Number); return { r: m[0], g: m[1], b: m[2], a: m.length > 3 ? m[3] : 1 }; };
+      const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+      const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+      const bgOf = (node) => {
+        let n = node;
+        while (n && n !== document.documentElement) {
+          const c = parse(getComputedStyle(n).backgroundColor);
+          if (c.a > 0.5) return c;
+          n = n.parentElement;
+        }
+        return parse(getComputedStyle(document.body).backgroundColor);
+      };
+      const bg = bgOf(panel);
+      return {
+        theme: document.documentElement.getAttribute('data-theme'),
+        text: ratio(parse(getComputedStyle(el).color), bg),
+        muted: ratio(parse(getComputedStyle(muted).color), bg),
+      };
+    })()`);
+    check('浅色主题正文对比度达标', lightTheme.text >= 4.5, `${lightTheme.theme} ${lightTheme.text.toFixed(2)}:1`);
+    check('浅色主题次要文字对比度达标', lightTheme.muted >= 4.5, `${lightTheme.theme} ${lightTheme.muted.toFixed(2)}:1`);
+    const lightShot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    if (lightShot.result?.data) {
+      await writeFile(path.join(SHOT_DIR, 'light.png'), Buffer.from(lightShot.result.data, 'base64'));
+    }
     await click('#themeBtn');
 
     // ---- 空结果恢复 ----
