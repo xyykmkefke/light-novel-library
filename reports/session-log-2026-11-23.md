@@ -106,3 +106,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 最小 CI：新增 `.github/workflows/data-check.yml`，push `main` 与 PR 自动跑 `check-data` + `test-merge`（Node 22 / `npm ci`）；`verify` 依赖本机浏览器，继续本地执行。
 - 文档同步：第 5 节 SW 缓存名 `v18` → `v33`；第 11 节接手提示词改为当前 v1.15.1 维护口径并加入 CI 说明；中文名方案文档的线上版本改为 v1.15.1，并标注为历史记录。
 - 验证：`check-data` 问题总数 0（默认可见 1925）、`test-merge` 20/20、`npm ci --dry-run` 通过。
+
+## 8. v1.15.2 扩展书目中文名映射（2026-11-23 22:41–23:55）
+
+- 脚本：新建 `scripts/link-ranobedb-cn.mjs`（`--shard/--shards/--merge/--limit/--min-volumes/--delay/--out`），按标题哈希缓存到 `data/build/ranobedb-cn-pilot/search/`，分片每 25 条写回，支持中断续跑与 `blocklist.json` 人工剔除。
+- 试点：`v>=5` 前 500 条 → 命中 51 条（10.2%），抽查 30 条误配 1 条，结论见 `reports/ranobedb-cn-pilot-2026-11-23.md`。
+- 全量：8487 条 4 分片并行（1.2s 间隔）约 44 分钟，命中 246 条（2.9%）；命中率随系列变短明显下降，与方案判断一致。
+- 复核：自动标记 56 条可疑项，再拆 3 份交子代理独立判定，交叉比对后确认 6 条错配并写入 `blocklist.json`：漫画译名错位（美石家）、不同作品（F91 → 初代高达小说版）、产品类型不同（哥布林杀手 TRPG → 漫画）、系列标记降级（寒蝉「解」、大圣女「ZERO」、蔷薇少女「0 Zero」）。定稿 **240 条**。
+- 应用：`build-ranobedb.mjs` 读取 `data/ranobedb-cn.json` 写入 `cn` / `bgm`，`py` 改用中文名首字母，`LN_RN_META` 增 `cnMapped: 240`；`data/light-novels-rn.js` 2,376,812 → 2,385,844 字节（+8.8 KB）。
+- 校验：`check-data` 新增 cn/bgm/cnMapped 断言，问题总数 0；`test-merge` 20/20；`verify` 新增「扩展条目可用中文名搜索」，共 **204/204**。
+- 版本：1.15.1 → **1.15.2**，SW `yuc-ln-shell-v33` → **v34**；README / HANDOVER（新增第 9.34 节）/ manifest / 页脚 / 验收断言同步。
+- 生效口径：扩展书目默认隐藏，中文名只在开启「显示扩展书目」后参与显示与搜索，默认 1925 条不变。
