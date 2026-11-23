@@ -32,6 +32,12 @@ const rnMetaMatch = rnRaw.match(/window\.LN_RN_META\s*=\s*(\{[\s\S]*?\});/);
 const rnDataMatch = rnRaw.match(/window\.LN_RN\s*=\s*(\[[\s\S]*\]);?/);
 const rnMeta = rnMetaMatch ? JSON.parse(rnMetaMatch[1]) : {};
 const rn = rnDataMatch ? JSON.parse(rnDataMatch[1]) : [];
+const liteRaw = await readFile(path.join(ROOT, 'data', 'light-novels-lite.js'), 'utf8').catch(() => '');
+const liteDataMatch = liteRaw.match(/window\.LN_DATA\s*=\s*(\[[\s\S]*\]);?/);
+const liteData = liteDataMatch ? JSON.parse(liteDataMatch[1]) : [];
+const restRaw = await readFile(path.join(ROOT, 'data', 'light-novels-rest.js'), 'utf8').catch(() => '');
+const restDataMatch = restRaw.match(/window\.LN_REST\s*=\s*(\[[\s\S]*\]);?/);
+const restData = restDataMatch ? JSON.parse(restDataMatch[1]) : [];
 const coreIds = new Set(data.map((x) => String(x.i)));
 
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
@@ -62,6 +68,7 @@ const label = {
   split: '册/故事卷统计异常',
   extra: '详情拆包异常',
   rn: '扩展书目异常',
+  splitcore: '核心拆包异常',
   img: '封面字段异常',
   source: '来源标记异常',
   volume: '卷包异常',
@@ -70,7 +77,7 @@ const label = {
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
   genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], volume: [], meta: [],
-  version: [], split: [], rn: [],
+  version: [], split: [], rn: [], splitcore: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
@@ -193,6 +200,27 @@ if (!rnMetaMatch || !rnDataMatch) {
   if (rnMeta.source !== 'RanobeDB' || rnMeta.license !== 'ODbL') issues.rn.push('来源或授权标记缺失');
 }
 
+if (!liteDataMatch || !restDataMatch) {
+  issues.splitcore.push('未找到轻量核心或剩余核心');
+} else {
+  const union = [...liteData, ...restData];
+  const ids = new Set();
+  union.forEach((x) => {
+    const id = String(x && x.i);
+    if (ids.has(id)) issues.splitcore.push(`${id}:轻量/剩余核心重复`);
+    ids.add(id);
+  });
+  if (union.length !== data.length) issues.splitcore.push(`合计 ${union.length}，完整核心 ${data.length}`);
+  const missing = data.filter((x) => !ids.has(String(x.i)));
+  if (missing.length) issues.splitcore.push(`缺少 ${missing.length} 条，示例 ${missing.slice(0, 3).map((x) => x.i).join('/')}`);
+  liteData.forEach((x) => {
+    if (x.c || x.gn || x.ver) issues.splitcore.push(`${x.i}:轻量核心不应包含隐藏条目`);
+  });
+  restData.forEach((x) => {
+    if (!x.c && !x.gn && !x.ver) issues.splitcore.push(`${x.i}:剩余核心不应包含默认可见条目`);
+  });
+}
+
 Object.keys(extra).forEach((id) => {
   if (!byIdAll.has(id)) issues.extra.push(`${id}:extra 指向不存在的条目`);
   const fields = extra[id];
@@ -278,6 +306,7 @@ console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 $
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
 console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
 console.log(`懒加载卷包：${volumes.length} 条；全部条目 ${data.length + volumes.length} 条`);
+console.log(`核心拆包：轻量 ${liteData.length} 条 / 剩余 ${restData.length} 条`);
 console.log(`扩展书目：${rn.length} 个系列 / ${(Number(rnMeta.volumes) || 0)} 卷（RanobeDB，默认隐藏）`);
 console.log(`拆包：详情 ${Object.keys(extra).length} 条 / 封面路径 ${data.filter((x) => x.img && !/^https?:/.test(x.img)).length} 条`);
 

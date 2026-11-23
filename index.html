@@ -6,7 +6,7 @@
 <title>轻小说库 · 我的阅读</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://gist.githubusercontent.com; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preload" as="script" href="data/light-novels.js" fetchpriority="high">
+<link rel="preload" as="script" href="data/light-novels-lite.js" fetchpriority="high">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS 添加到主屏幕：图标必须是 PNG，capable 决定是否全屏运行 -->
@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.0">
+<meta name="version" content="1.15.1">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2880,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.1</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3007,7 +3007,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="data/light-novels.js"></script>
+<script src="data/light-novels-lite.js"></script>
 <script>
   // 封面在数据里只存相对路径，运行时补全图片域名，减小首包体积
   (window.LN_DATA || []).forEach(function (x) {
@@ -3019,8 +3019,8 @@
   'use strict';
 
   var META = window.LN_META || {};
-  // 全库约 4000 条，一次加载；保留 fullReady 标志兼容既有逻辑
-  var fullReady = true;
+  // 首屏只加载默认可见条目；子卷、一般小说与重复版本由 loadRest 后台补齐
+  var fullReady = false;
   var DATA = [];
   var byId = new Map();
 
@@ -3031,6 +3031,7 @@
 
   adoptData();
   window.__FULL_DATA_READY = fullReady;
+  window.__LN_LITE_READY = true;
 
   // 详情字段（作者/插图/出版社/书系）单独成包：默认不下载，打开详情、统计、导出或按这些字段搜索时再加载
   var extraLoaded = false;
@@ -3162,6 +3163,57 @@
       openDetail(id);
     }
   });
+
+  // 剩余核心：子卷、一般小说与重复版本，首屏之后空闲时加载，不阻塞首屏
+  var restLoaded = false;
+  var restLoading = null;
+  function loadRest() {
+    if (restLoaded) return Promise.resolve();
+    if (restLoading) return restLoading;
+    restLoading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'data/light-novels-rest.js';
+      script.onload = function () {
+        var list = window.LN_REST || [];
+        var added = 0;
+        list.forEach(function (v) {
+          var id = String(v && v.i);
+          if (!id || byId.has(id)) return;
+          DATA.push(v);
+          byId.set(id, v);
+          added += 1;
+        });
+        restLoaded = true;
+        fullReady = true;
+        window.LN_DATA = DATA;
+        window.__LN_REST_READY = true;
+        window.__LN_REST_COUNT = added;
+        window.__FULL_DATA_READY = true;
+        document.dispatchEvent(new CustomEvent('ln-rest-ready'));
+        resolve();
+      };
+      script.onerror = function () {
+        restLoading = null;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return restLoading;
+  }
+  window.__lnLoadRest = loadRest;
+  document.addEventListener('ln-rest-ready', function () {
+    fillFilterOptions();
+    renderYears();
+    updateDataHint();
+    if (modalId) renderDetail(modalId);
+    if (state.tab === 'stats') renderStatsPage();
+    else render();
+    if (pendingDetail && byId.has(pendingDetail)) {
+      var id = pendingDetail;
+      pendingDetail = null;
+      openDetail(id);
+    }
+  });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
   var PREFS_KEY = 'yuc_ln_prefs_v1';
   var HIST_KEY = 'yuc_ln_hist_v1';
@@ -3274,6 +3326,15 @@
   function ensureRnForMine() {
     if (!mineHasRn() || rnLoaded) return Promise.resolve();
     return loadRn();
+  }
+  function mineHasRest() {
+    return Object.keys(myMap).some(function (id) {
+      return !byId.has(id) && Number(id) < 800000000;
+    });
+  }
+  function ensureRestForMine() {
+    if (!mineHasRest() || restLoaded) return Promise.resolve();
+    return loadRest();
   }
   // 探测本地存储是否可用，不可用时给出常驻提示
   var canStore = (function () {
@@ -5169,6 +5230,7 @@
   window.__lnYearSummary = yearSummary;
 
   function renderStatsPage() {
+    if (!restLoaded) loadRest();
     var panel = $('statsPanel');
     var year = new Date().getFullYear();
     var entries = [];
@@ -5834,7 +5896,11 @@
   }
 
   function openDetail(id) {
-    if (!byId.has(id)) return;
+    if (!byId.has(id)) {
+      // 深链可能指向尚未加载的剩余核心；先补齐再打开
+      if (!restLoaded && Number(id) < 800000000) loadRest().then(function () { openDetail(id); });
+      return;
+    }
     // 切换到另一本书时回到顶部，避免沿用上一本的滚动位置
     var switched = modalId !== id;
     if (modalEl.hidden) lastModalFocus = document.activeElement;
@@ -6014,21 +6080,27 @@
   $('hideChildrenBtn').addEventListener('click', function () {
     state.hideChildren = !state.hideChildren;
     syncControls();
-    if (!state.hideChildren) loadVolumes().then(render);
-    else render();
+    if (!state.hideChildren) {
+      loadRest();
+      loadVolumes().then(render);
+    } else {
+      render();
+    }
   });
 
   // 含一般小说：把仅「小说」标签的条目也纳入全库浏览与搜索
   $('includeNovelBtn').addEventListener('click', function () {
     state.includeNovel = !state.includeNovel;
     syncControls();
-    render();
+    if (state.includeNovel) loadRest().then(render);
+    else render();
   });
   $('showVersionsBtn').addEventListener('click', function () {
     state.showVersions = !state.showVersions;
     syncControls();
     updateDataHint();
-    render();
+    if (state.showVersions) loadRest().then(render);
+    else render();
   });
   // 扩展书目：首次打开时才下载 RanobeDB 包，关闭后仅从列表隐藏，不卸载数据
   $('showRnBtn').addEventListener('click', function () {
@@ -6379,6 +6451,7 @@
     if (tab === 'all' && state.view === 'board') state.view = 'grid';
     state.bulk = false;
     bulkSel = Object.create(null);
+    if (!restLoaded) loadRest();
     render();
   }
 
@@ -6583,6 +6656,7 @@
       if (/(作者|出版社|书系)[:：]/.test(state.q)) loadExtra();
       // 全库搜索清空后，状态过滤随之失效，避免下次搜索被静默限制
       if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
+      if (!restLoaded) loadRest();
       render();
       renderHist();
     }, 140);
@@ -7574,9 +7648,13 @@
     toast('已导出 Markdown：' + ids.length + ' 本');
   });
 
-  $('importBtn').addEventListener('click', function () { $('fileInput').click(); });
+  $('importBtn').addEventListener('click', function () {
+    loadRest();
+    $('fileInput').click();
+  });
 
   $('fileInput').addEventListener('change', function (e) {
+    loadRest();
     var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
@@ -7993,6 +8071,7 @@
       if (changed) {
         saveMine({ fromSync: true });
         render();
+        ensureRestForMine().then(render);
         ensureRnForMine().then(render);
       }
       return gistPush(cfg, buildPayload());
@@ -8110,6 +8189,11 @@
       el.textContent = '数据未就绪';
       return;
     }
+    if (!restLoaded) {
+      el.textContent = '正在加载全库… 已载入 ' + DATA.length + ' 本';
+      el.title = '首屏先加载默认可见书目，剩余书目后台补齐';
+      return;
+    }
     var general = DATA.filter(function (x) { return x.gn; }).length;
     var versions = DATA.filter(function (x) { return x.ver; }).length;
     var rn = DATA.filter(function (x) { return x.rn; }).length;
@@ -8201,6 +8285,14 @@
   if (!state.hideChildren) loadVolumes().then(render);
   if (state.showRn || (initialDetail && Number(initialDetail) >= 800000000)) loadRn().then(render);
   else ensureRnForMine().then(render);
+  if (state.showVersions || state.includeNovel || !state.hideChildren ||
+    (initialDetail && Number(initialDetail) < 800000000)) {
+    loadRest().then(render);
+  } else {
+    ensureRestForMine().then(render);
+    // 首屏渲染后再补剩余书目，避免和首屏核心抢带宽
+    setTimeout(loadRest, 3000);
+  }
   if (state.line) ensureLineOptions().then(render);
   if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();

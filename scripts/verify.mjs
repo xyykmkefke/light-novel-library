@@ -219,7 +219,35 @@ async function main() {
 
     // ---- 基础与数据 ----
     check('页面渲染出书目卡片', cards > 0, `${cards} 张`);
-    check('全库数据已就绪', (await cdp.evaluate('window.__FULL_DATA_READY === true')) === true);
+    const liteCore = await cdp.evaluate(`(() => ({
+      ready: window.__LN_LITE_READY === true,
+      data: (window.LN_DATA || []).length,
+      full: window.__FULL_DATA_READY === true,
+      restReady: window.__LN_REST_READY === true,
+      restScript: !!document.querySelector('script[src*="light-novels-rest"]'),
+      metaCount: Number((window.LN_META || {}).count) || 0,
+    }))()`);
+    check('首屏加载轻量核心',
+      liteCore.ready === true && liteCore.data > 1500 && liteCore.data < 2500,
+      `${liteCore.data} 条`);
+    check('首屏未加载剩余核心',
+      liteCore.full === false && liteCore.restReady === false && liteCore.restScript === false,
+      JSON.stringify(liteCore));
+    const restCore = await cdp.evaluate(`(async () => {
+      await window.__lnLoadRest();
+      return {
+        ready: window.__LN_REST_READY === true,
+        count: window.__LN_REST_COUNT,
+        total: (window.LN_DATA || []).length,
+        full: window.__FULL_DATA_READY === true,
+        metaCount: Number((window.LN_META || {}).count) || 0,
+      };
+    })()`);
+    check('剩余核心按需加载',
+      restCore.ready === true && restCore.total === restCore.metaCount &&
+      restCore.count === restCore.metaCount - liteCore.data && restCore.full === true,
+      JSON.stringify(restCore));
+    check('全库数据已就绪', restCore.full === true);
     const perf = await cdp.evaluate(`(() => {
       const n = performance.getEntriesByType('navigation')[0] || {};
       return {
@@ -273,10 +301,14 @@ async function main() {
       volumeReady.total === lazyVolumes.total + volumeReady.metaVolumes && volumeReady.bad === 0,
       JSON.stringify(volumeReady));
     await reload();
+    await cdp.evaluate('window.__lnLoadRest()');
+    await cdp.evaluate('window.__lnLoadVolumes()');
     await cdp.evaluate('window.__lnLoadExtra()');
 
     const stats = await cdp.evaluate(`(() => {
-      const d = window.LN_DATA || [];
+      // 统计只看核心包，排除按需加载的卷包
+      const volumeIds = new Set((window.LN_VOLUMES || []).map((v) => String(v.i)));
+      const d = (window.LN_DATA || []).filter((x) => !volumeIds.has(String(x.i)));
       return {
         total: d.length,
         volumes: Number((window.LN_META || {}).volumes) || 0,
@@ -1328,7 +1360,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.15.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.0'));
+    check('页脚版本为 v1.15.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.1'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1365,7 +1397,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.15.0', manifest.version === '1.15.0');
+    check('manifest 版本为 1.15.1', manifest.version === '1.15.1');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1387,10 +1419,12 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v32'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v33'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 不预缓存扩展包', !swTxt.includes('light-novels-rn'));
-    check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
+    check('Service Worker 不预缓存剩余核心', !swTxt.includes('light-novels-rest'));
+    check('Service Worker 缓存轻量核心与详情包',
+      swTxt.includes('data/light-novels-lite.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
     const indexTxt = await (await fetch(`http://127.0.0.1:${PORT}/index.html`)).text();
@@ -1672,12 +1706,18 @@ async function main() {
       offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
     });
     await cdp.send('Page.reload', { ignoreCache: false });
-    await sleep(2200);
+    await sleep(1200);
+    await cdp.evaluate('window.__lnLoadRest()').catch(() => {});
+    await sleep(1200);
     const offlineState = await cdp.evaluate(`(() => ({
       cards: document.querySelectorAll('.card').length,
       data: (window.LN_DATA || []).length,
+      rest: window.__LN_REST_READY === true,
+      metaCount: Number((window.LN_META || {}).count) || 0,
     }))()`).catch(() => null);
-    check('离线重开仍可浏览全库', !!offlineState && offlineState.cards > 0 && offlineState.data > 3900,
+    check('离线重开仍可浏览全库',
+      !!offlineState && offlineState.cards > 0 && offlineState.rest === true &&
+      offlineState.data === offlineState.metaCount,
       JSON.stringify(offlineState));
     await cdp.send('Network.emulateNetworkConditions', {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,

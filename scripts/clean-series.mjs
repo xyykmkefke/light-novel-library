@@ -416,6 +416,18 @@ export async function buildData(records, relations = new Map(), {
   await mkdir(path.dirname(outFile), { recursive: true });
   await writeFile(outFile, content, 'utf8');
 
+  // 首屏轻量核心：只放默认可见条目；子卷、一般小说与重复版本后台加载
+  const lite = final.filter((x) => !x.c && !x.gn && !x.ver);
+  const rest = final.filter((x) => x.c || x.gn || x.ver);
+  const liteFile = outFile.replace(/\.js$/, '-lite.js');
+  const restFile = outFile.replace(/\.js$/, '-rest.js');
+  const header = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
+  await writeFile(liteFile, header +
+    `window.LN_META = ${JSON.stringify(meta)};\n` +
+    `window.LN_DATA = ${JSON.stringify(lite)};\n`, 'utf8');
+  await writeFile(restFile, header +
+    `window.LN_REST = ${JSON.stringify(rest)};\n`, 'utf8');
+
   const extraFile = outFile.replace(/\.js$/, '-extra.js');
   const extraContent = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n' +
     `window.LN_EXTRA = ${JSON.stringify(extra)};\n`;
@@ -438,6 +450,10 @@ export async function buildData(records, relations = new Map(), {
     fallbackAdded,
     inherited,
     outFile,
+    liteFile,
+    restFile,
+    liteCount: lite.length,
+    restCount: rest.length,
     extraFile,
     extraCount: Object.keys(extra).length,
     volumeFile,

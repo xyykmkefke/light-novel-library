@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7639 卷懒加载卷包，合计 12490 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3364 个 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.15.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 199 项）
+状态：**v1.15.1 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 203 项）
+
+v1.15.1：首屏拆包——核心拆成「默认可见轻量包」与「剩余书目后台包」，首屏 gzip 从约 369 KB 降到约 194 KB；卷包、详情与扩展书目仍按需加载。
 
 v1.15.0：RanobeDB 扩展书目——新增第二书目源（≥2 卷、日文原名、与现有库去重），默认隐藏，通过「显示扩展书目」开关按需加载；补 10 个系列 / 22 卷缺失卷目；继续用 RanobeDB 回填 ISBN。
 
@@ -91,7 +93,7 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - 统计：系列内 9799 册，按上/中/下折合 9707 故事卷
 - 扩展书目：8487 个系列 / 31254 卷，默认隐藏，开关打开后按需加载
 - 字段：ISBN 3364 条、系列首卷 ISBN 421 条、书系 3595 条、出版社 4793 条、日文版发售日 2950 条
-- 文件：`data/light-novels.js`（首屏核心包，约 1.24 MB）+ `data/light-novels-extra.js`（详情字段，约 589 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.38 MB，按需加载）
+- 文件：`data/light-novels-lite.js`（首屏默认可见，约 541 KB，gzip 约 194 KB）+ `data/light-novels-rest.js`（子卷 / 一般小说 / 重复版本，约 673 KB，后台加载）+ `data/light-novels.js`（完整核心，供构建脚本使用）+ `data/light-novels-extra.js`（详情字段，约 589 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.38 MB，按需加载）
 - 封面在数据里只存相对路径，运行时补全图片域名；图片本身按 200w / 400w 自适应
 - 清洗：优先用 Bangumi 关联接口的「单行本」关系标记子卷，关系缺失时退回标题规则
 - 增强：子卷缺失的书系/插图/作者/出版社/题材从父系列继承；漫画、画集、指南写入 `kind`
@@ -111,14 +113,14 @@ npm run validate-ranobedb # 生成 RanobeDB 卷目对照报告
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（199 项）
+npm run verify        # 无头浏览器自动化验收（203 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v32`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v33`。
 
 ## 部署
 
