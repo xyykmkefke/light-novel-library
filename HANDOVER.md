@@ -1,12 +1,12 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.15.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 204/204）
+- 当前状态：**v1.15.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 205/205）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.15.2（已达成，功能：扩展书目中文名映射，240 条命中并上线）
+- 目标版本：v1.15.3（已达成，功能：扩展书目作者 / 出版社 / 文库 + 导入竞态修复 + ISBN 补齐）
 
 ## 1. 目标与边界
 
@@ -165,7 +165,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v34` |
+| SW 缓存 | `yuc-ln-shell-v35` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -289,7 +289,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v34`，SHELL 包含 `./data/light-novels-lite.js` 与 `./data/light-novels-extra.js`；剩余核心、卷包与扩展书目不预缓存，首屏后 / 首次展开 / 打开开关时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v35`，SHELL 包含 `./data/light-novels-lite.js` 与 `./data/light-novels-extra.js`；剩余核心、卷包与扩展书目不预缓存，首屏后 / 首次展开 / 打开开关时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
@@ -669,6 +669,18 @@ PWA / 移动端：
 - 生效口径：扩展书目默认隐藏，中文名只在用户开启「显示扩展书目」后参与显示与搜索；默认 1925 条不受影响。
 - 版本 1.15.2，SW `yuc-ln-shell-v34`。
 
+## 9.35 v1.15.3 扩展书目详情与导入修复（2026-11-24）
+
+- 详情抓取：新增 `scripts/fetch-ranobedb-detail.mjs`（`--shard/--shards/--limit/--delay`），抓 RanobeDB `/series/{id}` 的作者（`staff.role_type=author`）、出版社（`publishers.type=publisher`，优先日文版）、文库（`type=imprint`），只保留必要字段缓存在 `data/build/ranobedb-series-detail/{rid}.json`，可中断续跑。全量 8487 个系列，6 分片约 34 分钟。
+- 数据：`build-ranobedb.mjs` 读取详情缓存，为条目写入 `au` / `pub` / `line`；覆盖 8468 作者 / 8484 出版社 / 8232 文库。`LN_RN` 原始体积 +613 KB、gzip +138 KB（581 → 719 KB），仅用户开启扩展书目时下载。
+- 导入修复：`importBtn` / `fileInput` 的合并逻辑改为先 `loadRest()` 再合并。修复前，剩余核心（子卷 / 一般小说 / 重复版本）尚未补载时会被当成「无效记录」直接跳过并永久丢失；慢网（40 KB/s + 600ms 延迟）实测修复后正确写入「新增 1 本」。
+- 深链修复：`hashchange` 命中剩余核心条目时补 `loadRest()`，不再依赖 3 秒定时器。
+- ISBN：`find-isbn` 续跑 653 条，系列首卷 ISBN 从 421 补到 850 条，单册 3364 → 3367，任一 ISBN 覆盖 3785 → 4217（87%）。
+- 中文名：新增 `--fallback` 变体查询（去副标题 / 去尾括号 / 去「シリーズ」），全量补查 375 次，命中 0 条——变体召回的多是别部作品，匹配器已正确拒绝；保留开关备用。
+- 脚本健壮性：分片状态文件增加 `shards` 校验，合并按 `rid` 去重，避免换分片数后重复计数。
+- 校验：`check-data` 增加 au / pub / line 类型断言，问题总数 0；`test-merge` 20/20；`verify` 增加「扩展条目详情显示作者」，共 205 项。
+- 版本 1.15.3，SW `yuc-ln-shell-v35`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -682,4 +694,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.2 已完成，后续按第 10 节风险与决策、第 9.34 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（204 项），push/PR 由 CI 自动跑前两项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.3 已完成，后续按第 10 节风险与决策、第 9.35 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（205 项），push/PR 由 CI 自动跑前两项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

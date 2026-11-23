@@ -117,3 +117,15 @@ git -c http.version=HTTP/1.1 push origin main
 - 校验：`check-data` 新增 cn/bgm/cnMapped 断言，问题总数 0；`test-merge` 20/20；`verify` 新增「扩展条目可用中文名搜索」，共 **204/204**。
 - 版本：1.15.1 → **1.15.2**，SW `yuc-ln-shell-v33` → **v34**；README / HANDOVER（新增第 9.34 节）/ manifest / 页脚 / 验收断言同步。
 - 生效口径：扩展书目默认隐藏，中文名只在开启「显示扩展书目」后参与显示与搜索，默认 1925 条不变。
+
+## 9. v1.15.3 扩展书目详情与导入修复（2026-11-24 00:03–01:05）
+
+- 新增 `scripts/fetch-ranobedb-detail.mjs`：抓 RanobeDB 系列详情的作者 / 出版社 / 文库，只存必要字段，全量 8487 个系列 6 分片约 34 分钟（缓存 `data/build/ranobedb-series-detail/`）。
+- `build-ranobedb.mjs` 写入 `au` / `pub` / `line`：覆盖 8468 / 8484 / 8232 条；`LN_RN` gzip 581 → 719 KB（+138 KB，仅在开启扩展书目时下载）。
+- 导入竞态修复：合并逻辑改为 `loadRest().then(合并)`。修复前慢网下未补载的剩余核心条目会被判为无效记录永久丢弃；40 KB/s + 600ms 延迟实测，修复后导入成功写入「新增 1 本」。
+- 深链修复：`hashchange` 命中剩余核心条目时补触发 `loadRest()`。
+- ISBN 续跑：查询 653 条，系列首卷 421 → 850，单册 3364 → 3367，任一覆盖 3785 → 4217（87%）。
+- 中文名 fallback：新增变体查询（去副标题 / 尾括号 / シリーズ），补查 375 次命中 0 条，变体多命中别部作品，匹配器正确拒绝；保留开关。
+- 脚本健壮性：分片状态加 `shards` 校验、合并按 `rid` 去重（此前换分片数会导致重复计数）。
+- 校验：`check-data` 0 问题（新增 au/pub/line 断言）、`test-merge` 20/20、`verify` 205/205（新增「扩展条目详情显示作者」）。
+- 版本 1.15.2 → 1.15.3，SW `yuc-ln-shell-v34` → `v35`。
