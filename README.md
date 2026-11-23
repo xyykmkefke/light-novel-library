@@ -1,8 +1,10 @@
 # 轻小说库 · 阅读记录
 
-本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7617 卷懒加载卷包，合计 12468 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。通过 openBD 补入 3353 个 ISBN、2950 条日文版发售日。无账号、无后端。
+本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7617 卷懒加载卷包，合计 12468 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。通过 openBD 补入 3364 个 ISBN、2950 条日文版发售日，并用 RanobeDB 补 226 个系列首卷 ISBN。无账号、无后端。
 
-状态：**v1.12.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 191 项）
+状态：**v1.13.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 193 项）
+
+v1.13.0：书系筛选与 RanobeDB——新增按日文书系筛选；用 RanobeDB 公共 API 为缺少 ISBN 的条目补单册 ISBN 与系列首卷 ISBN；输出卷目对照报告。
 
 v1.12.0：日文书志——提取 ISBN 并用 openBD 批量补全日文书系、出版社、发售日；详情新增 ISBN 与日文版首发；ISBN 校验失败或缺失的数据自动丢弃。
 
@@ -79,7 +81,7 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - 来源：Bangumi（bgm.tv），`type=1` 书籍，`tag=轻小说` 与 `tag=小说`，通过镜像 `bgmapi.anibt.net` 抓取
 - 规模：核心 4851 条（轻小说 4062 / 一般小说 789）；系列 1306 / 单册 3545 / 子卷 2158；默认可见 1904 条
 - 卷包：7617 条（单行本 + 番外篇），按需加载；展开后共 11773 条轻小说
-- 字段：ISBN 3353 条、书系 3595 条、出版社 4793 条、日文版发售日 2950 条
+- 字段：ISBN 3364 条、系列首卷 ISBN 226 条、书系 3595 条、出版社 4793 条、日文版发售日 2950 条
 - 文件：`data/light-novels.js`（首屏核心包，约 1.24 MB）+ `data/light-novels-extra.js`（详情字段，约 589 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）
 - 封面在数据里只存相对路径，运行时补全图片域名；图片本身按 200w / 400w 自适应
 - 清洗：优先用 Bangumi 关联接口的「单行本」关系标记子卷，关系缺失时退回标题规则
@@ -93,10 +95,12 @@ npm install
 npm run fetch-data    # 抓取全量分页与系列关系，可中断续跑
 npm run clean-series  # 用本地缓存离线重算子卷
 npm run enrich-openbd # 用 openBD 补日文书系、发售日、ISBN
+npm run find-isbn     # 用 RanobeDB 补单册 / 系列首卷 ISBN
+npm run validate-ranobedb # 生成 RanobeDB 卷目对照报告
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（191 项）
+npm run verify        # 无头浏览器自动化验收（193 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。

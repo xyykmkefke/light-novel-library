@@ -20,7 +20,7 @@ const data = JSON.parse(dataMatch[1]);
 const extraRaw = await readFile(path.join(ROOT, 'data', 'light-novels-extra.js'), 'utf8').catch(() => '');
 const extraMatch = extraRaw.match(/window\.LN_EXTRA\s*=\s*(\{[\s\S]*\});?/);
 const extra = extraMatch ? JSON.parse(extraMatch[1]) : {};
-const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'jd'];
+const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'fisbn', 'jd'];
 const merged = data.map((x) => ({ ...x, ...(extra[String(x.i)] || {}) }));
 
 // 懒加载卷包：核心包只保留系列与独立作品，新卷单独校验
@@ -144,7 +144,9 @@ Object.keys(extra).forEach((id) => {
   Object.keys(fields).forEach((key) => {
     if (!EXTRA_KEYS.includes(key)) issues.extra.push(`${id}:未知字段 ${key}`);
     if (typeof fields[key] !== 'string' || !fields[key].trim()) issues.extra.push(`${id}:${key} 为空`);
-    if (key === 'isbn' && !validIsbn13(fields[key])) issues.extra.push(`${id}:ISBN 校验失败 ${fields[key]}`);
+    if ((key === 'isbn' || key === 'fisbn') && !validIsbn13(fields[key])) {
+      issues.extra.push(`${id}:${key} 校验失败 ${fields[key]}`);
+    }
     if (key === 'jd' && !/^\d{4}(-\d{2}){0,2}$/.test(fields[key])) issues.extra.push(`${id}:日文版日期异常 ${fields[key]}`);
   });
 });

@@ -269,7 +269,7 @@ export async function buildData(records, relations = new Map(), {
   childrenByParent.forEach((list) => list.sort((a, b) => Number(a) - Number(b)));
 
   // 拆包：详情字段按需加载，网格首屏不下载；封面只存路径，运行时再拼图片域名
-  const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'jd'];
+  const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'fisbn', 'jd'];
   const extra = {};
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };

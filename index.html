@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.12.0">
+<meta name="version" content="1.13.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2755,6 +2755,9 @@
         <select id="genre">
           <option value="all">全部题材</option>
         </select>
+        <select id="lineFilter" class="adv-filter" title="按日文书系筛选，首次展开会加载书系数据">
+          <option value="all">全部书系</option>
+        </select>
         <select id="sort">
           <option value="score" title="按收藏数加权，避免低票作品霸榜">按评分</option>
           <option value="heat">按热度</option>
@@ -2875,7 +2878,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.12.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.13.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3059,8 +3062,9 @@
   window.__lnLoadExtra = loadExtra;
   document.addEventListener('ln-extra-ready', function () {
     if (modalId) renderDetail(modalId);
+    fillLineOptions();
     if (state.tab === 'stats') renderStatsPage();
-    else if (/(作者|出版社|书系)[:：]/.test(state.q || '')) render();
+    else if (state.line || /(作者|出版社|书系)[:：]/.test(state.q || '')) render();
   });
 
   // 系列新卷单独成包：只有展开子卷、打开统计或一键加入全部子卷时才下载
@@ -3188,6 +3192,7 @@
     year: 'all',
     kind: 'all',
     genre: 'all',
+    line: '',
     sort: 'score',
     status: 'all',
     onlyMine: false,
@@ -3506,6 +3511,7 @@
       state.includeNovel = map.gn === '1' || map.gn === true;
     }
     if (map.gr === 'all' || Object.prototype.hasOwnProperty.call(GENRE_LABEL, map.gr)) state.genre = map.gr;
+    if (typeof map.ln === 'string') state.line = map.ln;
     if (['score', 'heat', 'date', 'name', 'vol', 'mineRating'].indexOf(map.o) >= 0) state.sort = map.o;
     if (['all'].concat(STATUS_ORDER).indexOf(map.st) >= 0) state.status = map.st;
     if (map.om === '1' || map.om === '0' || typeof map.om === 'boolean') {
@@ -3557,6 +3563,7 @@
         hc: state.hideChildren ? '1' : '0',
         gn: state.includeNovel ? '1' : '0',
         gr: state.genre,
+        ln: state.line,
         o: state.sort,
         st: state.status,
         om: state.onlyMine,
@@ -3723,6 +3730,7 @@
       't=' + encodeURIComponent(state.theme)
     ];
     if (state.q.trim()) parts.push('q=' + encodeURIComponent(state.q.trim()));
+    if (state.line) parts.push('ln=' + encodeURIComponent(state.line));
     if (state.group) parts.push('gb=' + encodeURIComponent(state.groupBy));
     // 深链指向的书目可能因数据刷新暂不存在，先保留参数
     var deepId = modalId || pendingDetail;
@@ -3778,6 +3786,7 @@
     searchEl.value = state.q;
     $('kind').value = state.kind;
     $('genre').value = state.genre;
+    if ($('lineFilter').options.length > 1) $('lineFilter').value = state.line || 'all';
     $('sort').value = state.sort;
     $('mineSort').value = state.mineSort;
     var childBtn = $('hideChildrenBtn');
@@ -3951,6 +3960,37 @@
 
   function fillFilterOptions() {
     fillGenreOptions();
+    if (window.__LN_EXTRA_READY) fillLineOptions();
+  }
+
+  // 书系来自详情包：首次点击筛选时才下载并生成选项
+  var lineOptionsReady = false;
+  function fillLineOptions() {
+    var counts = {};
+    DATA.forEach(function (x) {
+      if (x.c || x.gn || !x.line) return;
+      var name = String(x.line).trim();
+      if (name) counts[name] = (counts[name] || 0) + 1;
+    });
+    var entries = Object.keys(counts).map(function (name) {
+      return [name, counts[name]];
+    }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 80);
+    if (state.line && !counts[state.line]) entries.push([state.line, 0]);
+    var select = $('lineFilter');
+    select.innerHTML = '<option value="all">全部书系</option>';
+    entries.forEach(function (pair) {
+      var option = document.createElement('option');
+      option.value = pair[0];
+      option.textContent = pair[0] + ' (' + pair[1] + ')';
+      select.appendChild(option);
+    });
+    lineOptionsReady = true;
+    select.value = state.line || 'all';
+  }
+
+  function ensureLineOptions() {
+    if (lineOptionsReady) return Promise.resolve();
+    return loadExtra().then(fillLineOptions);
   }
 
   function baseList() {
@@ -4068,6 +4108,9 @@
 
   function filteredList() {
     var list = baseList();
+    if (state.line) {
+      list = list.filter(function (x) { return String(x.line || '').trim() === state.line; });
+    }
     var q = state.q.trim().toLowerCase();
     var allTokens = searchTokens(q);
     // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合
@@ -5288,7 +5331,7 @@
     $('filterToggle').style.display = state.tab === 'mine' ? 'none' : '';
     // 筛选按钮与「清除筛选」共用一套计数：前者不含状态与搜索，另单独计入排序
     var filterCount = (state.kind !== 'all' ? 1 : 0) +
-      (state.genre !== 'all' ? 1 : 0) +
+      (state.genre !== 'all' ? 1 : 0) + (state.line ? 1 : 0) +
       (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
       (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) +
       (!state.hideChildren ? 1 : 0) + (state.includeNovel ? 1 : 0) +
@@ -5531,6 +5574,7 @@
     if (item.pub) pairs.push(['出版社', item.pub]);
     if (item.line) pairs.push(['书系', item.line]);
     if (item.isbn) pairs.push(['ISBN', item.isbn]);
+    if (item.fisbn) pairs.push(['首卷 ISBN', item.fisbn]);
     if (item.jd) pairs.push(['日文版', item.jd]);
     if (item.gn) pairs.push(['收录', '一般小说（Bangumi「小说」标签）']);
     if (item.kind && KIND_LABEL[item.kind]) pairs.push(['类型', KIND_LABEL[item.kind]]);
@@ -5867,9 +5911,24 @@
   });
 
   // 一键清除类型/题材/状态/搜索等筛选，保留当前年份与视图偏好
+  $('lineFilter').addEventListener('pointerdown', function () {
+    ensureLineOptions();
+  });
+  $('lineFilter').addEventListener('focus', function () {
+    ensureLineOptions();
+  });
+  $('lineFilter').addEventListener('change', function () {
+    state.line = this.value === 'all' ? '' : this.value;
+    writeHash();
+    savePrefs();
+    if (state.line) ensureLineOptions().then(render);
+    else render();
+  });
+
   $('clearFiltersBtn').addEventListener('click', function () {
     state.kind = 'all';
     state.genre = 'all';
+    state.line = '';
     state.status = 'all';
     state.onlyMine = false;
     state.highScore = false;
@@ -6331,6 +6390,7 @@
     state.year = 'all';
     state.kind = 'all';
     state.genre = 'all';
+    state.line = '';
     state.status = 'all';
     state.sort = 'score';
     state.onlyMine = false;
@@ -7053,6 +7113,7 @@
     state.year = opts.year || 'all';
     state.kind = opts.kind || 'all';
     state.genre = opts.genre || 'all';
+    state.line = '';
     state.q = opts.q || '';
     searchEl.value = state.q;
     state.status = 'all';
@@ -7969,6 +8030,7 @@
   syncControls();
   render();
   if (!state.hideChildren) loadVolumes().then(render);
+  if (state.line) ensureLineOptions().then(render);
   if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();
   renderDataUpdated();

@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.12.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 191/191）
+- 当前状态：**v1.13.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 193/193）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.12.0（已达成，功能：openBD 日文书志补全）
+- 目标版本：v1.13.0（已达成，功能：书系筛选与 RanobeDB 补全）
 
 ## 1. 目标与边界
 
@@ -273,11 +273,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v28`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v29`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：191/191）
+### Step 5 验收（已完成：193/193）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -601,6 +601,14 @@ PWA / 移动端：
 - 字段：补书系 979 条、出版社 3 条；`jd` 写入日文版发售日（YYYY-MM / YYYY-MM-DD），共 2950 条。当前书系覆盖 3595 条、出版社 4793 条。
 - UI：详情新增 ISBN 与「日文版」两项；`isbn`、`jd` 仍放在详情包，首屏不下载。
 - 校验：`check-data` 增加 ISBN-13 校验和、日文版日期格式；`verify` 增加 ISBN 与日文版发售日覆盖 2 项，共 191 项。
+
+## 9.29 v1.13.0 书系筛选与 RanobeDB（2026-11-23）
+
+- 书系筛选：`#lineFilter` 首次点击时才调用 `loadExtra()` 并生成前 80 个高频书系；`state.line` 写入 hash（`ln=`）与偏好；清除筛选会一并重置。
+- ISBN 反查：NDL / Google Books 在当前网络不可达，改用 RanobeDB 公共 API v0（`/api/v0/releases`，60 次/分钟以内）。`scripts/find-isbn-ranobedb.mjs` 查询热度前 300 条缺 ISBN 条目，累计补 11 个单册 ISBN、226 个系列首卷 ISBN；匹配时优先完全同名，并排除 AA / SP / 公式指南等外传。
+- 字段：新增 `fisbn`（系列首卷 ISBN），详情显示「首卷 ISBN」；校验逻辑与 `isbn` 相同。
+- 校验报告：`scripts/validate-ranobedb.mjs` 抽样热度前 120 个系列（只接受完全同名），匹配 50 个：卷数一致 34、我们更多 11、RanobeDB 更多 5；最大差异是《关于我转生变成史莱姆这档事》（我们 31 / RanobeDB 46），可人工复核。报告写入 `reports/ranobedb-validate-2026-11-23.md`，不回写数据。
+- 验收：`verify` 新增书系筛选、首卷 ISBN 覆盖 2 项，共 193 项。
 
 ## 10. 已知风险与决策
 

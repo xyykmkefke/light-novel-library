@@ -1,6 +1,6 @@
 {
   "name": "light-novel-library",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
   "description": "本地优先的轻小说浏览与阅读记录，内置 Bangumi 轻小说条目",
   "license": "MIT",
@@ -9,6 +9,8 @@
     "fetch-data": "node scripts/fetch-books.mjs",
     "clean-series": "node scripts/clean-series.mjs",
     "enrich-openbd": "node scripts/enrich-openbd.mjs",
+    "find-isbn": "node scripts/find-isbn-ranobedb.mjs",
+    "validate-ranobedb": "node scripts/validate-ranobedb.mjs",
     "build-pinyin": "node scripts/build-pinyin.mjs",
     "check-data": "node scripts/check-data.mjs",
     "test-merge": "node scripts/test-merge.mjs",

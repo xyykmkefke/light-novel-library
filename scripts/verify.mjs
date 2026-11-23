@@ -292,6 +292,7 @@ async function main() {
         pub: d.filter((x) => x.pub).length,
         line: d.filter((x) => x.line).length,
         isbn: d.filter((x) => x.isbn).length,
+        fisbn: d.filter((x) => x.fisbn).length,
         jd: d.filter((x) => x.jd).length,
         tg: d.filter((x) => (x.tg || []).length).length,
         rt: d.filter((x) => 'rt' in x).length,
@@ -314,6 +315,7 @@ async function main() {
     check('出版社字段已抽取', stats.pub > 3000, `${stats.pub} 条`);
     check('书系字段已抽取', stats.line > 1500, `${stats.line} 条`);
     check('ISBN 字段已抽取', stats.isbn > 3000, `${stats.isbn} 条`);
+    check('系列首卷 ISBN 已补充', stats.fisbn > 150, `${stats.fisbn} 条`);
     check('日文版发售日已抽取', stats.jd > 2500, `${stats.jd} 条`);
     check('题材覆盖超过 70%', stats.tg / stats.total > 0.7, `${stats.tg} 条`);
     check('最终数据不含 rt 字段', stats.rt === 0);
@@ -399,6 +401,33 @@ async function main() {
     await sleep(250);
     const genreCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
     check('按题材筛选结果一致', genreCount === genre.n, `${genre.id}: ${genreCount}/${genre.n}`);
+    await click('#clearFiltersBtn');
+
+    // ---- 书系 ----
+    const lineFilter = await cdp.evaluate(`(async () => {
+      const sel = document.getElementById('lineFilter');
+      sel.dispatchEvent(new Event('focus'));
+      for (let i = 0; i < 30 && sel.options.length < 3; i += 1) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const opts = [...sel.options].filter((o) => o.value !== 'all');
+      if (!opts.length) return { ok: false, options: 0 };
+      const value = opts[0].value;
+      const expected = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && String(x.line || '').trim() === value).length;
+      sel.value = value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 350));
+      return {
+        ok: true,
+        options: opts.length,
+        value,
+        count: Number(document.getElementById('resultCount').textContent),
+        expected,
+      };
+    })()`);
+    check('书系筛选可用且结果一致',
+      lineFilter.ok === true && lineFilter.options >= 5 && lineFilter.count === lineFilter.expected,
+      JSON.stringify(lineFilter));
     await click('#clearFiltersBtn');
 
     // ---- 类型 ----
@@ -1256,7 +1285,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.12.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.12.0'));
+    check('页脚版本为 v1.13.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.13.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1293,7 +1322,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.12.0', manifest.version === '1.12.0');
+    check('manifest 版本为 1.13.0', manifest.version === '1.13.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1315,7 +1344,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v28'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v29'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
