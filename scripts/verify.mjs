@@ -1360,7 +1360,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.15.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.2'));
+    check('页脚版本为 v1.15.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.3'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1397,7 +1397,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.15.2', manifest.version === '1.15.2');
+    check('manifest 版本为 1.15.3', manifest.version === '1.15.3');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1419,7 +1419,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v34'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v35'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 不预缓存扩展包', !swTxt.includes('light-novels-rn'));
     check('Service Worker 不预缓存剩余核心', !swTxt.includes('light-novels-rest'));
@@ -1698,6 +1698,27 @@ async function main() {
       console.log('SKIP  扩展条目可用中文名搜索（当前数据未含中文名映射）');
     } else {
       check('扩展条目可用中文名搜索', cnSearch.hit === true, JSON.stringify(cnSearch));
+    }
+    // 扩展条目补了作者 / 出版社后，详情应显示对应字段
+    const rnAuthor = await cdp.evaluate(`(async () => {
+      const x = (window.LN_DATA || []).find((v) => v.rn && v.au);
+      if (!x) return { skip: true };
+      const el = document.getElementById('search');
+      el.value = x.n;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      const card = document.querySelector('.card[data-id="' + x.i + '"]');
+      if (!card) return { skip: false, ok: false, reason: 'no-card', au: x.au };
+      card.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const meta = document.getElementById('detailMeta').textContent;
+      document.getElementById('modalClose').click();
+      return { skip: false, ok: meta.includes(String(x.au).split(' / ')[0]), au: x.au, meta: meta.slice(0, 90) };
+    })()`);
+    if (rnAuthor.skip) {
+      console.log('SKIP  扩展条目详情显示作者（当前数据未含作者字段）');
+    } else {
+      check('扩展条目详情显示作者', rnAuthor.ok === true, JSON.stringify(rnAuthor));
     }
     await click('#showRnBtn');
     await setSearch('');

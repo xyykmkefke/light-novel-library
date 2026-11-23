@@ -133,6 +133,22 @@ try {
   console.log('中文名映射：未找到 data/ranobedb-cn.json，扩展条目保持日文标题');
 }
 
+// 可选：系列详情缓存（scripts/fetch-ranobedb-detail.mjs 产出），补作者 / 出版社 / 文库
+const DETAIL_DIR = path.join(ROOT, 'data', 'build', 'ranobedb-series-detail');
+const details = new Map();
+try {
+  for (const file of (await readdir(DETAIL_DIR)).filter((f) => /^\d+\.json$/.test(f))) {
+    try {
+      const parsed = JSON.parse(await readFile(path.join(DETAIL_DIR, file), 'utf8'));
+      const series = parsed.series || parsed;
+      if (series && series.id) details.set(Number(series.id), series);
+    } catch { /* 跳过损坏的缓存文件 */ }
+  }
+  console.log(`系列详情缓存：${details.size} 条`);
+} catch {
+  console.log('系列详情缓存：未找到，扩展条目不含作者与出版社');
+}
+
 const localTitles = [];
 [...core, ...volumes].forEach((x) => {
   const n = norm(x.n);
@@ -166,12 +182,25 @@ const entries = picked.map((s) => {
   const filename = s.book && s.book.image && s.book.image.filename;
   const cnHit = cnMatches[String(s.id)] || null;
   const cn = cnHit && String(cnHit.cn || '').trim() ? String(cnHit.cn).trim() : '';
+  const detail = details.get(Number(s.id)) || null;
+  const staff = detail && Array.isArray(detail.staff) ? detail.staff : [];
+  const role = (x) => String((x && (x.role || x.role_type)) || '');
+  const authors = [...new Set(staff.filter((x) => /^author$/i.test(role(x))).map((x) => String(x.name || '').trim()))]
+    .filter(Boolean);
+  const pubs = detail && Array.isArray(detail.publishers) ? detail.publishers : [];
+  const pubType = (x) => String((x && (x.type || x.publisher_type)) || '');
+  const publisher = pubs.find((x) => pubType(x) === 'publisher' && /^ja/i.test(String(x.lang || ''))) ||
+    pubs.find((x) => pubType(x) === 'publisher');
+  const imprint = pubs.find((x) => pubType(x) === 'imprint');
   return {
     i: ID_BASE + Number(s.id),
     n: String(s.title_orig).trim(),
     en: String(s.title || '').trim(),
     ...(cn ? { cn } : {}),
     ...(cn && Number(cnHit.bgm) > 0 ? { bgm: Number(cnHit.bgm) } : {}),
+    ...(authors.length ? { au: authors.join(' / ') } : {}),
+    ...(publisher && publisher.name ? { pub: String(publisher.name).trim() } : {}),
+    ...(imprint && imprint.name ? { line: String(imprint.name).trim() } : {}),
     d: fmtDate(s.c_start_date),
     v: Number(s.c_num_books) || 0,
     sv: true,
@@ -190,6 +219,8 @@ const meta = {
   count: entries.length,
   volumes: entries.reduce((n, x) => n + (Number(x.v) || 0), 0),
   cnMapped: entries.filter((x) => x.cn).length,
+  withAuthors: entries.filter((x) => x.au).length,
+  withPublishers: entries.filter((x) => x.pub || x.line).length,
   minDate: dates[0] || '',
   maxDate: dates[dates.length - 1] || '',
   minVolumes: MIN_VOLUMES,

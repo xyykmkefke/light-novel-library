@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.2">
+<meta name="version" content="1.15.3">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2880,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.3</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -7659,6 +7659,8 @@
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function () {
+      // 等剩余核心补载完再合并：否则尚未加载的子卷 / 一般小说 / 重复版本会被当成无效记录丢掉
+      loadRest().then(function () {
       try {
         var parsed = JSON.parse(String(reader.result));
         var raw = Array.isArray(parsed) ? parsed : (parsed.items || parsed.ids || []);
@@ -7711,6 +7713,7 @@
       } catch (err) {
         toast('导入失败：文件格式不正确');
       }
+      });
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -8152,6 +8155,8 @@
         pendingDetail = wanted && !byId.has(wanted) ? wanted : null;
         if (!state.hideChildren) loadVolumes();
         if (state.showRn || (wanted && Number(wanted) >= 800000000)) loadRn();
+        // 深链指向剩余核心（子卷 / 一般小说 / 重复版本）时先补载，补载完成后再开详情
+        if (pendingDetail && Number(pendingDetail) < 800000000) loadRest();
         render();
         if (wanted && byId.has(wanted)) openDetail(wanted);
         else closeDetail();

@@ -31,6 +31,8 @@ const LIMIT = Math.max(1, Number(arg('limit', 500)) || 500);
 const MIN_VOLUMES = Math.max(2, Number(arg('min-volumes', 5)) || 5);
 const DELAY_MS = Math.max(300, Number(arg('delay', 1200)) || 1200);
 const MERGE = flag('merge');
+// 首轮查不到时，用「去副标题 / 去括号 / 去シリーズ」的变体再查一次（只提高召回，匹配仍按原题判定）
+const FALLBACK = flag('fallback');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -169,6 +171,20 @@ function cacheKey(title) {
   return createHash('sha1').update(title).digest('hex').slice(0, 16);
 }
 
+// 副标题、尾部括号、系列名后缀会拖累 Bangumi 搜索召回，首轮无果时退化为主标题再查
+function titleVariants(title) {
+  const source = String(title || '').trim();
+  const out = [];
+  const push = (value) => {
+    const v = String(value || '').trim();
+    if (v.length >= 4 && v !== source && !out.includes(v)) out.push(v);
+  };
+  push(source.replace(/[（(][^（）()]{1,40}[）)]\s*$/, ''));
+  push(source.split(/[〜～―—]|\s-\s/)[0]);
+  push(source.replace(/\s*シリーズ\s*$/, ''));
+  return out.slice(0, 3);
+}
+
 let lastRequestAt = 0;
 async function throttle() {
   const wait = DELAY_MS - (Date.now() - lastRequestAt);
@@ -242,7 +258,8 @@ async function runShard() {
   let state = { shard: SHARD, shards: SHARDS, limit: LIMIT, minVolumes: MIN_VOLUMES, checked: 0, matched: 0, total: targets.length, updatedAt: '', done: false, results: {} };
   try {
     const prev = JSON.parse(await readFile(outFile, 'utf8'));
-    if (prev && prev.results && prev.limit === LIMIT && prev.minVolumes === MIN_VOLUMES) state = prev;
+    if (prev && prev.results && prev.limit === LIMIT && prev.minVolumes === MIN_VOLUMES &&
+      (Number(prev.shards) || 1) === SHARDS) state = prev;
   } catch { /* 首次运行 */ }
 
   console.log(`分片 ${SHARD}/${SHARDS}：目标 ${targets.length} 条（v>=${MIN_VOLUMES}，前 ${LIMIT} 条内）`);
@@ -250,7 +267,9 @@ async function runShard() {
   for (const entry of targets) {
     const rid = Number(entry.rid);
     done += 1;
-    if (state.results[rid] !== undefined) continue;
+    const prev = state.results[rid];
+    // --fallback 模式下，之前判定为未命中的条目要重试一次
+    if (prev !== undefined && !(FALLBACK && prev === null)) continue;
     let record = null;
     try {
       record = await searchSubject(String(entry.n).trim());
@@ -259,22 +278,32 @@ async function runShard() {
       await writeFile(outFile, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 1), 'utf8');
       throw err;
     }
-    const hit = pickMatch(entry, record.candidates);
+    let hit = pickMatch(entry, record.candidates);
+    if (!hit && FALLBACK) {
+      for (const variant of titleVariants(String(entry.n).trim())) {
+        const alt = await searchSubject(variant);
+        const altHit = pickMatch(entry, alt.candidates);
+        if (altHit) { hit = { ...altHit, via: variant }; break; }
+      }
+    }
     state.results[rid] = hit;
-    state.checked += 1;
-    if (hit) state.matched += 1;
+    // 计数从 results 重算，--fallback 重试时不会重复累加
+    state.checked = Object.keys(state.results).length;
+    state.matched = Object.values(state.results).filter(Boolean).length;
     state.updatedAt = new Date().toISOString();
     if (hit) {
-      console.log(`  ${done}/${targets.length} ✓ ${entry.n} → ${hit.cn}（${hit.how}${hit.manga ? '，漫画版' : ''}，bgm ${hit.bgm}）`);
+      console.log(`  ${done}/${targets.length} ✓ ${entry.n} → ${hit.cn}（${hit.how}${hit.manga ? '，漫画版' : ''}${hit.via ? '，变体查询' : ''}，bgm ${hit.bgm}）`);
     } else if (done % 20 === 0) {
       console.log(`  ${done}/${targets.length} 已查，命中 ${state.matched}`);
     }
-    if ((state.checked % 25 === 0) || done === targets.length) {
+    if (done % 25 === 0 || done === targets.length) {
       await writeFile(outFile, JSON.stringify(state, null, 1), 'utf8');
     }
   }
   state.done = true;
   state.updatedAt = new Date().toISOString();
+  state.checked = Object.keys(state.results).length;
+  state.matched = Object.values(state.results).filter(Boolean).length;
   await writeFile(outFile, JSON.stringify(state, null, 1), 'utf8');
   console.log(`分片 ${SHARD} 完成：检查 ${state.checked} 条，命中 ${state.matched} 条`);
 }
@@ -301,12 +330,16 @@ async function mergeShards() {
   const matches = {};
   const details = [];
   const seen = new Map();
+  const seenRid = new Set();
   let checked = 0;
   const stats = { exact: 0, contain: 0, near: 0, manga: 0, dupBgm: 0, blocked: 0 };
 
   for (const file of files) {
     const part = JSON.parse(await readFile(path.join(WORK_DIR, file), 'utf8'));
     for (const [rid, hit] of Object.entries(part.results || {})) {
+      // 分片数变过时同一个 rid 会出现在多个分片里，按 rid 去重
+      if (seenRid.has(rid)) continue;
+      seenRid.add(rid);
       checked += 1;
       if (!hit) continue;
       if (blockedRids.has(String(rid))) { stats.blocked += 1; continue; }

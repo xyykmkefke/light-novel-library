@@ -193,6 +193,9 @@ if (!rnMetaMatch || !rnDataMatch) {
     if (x.img && !/^https:\/\/images\.ranobedb\.org\//.test(x.img)) issues.rn.push(`${id}:封面 ${x.img}`);
     if (x.ch != null) issues.rn.push(`${id}:扩展系列不应有 ch`);
     if (x.en != null && typeof x.en !== 'string') issues.rn.push(`${id}:en 类型错误`);
+    if (x.au != null && (!String(x.au).trim() || typeof x.au !== 'string')) issues.rn.push(`${id}:au 异常`);
+    if (x.pub != null && (!String(x.pub).trim() || typeof x.pub !== 'string')) issues.rn.push(`${id}:pub 异常`);
+    if (x.line != null && (!String(x.line).trim() || typeof x.line !== 'string')) issues.rn.push(`${id}:line 异常`);
     if (x.cn != null) {
       const cn = String(x.cn).trim();
       if (!cn) issues.rn.push(`${id}:cn 为空字符串`);
