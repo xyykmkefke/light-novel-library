@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.7.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 175/175）
+- 当前状态：**v1.7.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 177/177）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.7.1（已达成，功能：书评正文搜索）
+- 目标版本：v1.7.2（已达成，功能：年度小结导出）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v22`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v23`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：175/175）
+### Step 5 验收（已完成：177/177）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -546,6 +546,14 @@ PWA / 移动端：
 - 搜索占位与帮助面板同步补充说明。
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.7.1；SW 缓存名升到 `yuc-ln-shell-v22`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 175/175（新增书评正文搜索 1 项）。
+
+## 9.23 v1.7.2 功能记录（2026-11-23，第 20 轮）
+
+- 统计页新增「年度小结」卡片：`yearSummary()` 汇总当年读完本数、已读卷数、平均评分、最常读作者、题材 Top5 与读完书目（最多 30 本），导出为 Markdown。
+- 纯函数挂载 `window.__lnYearSummary`，便于验收与调试；导出复用 `download()`，文件名 `轻小说年度小结-YYYY.md`。
+- 参考：Goodreads「Year in Books」年度回顾的分享形态（<https://readingszone.com/my-year-in-books/>、<https://thereadinglane.com/2025/12/28/rear-in-books-goodreads-2025/>）。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.7.2；SW 缓存名升到 `yuc-ln-shell-v23`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 177/177（新增年度小结导出 2 项）。
 
 ## 10. 已知风险与决策
 

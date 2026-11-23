@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.7.1">
+<meta name="version" content="1.7.2">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2500,6 +2500,7 @@
     font-weight: 600;
     color: var(--muted);
   }
+  .stat-action { margin-top: 10px; }
   .stat-nums { display: flex; gap: 18px; flex-wrap: wrap; }
   .stat-num b { display: block; font-size: 22px; line-height: 1.25; }
   .stat-num span { font-size: 11.5px; color: var(--muted-2); }
@@ -2873,7 +2874,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.7.1</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.7.2</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4843,6 +4844,74 @@
     }).join('') + '</div>';
   }
 
+  // 年度小结：把某年读完的书、评分与偏好整理成可分享的 Markdown（参考 Goodreads Year in Books）
+  function yearSummary(year) {
+    var finished = [];
+    var rated = [];
+    var volSum = 0;
+    var genres = {};
+    var authors = {};
+    Object.keys(myMap).forEach(function (id) {
+      var e = myMap[id];
+      var x = byId.get(id);
+      if (!e || !x) return;
+      var y = e.f ? new Date(e.f).getFullYear() : 0;
+      if (y !== year) return;
+      finished.push({ x: x, e: e });
+      volSum += Math.max(0, Number(e.vol) || 0);
+      if (e.r) rated.push(e.r);
+      (x.tg || []).forEach(function (g) {
+        var label = GENRE_LABEL[g];
+        if (label) genres[label] = (genres[label] || 0) + 1;
+      });
+      String(x.au || '').split(/[\/、,，&]/).forEach(function (name) {
+        var key = name.trim();
+        if (key) authors[key] = (authors[key] || 0) + 1;
+      });
+    });
+    finished.sort(function (a, b) { return (b.e.f || 0) - (a.e.f || 0); });
+    var topOf = function (obj, n) {
+      return Object.keys(obj).map(function (k) { return [k, obj[k]]; })
+        .sort(function (a, b) { return b[1] - a[1]; }).slice(0, n);
+    };
+    var avg = rated.length ? (rated.reduce(function (s, n) { return s + n; }, 0) / rated.length) : 0;
+    var topGenres = topOf(genres, 5);
+    var topAuthors = topOf(authors, 5);
+    var lines = [
+      '# ' + year + ' 年阅读小结',
+      '',
+      '- 读完：' + finished.length + ' 本',
+      '- 已读卷数：' + volSum + ' 卷',
+      '- 平均评分：' + (avg ? avg.toFixed(1) + ' / 10（' + rated.length + ' 本）' : '—'),
+      '- 最常读作者：' + (topAuthors.length ? topAuthors[0][0] + '（' + topAuthors[0][1] + ' 本）' : '—'),
+      '',
+      '## 题材偏好',
+      '',
+    ];
+    if (topGenres.length) {
+      topGenres.forEach(function (g, i) { lines.push((i + 1) + '. ' + g[0] + '（' + g[1] + ' 本）'); });
+    } else {
+      lines.push('暂无题材数据');
+    }
+    lines.push('', '## 读完书目', '');
+    if (finished.length) {
+      finished.slice(0, 30).forEach(function (o) {
+        var title = o.x.cn || o.x.n || '未知书目';
+        var parts = ['- 《' + title + '》'];
+        if (o.e.r) parts.push('★ ' + o.e.r + '/10');
+        if (o.e.vol) parts.push('读到第 ' + o.e.vol + (o.x.v ? ' / ' + o.x.v : '') + ' 卷');
+        if (o.e.f) parts.push(fmtDate(o.e.f));
+        lines.push(parts.join(' · '));
+      });
+      if (finished.length > 30) lines.push('', '…… 另有 ' + (finished.length - 30) + ' 本未列出');
+    } else {
+      lines.push('这一年还没有读完的书');
+    }
+    lines.push('', '> 由轻小说库导出 · ' + new Date().toISOString().slice(0, 10));
+    return lines.join('\n');
+  }
+  window.__lnYearSummary = yearSummary;
+
   function renderStatsPage() {
     var panel = $('statsPanel');
     var year = new Date().getFullYear();
@@ -4996,6 +5065,9 @@
         '</div><div class="goal-meta">' + (pace.sampled
           ? '平均用时按 ' + pace.sampled + ' 本有加入与读完时间的记录计算'
           : '记录加入与读完时间后可统计平均用时') + '</div></div>' +
+        '<div class="stat-card"><h3>年度小结</h3>' +
+          '<div class="goal-meta">把当年读完的书、评分、题材与作者偏好整理成 Markdown，便于分享或存档。</div>' +
+          '<button class="btn stat-action" type="button" data-stats="exportYear">导出 Markdown</button></div>' +
       '</div>' +
       '<div class="stats-grid">' +
         '<div class="stat-card"><h3>阅读打卡</h3><div class="stat-nums">' +
@@ -5033,6 +5105,12 @@
     var act = e.target.closest('[data-stats]');
     if (!act) return;
     if (act.dataset.stats === 'browse') { setTab('all'); return; }
+    if (act.dataset.stats === 'exportYear') {
+      var y = new Date().getFullYear();
+      download('轻小说年度小结-' + y + '.md', yearSummary(y), 'text/markdown;charset=utf-8');
+      toast('年度小结已导出');
+      return;
+    }
     if (act.dataset.stats === 'goal') {
       var input = $('goalInput');
       var target = Math.max(0, Math.min(999, Math.round(Number(input && input.value) || 0)));
