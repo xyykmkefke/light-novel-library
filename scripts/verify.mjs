@@ -281,9 +281,11 @@ async function main() {
         total: d.length,
         volumes: Number((window.LN_META || {}).volumes) || 0,
         general: d.filter((x) => x.gn).length,
-        defaultVisible: d.filter((x) => !x.c && !x.gn).length,
+        versions: d.filter((x) => x.ver).length,
+        defaultVisible: d.filter((x) => !x.c && !x.gn && !x.ver && !x.ver).length,
         meta: window.LN_META || null,
         c: d.filter((x) => x.c).length,
+        chsSeries: d.filter((x) => x.chs).length,
         series: d.filter((x) => x.sv).length,
         kind: d.reduce((m, x) => { if (x.kind) m[x.kind] = (m[x.kind] || 0) + 1; return m; }, {}),
         py: d.filter((x) => x.py).length,
@@ -325,10 +327,14 @@ async function main() {
     check('系列子卷索引完整',
       stats.chSeries > 300 && stats.chRefs === stats.c + stats.volumes,
       `${stats.chSeries} 系列 / ${stats.chRefs} 引用（核心 ${stats.c} + 卷包 ${stats.volumes}）`);
+    check('拆分卷按故事卷统计',
+      stats.chsSeries > 20 && stats.meta &&
+      Number(stats.meta.storyVolumes) < Number(stats.meta.physicalVolumes),
+      `${stats.chsSeries} 个系列 / ${stats.meta && stats.meta.physicalVolumes} 册 → ${stats.meta && stats.meta.storyVolumes} 故事卷`);
 
     // ---- 默认筛选 ----
     const visibleDefault = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const expectedDefault = await cdp.evaluate(`(() => (window.LN_DATA || []).filter((x) => !x.c && !x.gn).length)()`);
+    const expectedDefault = await cdp.evaluate(`(() => (window.LN_DATA || []).filter((x) => !x.c && !x.gn && !x.ver && !x.ver).length)()`);
     check('默认隐藏系列子卷', visibleDefault === expectedDefault, `${visibleDefault} / ${expectedDefault}`);
     check('一般小说已合并入库',
       stats.general > 700 && stats.meta && stats.meta.general === stats.general,
@@ -341,8 +347,8 @@ async function main() {
       const n = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
       const pressed = await cdp.evaluate("document.getElementById('includeNovelBtn').getAttribute('aria-pressed')");
       await click('#includeNovelBtn');
-      return n === stats.total - stats.c && pressed === 'true';
-    })(), `全部 ${stats.total - stats.c}`);
+      return n === stats.total - stats.c - stats.versions && pressed === 'true';
+    })(), `全部 ${stats.total - stats.c - stats.versions}`);
     check('默认筛选按钮显示已隐藏子卷',
       (await cdp.evaluate("document.getElementById('hideChildrenBtn').getAttribute('aria-pressed')")) === 'true');
     check('年份条溢出时显示滚动提示',
@@ -371,13 +377,27 @@ async function main() {
       await cdp.evaluate('window.__lnLoadVolumes()');
       await click('#hideChildrenBtn');
       const n = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+      const expected = await cdp.evaluate(`(() =>
+        (window.LN_DATA || []).filter((x) => !x.gn && !x.ver).length)()`);
       await click('#hideChildrenBtn');
-      return n === stats.total - stats.general + stats.volumes;
-    })(), `全部 ${stats.total - stats.general + stats.volumes}`);
+      return n === expected;
+    })(), `全部 ${stats.total - stats.general + stats.volumes - stats.versions}`);
+
+    check('重复版本默认隐藏且可切换', await (async () => {
+      const before = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+      await click('#showVersionsBtn');
+      const after = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+      const expected = await cdp.evaluate(`(() =>
+        (window.LN_DATA || []).filter((x) => !x.c && !x.gn).length)()`);
+      const pressed = await cdp.evaluate("document.getElementById('showVersionsBtn').getAttribute('aria-pressed')");
+      await click('#showVersionsBtn');
+      return stats.versions > 50 && before === stats.defaultVisible &&
+        after === expected && pressed === 'true';
+    })(), `版本 ${stats.versions} 个`);
 
     // ---- 年份 ----
     const year = await cdp.evaluate(`(() => {
-      const d = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && x.d);
+      const d = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && !x.ver && x.d);
       const y = String(d[0].d).slice(0, 4);
       return { y, n: d.filter((x) => String(x.d).slice(0, 4) === y).length };
     })()`);
@@ -390,7 +410,7 @@ async function main() {
     const genre = await cdp.evaluate(`(() => {
       const opt = [...document.querySelectorAll('#genre option')].find((o) => o.value !== 'all');
       const id = opt.value;
-      const n = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && (x.tg || []).includes(id)).length;
+      const n = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && !x.ver && (x.tg || []).includes(id)).length;
       return { id, n };
     })()`);
     await cdp.evaluate(`(() => {
@@ -413,7 +433,7 @@ async function main() {
       const opts = [...sel.options].filter((o) => o.value !== 'all');
       if (!opts.length) return { ok: false, options: 0 };
       const value = opts[0].value;
-      const expected = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && String(x.line || '').trim() === value).length;
+      const expected = (window.LN_DATA || []).filter((x) => !x.c && !x.gn && !x.ver && String(x.line || '').trim() === value).length;
       sel.value = value;
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 350));
@@ -438,12 +458,12 @@ async function main() {
     })()`);
     await sleep(250);
     const mangaCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    check('按类型筛选漫画', mangaCount === await cdp.evaluate(`(() => (window.LN_DATA || []).filter((x) => x.kind === 'manga' && !x.c && !x.gn).length)()`), `${mangaCount} 本`);
+    check('按类型筛选漫画', mangaCount === await cdp.evaluate(`(() => (window.LN_DATA || []).filter((x) => x.kind === 'manga' && !x.c && !x.gn && !x.ver).length)()`), `${mangaCount} 本`);
     await click('#clearFiltersBtn');
 
     // ---- 搜索 ----
     const sample = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => v.cn && !v.c && !v.gn);
+      const x = (window.LN_DATA || []).find((v) => v.cn && !v.c && !v.gn && !v.ver);
       return { id: x.i, cn: x.cn };
     })()`);
     await setSearch(sample.cn.slice(0, 2));
@@ -454,12 +474,12 @@ async function main() {
     const excludeCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
     check('排除词缩小结果', excludeCount <= searchCount, `${searchCount} → ${excludeCount}`);
     await setSearch('');
-    const py = await cdp.evaluate(`(() => (window.LN_DATA || []).find((x) => x.py && x.py.length > 2 && !x.c && !x.gn).py)()`);
+    const py = await cdp.evaluate(`(() => (window.LN_DATA || []).find((x) => x.py && x.py.length > 2 && !x.c && !x.gn && !x.ver).py)()`);
     await setSearch(py);
     check('拼音首字母搜索有结果',
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0, py);
     await setSearch('');
-    const kanaPy = await cdp.evaluate(`(() => (window.LN_DATA || []).find((x) => /^[\\u3040-\\u30ff]/.test(x.n || '') && x.py && x.py.length > 4 && !x.c && !x.gn).py)()`);
+    const kanaPy = await cdp.evaluate(`(() => (window.LN_DATA || []).find((x) => /^[\\u3040-\\u30ff]/.test(x.n || '') && x.py && x.py.length > 4 && !x.c && !x.gn && !x.ver).py)()`);
     await setSearch(kanaPy);
     check('纯日文标题可用罗马字首字母搜索',
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0, kanaPy);
@@ -468,23 +488,23 @@ async function main() {
     // ---- 高级搜索语法 ----
     await setSearch('分:>=9');
     const scoreExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const scoreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && x.s != null && x.s >= 9).length)()`);
+    const scoreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && x.s != null && x.s >= 9).length)()`);
     check('分:>=9 搜索生效', scoreExprCount === scoreExprExpected, `${scoreExprCount}/${scoreExprExpected}`);
     check('分: 语法不参与标题高亮', (await count('.title mark')) === 0);
 
     await setSearch('题材:奇幻');
     const genreExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const genreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && (x.tg || []).includes('fan')).length)()`);
+    const genreExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && (x.tg || []).includes('fan')).length)()`);
     check('题材:奇幻 搜索生效', genreExprCount === genreExprExpected, `${genreExprCount}/${genreExprExpected}`);
 
     await setSearch('年:2020');
     const yearExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const yearExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.d || '').startsWith('2020')).length)()`);
+    const yearExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && String(x.d || '').startsWith('2020')).length)()`);
     check('年:2020 搜索生效', yearExprCount === yearExprExpected, `${yearExprCount}/${yearExprExpected}`);
 
     await cdp.evaluate('window.__lnLoadExtra()');
     const authorName = await cdp.evaluate(`(() => {
-      const x = window.LN_DATA.find((v) => v.au && !v.c && !v.gn);
+      const x = window.LN_DATA.find((v) => v.au && !v.c && !v.gn && !v.ver);
       return String(x.au).split(/[\\/、,，&]/)[0].trim();
     })()`);
     await setSearch('作者:' + authorName);
@@ -493,12 +513,12 @@ async function main() {
 
     await setSearch('出版社:KADOKAWA');
     const pubExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const pubExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.pub || '').toLowerCase().includes('kadokawa')).length)()`);
+    const pubExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && String(x.pub || '').toLowerCase().includes('kadokawa')).length)()`);
     check('出版社: 搜索生效', pubExprCount === pubExprExpected, `${pubExprCount}/${pubExprExpected}`);
 
     await setSearch('书系:電撃文庫');
     const lineExprCount = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-    const lineExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.line || '').includes('電撃文庫')).length)()`);
+    const lineExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && String(x.line || '').includes('電撃文庫')).length)()`);
     check('书系: 搜索生效', lineExprCount === lineExprExpected, `${lineExprCount}/${lineExprExpected}`);
 
     await setSearch('分:>=8 题材:恋爱');
@@ -514,7 +534,7 @@ async function main() {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
     await sleep(250);
-    const heatFirst = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn).sort((a,b) => (b.h||0)-(a.h||0))[0].i)()`);
+    const heatFirst = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver).sort((a,b) => (b.h||0)-(a.h||0))[0].i)()`);
     const shownFirst = await cdp.evaluate(`(() => document.querySelector('.card')?.dataset.id)()`);
     check('按热度排序生效', String(shownFirst) === String(heatFirst), `${shownFirst} / ${heatFirst}`);
 
@@ -526,7 +546,7 @@ async function main() {
     })()`);
     await sleep(250);
     const scoreFirst = await cdp.evaluate(`(() => {
-      const list = window.LN_DATA.filter((x) => !x.c && !x.gn);
+      const list = window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver);
       const f = window.__lnBayesScore;
       const top = list.slice().sort((a, b) => f(b) - f(a) || (b.h || 0) - (a.h || 0))[0];
       return { id: String(top.i), h: top.h, s: top.s };
@@ -543,7 +563,7 @@ async function main() {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
     await sleep(250);
-    const maxVol = await cdp.evaluate(`(() => Math.max(...window.LN_DATA.filter((x) => !x.c && !x.gn).map((x) => Number(x.v) || 0)))()`);
+    const maxVol = await cdp.evaluate(`(() => Math.max(...window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver).map((x) => Number(x.v) || 0)))()`);
     const firstVol = await cdp.evaluate(`(() => {
       const id = document.querySelector('.card')?.dataset.id;
       const x = window.LN_DATA.find((v) => String(v.i) === id);
@@ -566,7 +586,7 @@ async function main() {
 
     // ---- 我的阅读 ----
     const pick = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => v.v > 2 && !v.c && !v.gn && v.img);
+      const x = (window.LN_DATA || []).find((v) => v.v > 2 && !v.c && !v.gn && !v.ver && v.img);
       return { id: String(x.i), v: x.v, name: x.cn || x.n };
     })()`);
     // 通过详情加入，避免目标条目不在首个分页里导致点击不到
@@ -657,7 +677,7 @@ async function main() {
       q: document.getElementById('search').value,
       count: Number(document.getElementById('resultCount').textContent),
     }))()`);
-    const authorJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.au || '').includes(${JSON.stringify(authorJumpName)})).length)()`);
+    const authorJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && String(x.au || '').includes(${JSON.stringify(authorJumpName)})).length)()`);
     check('作者标签跳转全库筛选',
       !!authorJumpName && authorJumpState.modalClosed && authorJumpState.q === '作者:' + authorJumpName &&
       authorJumpState.count === authorJumpExpected,
@@ -668,11 +688,11 @@ async function main() {
     const pubJump = await cdp.evaluate(`(() => {
       const counts = {};
       window.LN_DATA.forEach((x) => {
-        if (!x.c && !x.gn && x.pub && !/\\s/.test(x.pub)) counts[x.pub] = (counts[x.pub] || 0) + 1;
+        if (!x.c && !x.gn && !x.ver && x.pub && !/\\s/.test(x.pub)) counts[x.pub] = (counts[x.pub] || 0) + 1;
       });
       const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
       if (!top) return null;
-      const rec = window.LN_DATA.find((x) => !x.c && !x.gn && x.pub === top[0]);
+      const rec = window.LN_DATA.find((x) => !x.c && !x.gn && !x.ver && x.pub === top[0]);
       return { pub: top[0], id: String(rec.i) };
     })()`);
     if (pubJump) {
@@ -691,7 +711,7 @@ async function main() {
         q: document.getElementById('search').value,
         count: Number(document.getElementById('resultCount').textContent),
       }))()`);
-      const pubJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.pub || '').toLowerCase().includes(${JSON.stringify(pubJump.pub)}.toLowerCase())).length)()`);
+      const pubJumpExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && !x.ver && String(x.pub || '').toLowerCase().includes(${JSON.stringify(pubJump.pub)}.toLowerCase())).length)()`);
       check('出版社标签跳转全库筛选',
         !!pubJumpName && pubJumpState.modalClosed && pubJumpState.q === '出版社:' + pubJumpName &&
         pubJumpState.count === pubJumpExpected,
@@ -826,7 +846,7 @@ async function main() {
 
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && !v.gn && v.img && String(v.i) !== ${JSON.stringify(pick.id)});
+      const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && !v.gn && !v.ver && v.img && String(v.i) !== ${JSON.stringify(pick.id)});
       return { id: String(x.i), v: x.v };
     })()`);
     await cdp.evaluate(`(() => {
@@ -1161,17 +1181,28 @@ async function main() {
     }))()`);
     check('设置面板显示离线缓存占用',
       /封面 \d+ 张 · 占用/.test(offlineInfo.text) && offlineInfo.exposed, offlineInfo.text);
+    // 安装引导 toast 可能延迟出现并覆盖清理提示，记录变更序列而不只读最后一条
+    await cdp.evaluate(`(() => {
+      window.__toastLog = [];
+      if (window.__toastObserver) window.__toastObserver.disconnect();
+      var el = document.getElementById('toast');
+      window.__toastObserver = new MutationObserver(function () {
+        var t = el.textContent || '';
+        if (t) window.__toastLog.push(t);
+      });
+      window.__toastObserver.observe(el, { childList: true, subtree: true, characterData: true });
+    })()`);
     await cdp.evaluate(`(() => document.getElementById('clearImgCache').click())()`);
     await sleep(700);
     const clearedCache = await cdp.evaluate(`(() => ({
       text: document.getElementById('offlineInfo').textContent,
-      toast: document.getElementById('toast').textContent,
+      toasts: (window.__toastLog || []).slice(),
       imgs: window.__lnOfflineInfo ? window.__lnOfflineInfo.imgs : -1,
     }))()`);
     check('清理封面缓存后统计归零',
       clearedCache.imgs === 0 && /封面 0 张/.test(clearedCache.text) &&
-      /已清理 \d+ 张封面缓存/.test(clearedCache.toast),
-      `${clearedCache.text} / ${clearedCache.toast}`);
+      clearedCache.toasts.some((t) => /已清理 \d+ 张封面缓存/.test(t)),
+      `${clearedCache.text} / ${clearedCache.toasts.join(' | ')}`);
     await click('#settingsClose');
     const themeBefore = await cdp.evaluate(`(() => document.documentElement.getAttribute('data-theme'))()`);
     await click('#themeBtn');
@@ -1223,7 +1254,7 @@ async function main() {
 
     // ---- 搜索联想 ----
     const sugTitle = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => !v.c && !v.gn && (v.cn || v.n) &&
+      const x = (window.LN_DATA || []).find((v) => !v.c && !v.gn && !v.ver && (v.cn || v.n) &&
         String(v.cn || v.n).length >= 4 && String(v.cn || v.n).indexOf(' ') < 0);
       return x ? String(x.cn || x.n) : '';
     })()`);
@@ -1285,11 +1316,11 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.13.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.13.1'));
+    check('页脚版本为 v1.14.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.14.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => !v.d && !v.c && !v.gn);
+      const x = (window.LN_DATA || []).find((v) => !v.d && !v.c && !v.gn && !v.ver);
       return x ? { id: String(x.i), name: x.cn || x.n } : null;
     })()`);
     if (noDate) {
@@ -1305,7 +1336,7 @@ async function main() {
     }
 
     const noVol = await cdp.evaluate(`(() => {
-      const x = (window.LN_DATA || []).find((v) => !v.v && !v.c && !v.gn);
+      const x = (window.LN_DATA || []).find((v) => !v.v && !v.c && !v.gn && !v.ver);
       return x ? { id: String(x.i) } : null;
     })()`);
     const zeroVolProgress = await cdp.evaluate(`(() => {
@@ -1322,7 +1353,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.13.1', manifest.version === '1.13.1');
+    check('manifest 版本为 1.14.0', manifest.version === '1.14.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1344,7 +1375,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v30'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v31'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));

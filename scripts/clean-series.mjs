@@ -13,6 +13,26 @@ const BUILD_DIR = path.join(ROOT, 'data', 'build');
 const OUT_FILE = path.join(ROOT, 'data', 'light-novels.js');
 const IMG_BASE_RE = /^https?:\/\/bgmimg\.anibt\.net\/r\/400\//;
 const VOLUME_RELATIONS = new Set(['单行本', '番外篇']);
+const SPLIT_TITLE_RE = /[（(]\s*(上|中|下|前編|後編|前篇|後篇|上巻|中巻|下巻)\s*[）)]|\s(上|中|下)$/g;
+
+function normalizeSeriesKey(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[（(]\s*(上|中|下|前編|後編|前篇|後篇)\s*[）)]/g, '')
+    .replace(/[\s"'“”‘’「」『』【】\[\]()（）:：\-–—~〜!?！？,，.。·、]/g, '');
+}
+
+function storyUnits(ids, byId) {
+  const groups = new Set();
+  ids.forEach((id) => {
+    const book = byId.get(String(id));
+    const title = String(book?.cn || book?.n || id);
+    const base = title.replace(SPLIT_TITLE_RE, '').replace(/\s+/g, ' ').trim();
+    groups.add(base || String(id));
+  });
+  return groups.size;
+}
 
 function normalizeIsbn(code) {
   const raw = String(code || '').replace(/[^0-9Xx]/g, '').toUpperCase();
@@ -316,12 +336,47 @@ export async function buildData(records, relations = new Map(), {
     return a.i - b.i;
   });
 
+  // 拆分卷：上/中/下按同一故事卷计，详情与统计区分「册」和「故事卷」
+  const allBooks = new Map([...final, ...volumes].map((x) => [String(x.i), x]));
+  let physicalVolumes = 0;
+  let storyVolumes = 0;
+  final.forEach((item) => {
+    if (!item.sv || !Array.isArray(item.ch) || !item.ch.length) return;
+    physicalVolumes += item.ch.length;
+    const units = storyUnits(item.ch, allBooks);
+    storyVolumes += units;
+    if (units < item.ch.length) item.chs = units;
+  });
+
+  // 同名系列条目：保留卷数最多、收藏最高的主条目，其余标记 ver 并默认隐藏
+  const seriesGroups = new Map();
+  final.filter((x) => x.sv).forEach((item) => {
+    const key = normalizeSeriesKey(item.n) || normalizeSeriesKey(item.cn);
+    if (!key) return;
+    if (!seriesGroups.has(key)) seriesGroups.set(key, []);
+    seriesGroups.get(key).push(item);
+  });
+  let versionCount = 0;
+  seriesGroups.forEach((list) => {
+    if (list.length < 2) return;
+    list.sort((a, b) => (b.ch?.length || 0) - (a.ch?.length || 0) ||
+      (b.h || 0) - (a.h || 0) || a.i - b.i);
+    const primary = list[0];
+    list.slice(1).forEach((item) => {
+      item.ver = primary.i;
+      versionCount += 1;
+    });
+  });
+
   const dates = final.map((x) => x.d).filter(Boolean).sort();
   const meta = {
     generatedAt,
     count: final.length,
     volumes: volumes.length,
     general: final.filter((x) => x.gn).length,
+    versions: versionCount,
+    physicalVolumes,
+    storyVolumes,
     minDate: dates[0] || '',
     maxDate: dates[dates.length - 1] || '',
   };

@@ -47,6 +47,8 @@ const label = {
   flags: '布尔字段异常',
   kind: '类型字段异常',
   children: '系列子卷索引异常',
+  version: '重复版本标记异常',
+  split: '册/故事卷统计异常',
   extra: '详情拆包异常',
   img: '封面字段异常',
   source: '来源标记异常',
@@ -56,6 +58,7 @@ const label = {
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
   genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], volume: [], meta: [],
+  version: [], split: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
@@ -114,6 +117,19 @@ data.forEach((x, idx) => {
       });
     }
   }
+  if (x.ver != null) {
+    const primary = byIdAll.get(String(x.ver));
+    if (!x.sv || !primary || !primary.sv) issues.version.push(`${x.i}:主条目 ${x.ver} 不存在或不是系列`);
+    else if (String(x.ver) === String(x.i)) issues.version.push(`${x.i}:不能指向自身`);
+    else if (primary.ver != null) issues.version.push(`${x.i}:主条目 ${x.ver} 仍是版本`);
+  }
+  if (x.chs != null) {
+    if (!x.sv || !Array.isArray(x.ch) || !x.ch.length) {
+      issues.split.push(`${x.i}:chs 只能出现在有子卷的系列`);
+    } else if (!Number.isInteger(x.chs) || x.chs <= 0 || x.chs > x.ch.length) {
+      issues.split.push(`${x.i}:chs=${x.chs}，ch=${x.ch.length}`);
+    }
+  }
 });
 
 if (!volumeMatch) issues.volume.push('未找到 window.LN_VOLUMES');
@@ -162,6 +178,13 @@ if (Number(meta.general) !== general) {
 if (Number(meta.volumes) !== volumes.length) {
   issues.meta.push(`volumes=${meta.volumes}，实际=${volumes.length}`);
 }
+if (Number(meta.versions) !== data.filter((x) => x.ver != null).length) {
+  issues.meta.push(`versions=${meta.versions}，实际=${data.filter((x) => x.ver != null).length}`);
+}
+const physical = data.reduce((n, x) => n + (Array.isArray(x.ch) ? x.ch.length : 0), 0);
+const story = data.reduce((n, x) => n + (Array.isArray(x.ch) ? (x.chs || x.ch.length) : 0), 0);
+if (Number(meta.physicalVolumes) !== physical) issues.meta.push(`physicalVolumes=${meta.physicalVolumes}，实际=${physical}`);
+if (Number(meta.storyVolumes) !== story) issues.meta.push(`storyVolumes=${meta.storyVolumes}，实际=${story}`);
 const dates = data.map((x) => x.d).filter(Boolean).sort();
 const minDate = dates[0] || '';
 const maxDate = dates[dates.length - 1] || '';
