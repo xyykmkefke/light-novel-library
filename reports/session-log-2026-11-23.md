@@ -74,7 +74,7 @@
 ## 4. 验证与部署
 
 ```bash
-cd c:\Users\ASUS\Desktop\音乐\轻小说
+cd "C:/Users/ASUS/Desktop/collection project/轻小说"
 node scripts/check-data.mjs   # 0 问题
 node scripts/test-merge.mjs   # 20/20
 node scripts/verify.mjs       # 203/203
@@ -98,3 +98,11 @@ git -c http.version=HTTP/1.1 push origin main
 - `27da74e` feat: 接入 RanobeDB 扩展书目并补卷与 ISBN
 - `1a8e9f1` docs: 新增 RanobeDB 中文名映射任务方案
 - `ddbf143` perf: 首屏核心拆包并后台补载剩余书目
+
+## 7. P0 收尾（2026-11-23 22:34）
+
+- 路径迁移：接手路径由旧 `Desktop\音乐\轻小说` 改为当前 `Desktop\collection project\轻小说`，会话日志中的 `cd` 命令补引号。
+- 统计口径：`scripts/check-data.mjs` 的「默认可见」统一为 `!c && !gn && !ver`，输出从 2691 / 2001 修正为 **1925**，与 lite 包一致；`问题总数：0` 不变。
+- 最小 CI：新增 `.github/workflows/data-check.yml`，push `main` 与 PR 自动跑 `check-data` + `test-merge`（Node 22 / `npm ci`）；`verify` 依赖本机浏览器，继续本地执行。
+- 文档同步：第 5 节 SW 缓存名 `v18` → `v33`；第 11 节接手提示词改为当前 v1.15.1 维护口径并加入 CI 说明；中文名方案文档的线上版本改为 v1.15.1，并标注为历史记录。
+- 验证：`check-data` 问题总数 0（默认可见 1925）、`test-merge` 20/20、`npm ci --dry-run` 通过。

@@ -296,8 +296,9 @@ function matches(x, keyword) {
   return String(x.cn || '').includes(keyword) || String(x.n || '').includes(keyword);
 }
 
-console.log(`条目总数：${data.length}；系列 ${series} / 单册 ${singles} / 子卷 ${children} / 默认可见 ${data.length - children}`);
-console.log(`来源：轻小说 ${data.length - general} / 一般小说 ${general}；默认可见轻小说 ${data.filter((x) => !x.c && !x.gn).length}`);
+const visibleDefault = data.filter((x) => !x.c && !x.gn && !x.ver).length;
+console.log(`条目总数：${data.length}；系列 ${series} / 单册 ${singles} / 子卷 ${children} / 默认可见 ${visibleDefault}`);
+console.log(`来源：轻小说 ${data.length - general} / 一般小说 ${general}；默认可见轻小说 ${visibleDefault}`);
 console.log(`日期范围：${minDate || '—'} ~ ${maxDate || '—'}`);
 console.log(`题材覆盖：${withGenre}/${data.length}（${(withGenre / data.length * 100).toFixed(1)}%）`);
 console.log(`题材分布：${dist || '无'}`);
