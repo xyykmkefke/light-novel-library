@@ -2,9 +2,11 @@
 
 - 文档日期：2026-11-23
 - 当前状态：**v1.15.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 203/203）
+- 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
+- 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.15.1（已达成，功能：首屏核心拆包，轻量包约 194 KB gzip）
+- 目标版本：v1.15.1（已达成，功能：首屏核心拆包，轻量包约 197 KB gzip）
 
 ## 1. 目标与边界
 
