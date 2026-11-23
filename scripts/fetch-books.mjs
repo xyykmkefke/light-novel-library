@@ -10,7 +10,7 @@ import { mkdir, writeFile, readFile, access, rm, readdir } from 'node:fs/promise
 import path from 'node:path';
 import { initials } from './build-pinyin.mjs';
 import { genreIdsFromNames, rawTagNames } from './genres.mjs';
-import { buildData } from './clean-series.mjs';
+import { buildData, buildMissingVolumes } from './clean-series.mjs';
 
 const BASE = 'https://bgmapi.anibt.net';
 const PAGE_SIZE = 20;
@@ -428,8 +428,9 @@ async function main() {
   metaInfo.general = all.filter((x) => x.gn).length;
   await writeFile(metaFile, JSON.stringify(metaInfo), 'utf8');
 
-  const stats = await buildData(all, relations);
+  const stats = await buildData(all, relations, { volumePack: buildMissingVolumes(all, relations) });
   console.log(`完成：${stats.total} 条（系列 ${stats.series} / 单册 ${stats.singles} / 子卷 ${stats.children} / 默认可见 ${stats.visible}）`);
+  console.log(`懒加载卷包：${stats.volumes} 条 → ${stats.volumeFile}`);
   console.log(`关联子卷 ${stats.relationChildren} 条，标题兜底 ${stats.fallbackAdded} 条`);
   console.log(`父系列继承：书系 ${stats.inherited.line} / 插图 ${stats.inherited.il} / 作者 ${stats.inherited.au} / 出版社 ${stats.inherited.pub} / 题材 ${stats.inherited.tg} / 类型 ${stats.inherited.kind}`);
   console.log(`输出 ${stats.outFile}`);

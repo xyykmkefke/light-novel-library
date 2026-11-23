@@ -23,6 +23,12 @@ const extra = extraMatch ? JSON.parse(extraMatch[1]) : {};
 const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
 const merged = data.map((x) => ({ ...x, ...(extra[String(x.i)] || {}) }));
 
+// 懒加载卷包：核心包只保留系列与独立作品，新卷单独校验
+const volumeRaw = await readFile(path.join(ROOT, 'data', 'light-novels-volumes.js'), 'utf8').catch(() => '');
+const volumeMatch = volumeRaw.match(/window\.LN_VOLUMES\s*=\s*(\[[\s\S]*\]);?/);
+const volumes = volumeMatch ? JSON.parse(volumeMatch[1]) : [];
+const coreIds = new Set(data.map((x) => String(x.i)));
+
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
 const label = {
   duplicate: '重复 ID',
@@ -39,14 +45,20 @@ const label = {
   extra: '详情拆包异常',
   img: '封面字段异常',
   source: '来源标记异常',
+  volume: '卷包异常',
   meta: '元信息异常',
 };
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
-  genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], meta: [],
+  genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], volume: [], meta: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
+volumes.forEach((v) => {
+  if (v && v.i != null) byIdAll.set(String(v.i), v);
+});
+const refIds = new Set();
+data.forEach((x) => (x.ch || []).forEach((cid) => refIds.add(String(cid))));
 
 data.forEach((x, idx) => {
   const id = Number(x.i);
@@ -99,6 +111,24 @@ data.forEach((x, idx) => {
   }
 });
 
+if (!volumeMatch) issues.volume.push('未找到 window.LN_VOLUMES');
+const seenVolume = new Set();
+volumes.forEach((v) => {
+  const id = String(v && v.i);
+  if (!/^\d+$/.test(id)) issues.volume.push(`非法 ID：${id}`);
+  if (coreIds.has(id)) issues.volume.push(`${id}:卷包与核心包重复`);
+  if (seenVolume.has(id)) issues.volume.push(`${id}:卷包内重复`);
+  seenVolume.add(id);
+  if (!String(v.cn || '').trim() && !String(v.n || '').trim()) issues.volume.push(`${id}:缺少标题`);
+  if (v.sv !== false || v.c !== true || v.ns !== false) {
+    issues.volume.push(`${id}:sv=${v.sv},c=${v.c},ns=${v.ns}`);
+  }
+  if (v.img && !/^https?:\/\//.test(v.img) && !/^(pic\/cover\/|\d{2}\/\d{2}\/)/.test(v.img)) {
+    issues.volume.push(`${id}:封面 ${v.img}`);
+  }
+  if (!refIds.has(id)) issues.volume.push(`${id}:未被任何系列 ch 引用`);
+});
+
 Object.keys(extra).forEach((id) => {
   if (!byIdAll.has(id)) issues.extra.push(`${id}:extra 指向不存在的条目`);
   const fields = extra[id];
@@ -119,6 +149,9 @@ if (Number(meta.count) !== data.length) {
 const general = data.filter((x) => x.gn).length;
 if (Number(meta.general) !== general) {
   issues.meta.push(`general=${meta.general}，实际=${general}`);
+}
+if (Number(meta.volumes) !== volumes.length) {
+  issues.meta.push(`volumes=${meta.volumes}，实际=${volumes.length}`);
 }
 const dates = data.map((x) => x.d).filter(Boolean).sort();
 const minDate = dates[0] || '';
@@ -169,6 +202,7 @@ console.log(`字段缺失：作者 ${missing.au} / 插图 ${missing.il} / 出版
 console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 ${missing.vSeries}`);
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
 console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
+console.log(`懒加载卷包：${volumes.length} 条；全部条目 ${data.length + volumes.length} 条`);
 console.log(`拆包：详情 ${Object.keys(extra).length} 条 / 封面路径 ${data.filter((x) => x.img && !/^https?:/.test(x.img)).length} 条`);
 
 for (const keyword of ['文学少女', '无职转生', '白夜行', '人间失格']) {

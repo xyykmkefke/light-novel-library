@@ -244,10 +244,42 @@ async function main() {
     })()`);
     check('详情包按需加载并合并', extraReady === true);
 
+    // 系列新卷：首屏不下载；展开子卷或一键加入时才合并
+    const lazyVolumes = await cdp.evaluate(`(() => ({
+      ready: window.__LN_VOLUMES_READY === true,
+      script: !!document.querySelector('script[src*="light-novels-volumes"]'),
+      total: (window.LN_DATA || []).length,
+      metaVolumes: Number((window.LN_META || {}).volumes) || 0,
+    }))()`);
+    check('首屏未加载卷包',
+      lazyVolumes.ready === false && lazyVolumes.script === false && lazyVolumes.metaVolumes > 7000,
+      JSON.stringify(lazyVolumes));
+    const volumeReady = await cdp.evaluate(`(async () => {
+      await window.__lnLoadVolumes();
+      const d = window.LN_DATA || [];
+      const all = new Map(d.map((x) => [String(x.i), x]));
+      const bad = d.reduce((n, x) => n + (Array.isArray(x.ch)
+        ? x.ch.filter((cid) => !all.get(String(cid))?.c).length : 0), 0);
+      return {
+        ready: window.__LN_VOLUMES_READY === true,
+        count: window.__LN_VOLUME_COUNT,
+        total: d.length,
+        metaVolumes: Number((window.LN_META || {}).volumes) || 0,
+        bad,
+      };
+    })()`);
+    check('卷包按需加载并合并',
+      volumeReady.ready === true && volumeReady.count === volumeReady.metaVolumes &&
+      volumeReady.total === lazyVolumes.total + volumeReady.metaVolumes && volumeReady.bad === 0,
+      JSON.stringify(volumeReady));
+    await reload();
+    await cdp.evaluate('window.__lnLoadExtra()');
+
     const stats = await cdp.evaluate(`(() => {
       const d = window.LN_DATA || [];
       return {
         total: d.length,
+        volumes: Number((window.LN_META || {}).volumes) || 0,
         general: d.filter((x) => x.gn).length,
         defaultVisible: d.filter((x) => !x.c && !x.gn).length,
         meta: window.LN_META || null,
@@ -285,8 +317,8 @@ async function main() {
       (stats.kind.manga || 0) > 0 && (stats.kind.artbook || 0) > 0,
       JSON.stringify(stats.kind));
     check('系列子卷索引完整',
-      stats.chSeries > 300 && stats.chRefs === stats.c && stats.chBad === 0,
-      `${stats.chSeries} 系列 / ${stats.chRefs} 引用 / 异常 ${stats.chBad}`);
+      stats.chSeries > 300 && stats.chRefs === stats.c + stats.volumes,
+      `${stats.chSeries} 系列 / ${stats.chRefs} 引用（核心 ${stats.c} + 卷包 ${stats.volumes}）`);
 
     // ---- 默认筛选 ----
     const visibleDefault = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
@@ -330,11 +362,12 @@ async function main() {
     }
 
     check('显示系列子卷后总数增加', await (async () => {
+      await cdp.evaluate('window.__lnLoadVolumes()');
       await click('#hideChildrenBtn');
       const n = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
       await click('#hideChildrenBtn');
-      return n === stats.total - stats.general;
-    })(), `全部 ${stats.total - stats.general}`);
+      return n === stats.total - stats.general + stats.volumes;
+    })(), `全部 ${stats.total - stats.general + stats.volumes}`);
 
     // ---- 年份 ----
     const year = await cdp.evaluate(`(() => {
@@ -416,6 +449,7 @@ async function main() {
     const yearExprExpected = await cdp.evaluate(`(() => window.LN_DATA.filter((x) => !x.c && !x.gn && String(x.d || '').startsWith('2020')).length)()`);
     check('年:2020 搜索生效', yearExprCount === yearExprExpected, `${yearExprCount}/${yearExprExpected}`);
 
+    await cdp.evaluate('window.__lnLoadExtra()');
     const authorName = await cdp.evaluate(`(() => {
       const x = window.LN_DATA.find((v) => v.au && !v.c && !v.gn);
       return String(x.au).split(/[\\/、,，&]/)[0].trim();
@@ -1218,7 +1252,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.10.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.10.0'));
+    check('页脚版本为 v1.11.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.11.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1255,7 +1289,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.10.0', manifest.version === '1.10.0');
+    check('manifest 版本为 1.11.0', manifest.version === '1.11.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1277,7 +1311,8 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v26'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v27'));
+    check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));

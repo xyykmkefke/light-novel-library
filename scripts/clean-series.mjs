@@ -6,10 +6,13 @@
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { initials } from './build-pinyin.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const BUILD_DIR = path.join(ROOT, 'data', 'build');
 const OUT_FILE = path.join(ROOT, 'data', 'light-novels.js');
+const IMG_BASE_RE = /^https?:\/\/bgmimg\.anibt\.net\/r\/400\//;
+const VOLUME_RELATIONS = new Set(['单行本', '番外篇']);
 
 const VOLUME_RE = /^(?:第)?\d+(?:[卷册集话])?(?:[-~].*)?$/;
 const SUFFIX_RE = /^(?:上|中|下|前|后|新装版|短篇集|外传|番外篇?|画集|公式书|设定集)[^\s]{0,8}$/;
@@ -186,10 +189,53 @@ function buildChildrenMap(records, relations, flags) {
   return children;
 }
 
+// 关联里有、但库中没有的日本轻小说卷：生成懒加载卷包，不进入首屏核心包
+export function buildMissingVolumes(records, relations) {
+  const byId = new Map(records.map((x) => [String(x.i), x]));
+  const parents = [];
+  for (const [parentId, rels] of relations.entries()) {
+    const parent = byId.get(String(parentId));
+    if (!parent) continue;
+    if (parent.gn || !/[\u3040-\u30ff]/.test(parent.n || '')) continue;
+    parents.push([parent, Array.isArray(rels) ? rels : []]);
+  }
+  // 同一卷挂在多个系列时，归到收藏数最高的系列，避免 ch 重复
+  parents.sort((a, b) => (b[0].h || 0) - (a[0].h || 0));
+
+  const volumes = [];
+  const parentById = new Map();
+  for (const [parent, rels] of parents) {
+    for (const rel of rels) {
+      if (rel?.type != null && Number(rel.type) !== 1) continue;
+      const relation = String(rel?.relation || '').trim();
+      if (!VOLUME_RELATIONS.has(relation)) continue;
+      const id = String(rel.id);
+      if (!id || byId.has(id) || parentById.has(id)) continue;
+      const name = String(rel.name || '').trim();
+      if (!name) continue;
+      const cn = String(rel.name_cn || '').trim();
+      const img = String(rel.images?.common || rel.images?.large || '').replace(IMG_BASE_RE, '');
+      volumes.push({
+        i: Number(rel.id),
+        n: name,
+        cn,
+        img,
+        sv: false,
+        c: true,
+        ns: false,
+        py: initials(cn || name),
+      });
+      parentById.set(id, String(parent.i));
+    }
+  }
+  return { volumes, parentById };
+}
+
 export async function buildData(records, relations = new Map(), {
   fallback = true,
   generatedAt = new Date().toISOString(),
   outFile = OUT_FILE,
+  volumePack = { volumes: [], parentById: new Map() },
 } = {}) {
   const parentsByChild = buildParentMap(records, relations);
   const inherited = inheritFromParents(records, parentsByChild);
@@ -198,9 +244,18 @@ export async function buildData(records, relations = new Map(), {
   const fallbackAdded = fallback ? markTitleChildren(records, relations, flags) : 0;
   const childrenByParent = buildChildrenMap(records, relations, flags);
 
+  // 懒加载卷包：只把新卷挂到父系列的 ch，不放进首屏核心包
+  const volumes = Array.isArray(volumePack?.volumes) ? volumePack.volumes : [];
+  const volumeParentById = volumePack?.parentById || new Map();
+  volumeParentById.forEach((pid, cid) => {
+    if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+    const list = childrenByParent.get(pid);
+    if (!list.includes(cid)) list.push(cid);
+  });
+  childrenByParent.forEach((list) => list.sort((a, b) => Number(a) - Number(b)));
+
   // 拆包：详情字段按需加载，网格首屏不下载；封面只存路径，运行时再拼图片域名
   const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
-  const IMG_BASE_RE = /^https?:\/\/bgmimg\.anibt\.net\/r\/400\//;
   const extra = {};
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };
@@ -228,6 +283,7 @@ export async function buildData(records, relations = new Map(), {
   const meta = {
     generatedAt,
     count: final.length,
+    volumes: volumes.length,
     general: final.filter((x) => x.gn).length,
     minDate: dates[0] || '',
     maxDate: dates[dates.length - 1] || '',
@@ -244,11 +300,17 @@ export async function buildData(records, relations = new Map(), {
     `window.LN_EXTRA = ${JSON.stringify(extra)};\n`;
   await writeFile(extraFile, extraContent, 'utf8');
 
+  const volumeFile = outFile.replace(/\.js$/, '-volumes.js');
+  const volumeContent = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n' +
+    `window.LN_VOLUMES = ${JSON.stringify(volumes)};\n`;
+  await writeFile(volumeFile, volumeContent, 'utf8');
+
   return {
     total: final.length,
     series: final.filter((x) => x.sv).length,
     singles: final.filter((x) => !x.sv).length,
     children: final.filter((x) => x.c).length,
+    volumes: volumes.length,
     visible: final.filter((x) => !x.c).length,
     relationSeries: relations.size,
     relationChildren,
@@ -257,6 +319,7 @@ export async function buildData(records, relations = new Map(), {
     outFile,
     extraFile,
     extraCount: Object.keys(extra).length,
+    volumeFile,
   };
 }
 
@@ -307,8 +370,10 @@ export async function loadCachedRelations(records) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const records = await loadCachedPages();
   const relations = await loadCachedRelations(records);
-  const stats = await buildData(records, relations);
+  const volumePack = buildMissingVolumes(records, relations);
+  const stats = await buildData(records, relations, { volumePack });
   console.log(`完成：${stats.total} 条（系列 ${stats.series} / 单册 ${stats.singles} / 子卷 ${stats.children}）`);
+  console.log(`懒加载卷包：${stats.volumes} 条 → ${stats.volumeFile}`);
   console.log(`关联覆盖 ${stats.relationSeries} 个系列，关联子卷 ${stats.relationChildren} 条，标题兜底 ${stats.fallbackAdded} 条`);
   console.log(`父系列继承：书系 ${stats.inherited.line} / 插图 ${stats.inherited.il} / 作者 ${stats.inherited.au} / 出版社 ${stats.inherited.pub} / 题材 ${stats.inherited.tg} / 类型 ${stats.inherited.kind}`);
   console.log(`输出 ${stats.outFile}`);

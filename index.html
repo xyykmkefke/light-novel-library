@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.10.0">
+<meta name="version" content="1.11.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2875,7 +2875,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.10.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.11.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3061,6 +3061,52 @@
     if (modalId) renderDetail(modalId);
     if (state.tab === 'stats') renderStatsPage();
     else if (/(作者|出版社|书系)[:：]/.test(state.q || '')) render();
+  });
+
+  // 系列新卷单独成包：只有展开子卷、打开统计或一键加入全部子卷时才下载
+  var volumesLoaded = false;
+  var volumesLoading = null;
+  function loadVolumes() {
+    if (volumesLoaded) return Promise.resolve();
+    if (volumesLoading) return volumesLoading;
+    volumesLoading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'data/light-novels-volumes.js';
+      script.onload = function () {
+        var list = window.LN_VOLUMES || [];
+        var added = 0;
+        list.forEach(function (v) {
+          var id = String(v && v.i);
+          if (!id || byId.has(id)) return;
+          DATA.push(v);
+          byId.set(id, v);
+          added += 1;
+        });
+        volumesLoaded = true;
+        window.LN_DATA = DATA;
+        window.__LN_VOLUMES_READY = true;
+        window.__LN_VOLUME_COUNT = added;
+        document.dispatchEvent(new CustomEvent('ln-volumes-ready'));
+        resolve();
+      };
+      script.onerror = function () {
+        volumesLoading = null;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return volumesLoading;
+  }
+  window.__lnLoadVolumes = loadVolumes;
+  document.addEventListener('ln-volumes-ready', function () {
+    if (modalId) renderDetail(modalId);
+    if (state.tab === 'stats') renderStatsPage();
+    else render();
+    if (pendingDetail && byId.has(pendingDetail)) {
+      var id = pendingDetail;
+      pendingDetail = null;
+      openDetail(id);
+    }
   });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
   var PREFS_KEY = 'yuc_ln_prefs_v1';
@@ -4522,7 +4568,8 @@
     bulkSel = Object.create(null);
     // syncControls 会把 tab / 搜索框等控件一并同步到 state
     syncControls();
-    render();
+    if (!state.hideChildren) loadVolumes().then(render);
+    else render();
   }
   function renderViewsMenu() {
     var menu = $('viewsMenu');
@@ -5227,6 +5274,7 @@
       gridEl.hidden = true;
       $('statsPanel').hidden = false;
       loadExtra();
+      loadVolumes();
       renderStatsPage();
       writeHash();
       savePrefs();
@@ -5797,7 +5845,8 @@
   $('hideChildrenBtn').addEventListener('click', function () {
     state.hideChildren = !state.hideChildren;
     syncControls();
-    render();
+    if (!state.hideChildren) loadVolumes().then(render);
+    else render();
   });
 
   // 含一般小说：把仅「小说」标签的条目也纳入全库浏览与搜索
@@ -6085,7 +6134,7 @@
       { name: '只用高分（≥8.0）', kind: '筛选', run: function () { state.highScore = true; syncControls(); render(); } },
       { name: '只看已收藏', kind: '筛选', run: function () { state.onlyMine = true; state.hideMine = false; syncControls(); render(); } },
       { name: '隐藏已收藏', kind: '筛选', run: function () { state.hideMine = true; state.onlyMine = false; syncControls(); render(); } },
-      { name: '显示系列子卷', kind: '筛选', run: function () { state.hideChildren = false; syncControls(); render(); } },
+      { name: '显示系列子卷', kind: '筛选', run: function () { state.hideChildren = false; syncControls(); loadVolumes().then(render); } },
       { name: '切换含一般小说', kind: '筛选', run: function () { state.includeNovel = !state.includeNovel; syncControls(); render(); } },
       { name: '只看轻小说', kind: '筛选', run: function () { state.kind = 'novel'; syncControls(); render(); } },
       { name: '切换明暗主题', kind: '外观', run: function () { $('themeBtn').click(); } },
@@ -6260,7 +6309,7 @@
     if (e.target.closest('#showChildrenBtn')) {
       state.hideChildren = false;
       syncControls();
-      render();
+      loadVolumes().then(render);
       return;
     }
     if (e.target.closest('#clearMineFilter')) {
@@ -6723,26 +6772,28 @@
   // 系列详情：一键把该系列全部子卷加入想读
   $('detailAddChildren').addEventListener('click', function () {
     if (!modalId) return;
-    var item = byId.get(modalId);
-    if (!item || !Array.isArray(item.ch)) return;
-    var now = Date.now();
-    var added = 0;
-    item.ch.forEach(function (cid, i) {
-      var key = String(cid);
-      if (myMap[key]) return;
-      myMap[key] = { s: 'want', t: now + i, vol: 0, u: now + i, f: 0, r: 0, rv: '', nt: '', rvU: 0 };
-      clearDeleted(key);
-      added += 1;
+    loadVolumes().then(function () {
+      var item = byId.get(modalId);
+      if (!item || !Array.isArray(item.ch)) return;
+      var now = Date.now();
+      var added = 0;
+      item.ch.forEach(function (cid, i) {
+        var key = String(cid);
+        if (myMap[key]) return;
+        myMap[key] = { s: 'want', t: now + i, vol: 0, u: now + i, f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+        clearDeleted(key);
+        added += 1;
+      });
+      if (!added) {
+        toast('该系列子卷已全部在阅读列表');
+        return;
+      }
+      markDay();
+      saveMine();
+      render();
+      renderDetail(modalId);
+      toast('已把 ' + added + ' 卷加入想读');
     });
-    if (!added) {
-      toast('该系列子卷已全部在阅读列表');
-      return;
-    }
-    markDay();
-    saveMine();
-    render();
-    renderDetail(modalId);
-    toast('已把 ' + added + ' 卷加入想读');
   });
 
   // 详情内一键进度：局部刷新，避免重建书评输入区丢失未保存草稿
@@ -7837,9 +7888,11 @@
       return;
     }
     var general = DATA.filter(function (x) { return x.gn; }).length;
+    var volumes = Number(META.volumes) || 0;
     el.textContent = '共 ' + (DATA.length - general) + ' 本轻小说' +
-      (general ? ' · 另有 ' + general + ' 本一般小说' : '');
-    el.title = general ? '一般小说仅在开启「含一般小说」后显示与搜索' : '';
+      (volumes ? ' · 另有 ' + volumes + ' 卷' : '') +
+      (general ? ' · ' + general + ' 本一般小说' : '');
+    el.title = '系列新卷按需加载；一般小说仅在开启「含一般小说」后显示与搜索';
   }
 
   // 页脚展示数据快照时间（本地时区），让用户知道数据新鲜度
@@ -7913,6 +7966,7 @@
   pendingDetail = initialDetail && !byId.has(initialDetail) ? initialDetail : null;
   syncControls();
   render();
+  if (!state.hideChildren) loadVolumes().then(render);
   if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();
   renderDataUpdated();
