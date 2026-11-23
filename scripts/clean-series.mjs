@@ -14,6 +14,20 @@ const OUT_FILE = path.join(ROOT, 'data', 'light-novels.js');
 const IMG_BASE_RE = /^https?:\/\/bgmimg\.anibt\.net\/r\/400\//;
 const VOLUME_RELATIONS = new Set(['单行本', '番外篇']);
 
+function normalizeIsbn(code) {
+  const raw = String(code || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+  if (raw.length === 13) {
+    if (!/^\d{13}$/.test(raw)) return '';
+    const sum = raw.slice(0, 12).split('').reduce((n, d, i) => n + Number(d) * (i % 2 ? 3 : 1), 0);
+    return (10 - (sum % 10)) % 10 === Number(raw[12]) ? raw : '';
+  }
+  if (raw.length !== 10) return '';
+  const body = '978' + raw.slice(0, 9);
+  const sum = body.split('').reduce((n, d, i) => n + Number(d) * (i % 2 ? 3 : 1), 0);
+  const code13 = body + ((10 - (sum % 10)) % 10);
+  return /^\d{13}$/.test(code13) ? code13 : '';
+}
+
 const VOLUME_RE = /^(?:第)?\d+(?:[卷册集话])?(?:[-~].*)?$/;
 const SUFFIX_RE = /^(?:上|中|下|前|后|新装版|短篇集|外传|番外篇?|画集|公式书|设定集)[^\s]{0,8}$/;
 
@@ -255,11 +269,16 @@ export async function buildData(records, relations = new Map(), {
   childrenByParent.forEach((list) => list.sort((a, b) => Number(a) - Number(b)));
 
   // 拆包：详情字段按需加载，网格首屏不下载；封面只存路径，运行时再拼图片域名
-  const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
+  const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'jd'];
   const extra = {};
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };
     if (!Array.isArray(out.tg) || !out.tg.length) delete out.tg;
+    if (out.isbn) {
+      const isbn = normalizeIsbn(out.isbn);
+      if (isbn) out.isbn = isbn;
+      else delete out.isbn;
+    }
     if (out.sv && childrenByParent.has(String(rest.i))) out.ch = childrenByParent.get(String(rest.i));
     const fields = {};
     EXTRA_KEYS.forEach((key) => {

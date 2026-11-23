@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.11.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 189/189）
+- 当前状态：**v1.12.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 191/191）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.11.0（已达成，功能：系列关联补卷与懒加载卷包）
+- 目标版本：v1.12.0（已达成，功能：openBD 日文书志补全）
 
 ## 1. 目标与边界
 
@@ -55,13 +55,13 @@ User-Agent: yuc-light-novel-list/1.0
 - 搜索结果已包含 `infobox`、`tags`、`rating`、`collection`，无需逐条请求详情。
 - 建议请求间隔 800ms，失败重试 4 次（2s / 4s / 6s 退避）。
 
-数据构成（实测 4815 条）：
+数据构成（实测 4851 条）：
 
-- `series: true` 1291 条：系列主条目
-- `series: false` 3524 条：单册，或某个系列的卷
-- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2143 条；默认可见轻小说 1988 条
-- 仅「小说」标签、没有「轻小说」标签的 723 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说
-- 关联中还有、库中没有的 7584 卷（单行本 + 番外篇）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
+- `series: true` 1306 条：系列主条目
+- `series: false` 3545 条：单册，或某个系列的卷
+- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2158 条；默认可见轻小说 1904 条
+- 仅「小说」标签、没有「轻小说」标签的 789 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说
+- 关联中还有、库中没有的 7617 卷（单行本 + 番外篇）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
 - 需要「隐藏系列子卷」清洗，否则搜索一个系列会出现多条重复
 
 ## 3. 抓取与产出
@@ -273,11 +273,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v27`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v28`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：189/189）
+### Step 5 验收（已完成：191/191）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -593,6 +593,14 @@ PWA / 移动端：
 - 数据：卷包 `data/light-novels-volumes.js` 约 1.35 MB，只存 id、标题、封面相对路径、拼音与必需布尔字段；核心包 `ch` 引用卷 ID，核心体积基本不变。
 - UI：`loadVolumes()` 按需注入卷包并合并进 `DATA`；展开子卷、打开统计、一键加入全部子卷、应用含子卷视图时触发；首屏与服务端 SHELL 都不下载卷包。
 - 校验：`check-data` 新增卷包结构、重复 ID、封面路径、ch 引用完整性校验；`verify` 新增首屏未加载卷包、按需合并、SW 不预缓存卷包 3 项，共 189 项。
+
+## 9.28 v1.12.0 openBD 日文书志补全（2026-11-23）
+
+- ISBN：`fetch-books.mjs` 从 infobox 提取 ISBN-10/13，`clean-series.mjs` 统一转 13 位并做校验，非法值直接丢弃；当前核心 4851 条中 3353 条有有效 ISBN。
+- openBD：`scripts/enrich-openbd.mjs` 按 100 个 ISBN 一批查询 `api.openbd.jp`，结果按 ISBN 缓存在 `data/build/openbd/`；查询 3355 条、命中 3034 条。
+- 字段：补书系 979 条、出版社 3 条；`jd` 写入日文版发售日（YYYY-MM / YYYY-MM-DD），共 2950 条。当前书系覆盖 3595 条、出版社 4793 条。
+- UI：详情新增 ISBN 与「日文版」两项；`isbn`、`jd` 仍放在详情包，首屏不下载。
+- 校验：`check-data` 增加 ISBN-13 校验和、日文版日期格式；`verify` 增加 ISBN 与日文版发售日覆盖 2 项，共 191 项。
 
 ## 10. 已知风险与决策
 

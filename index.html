@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.11.0">
+<meta name="version" content="1.12.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2875,7 +2875,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.11.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.12.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -5530,6 +5530,8 @@
     if (item.il) pairs.push(['插图', item.il]);
     if (item.pub) pairs.push(['出版社', item.pub]);
     if (item.line) pairs.push(['书系', item.line]);
+    if (item.isbn) pairs.push(['ISBN', item.isbn]);
+    if (item.jd) pairs.push(['日文版', item.jd]);
     if (item.gn) pairs.push(['收录', '一般小说（Bangumi「小说」标签）']);
     if (item.kind && KIND_LABEL[item.kind]) pairs.push(['类型', KIND_LABEL[item.kind]]);
     // 收藏后补充加入时间与读完时间

@@ -20,7 +20,7 @@ const data = JSON.parse(dataMatch[1]);
 const extraRaw = await readFile(path.join(ROOT, 'data', 'light-novels-extra.js'), 'utf8').catch(() => '');
 const extraMatch = extraRaw.match(/window\.LN_EXTRA\s*=\s*(\{[\s\S]*\});?/);
 const extra = extraMatch ? JSON.parse(extraMatch[1]) : {};
-const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
+const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'jd'];
 const merged = data.map((x) => ({ ...x, ...(extra[String(x.i)] || {}) }));
 
 // 懒加载卷包：核心包只保留系列与独立作品，新卷单独校验
@@ -30,6 +30,11 @@ const volumes = volumeMatch ? JSON.parse(volumeMatch[1]) : [];
 const coreIds = new Set(data.map((x) => String(x.i)));
 
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
+function validIsbn13(code) {
+  if (!/^\d{13}$/.test(code)) return false;
+  const sum = code.slice(0, 12).split('').reduce((n, d, i) => n + Number(d) * (i % 2 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === Number(code[12]);
+}
 const label = {
   duplicate: '重复 ID',
   date: '非法日期',
@@ -139,6 +144,8 @@ Object.keys(extra).forEach((id) => {
   Object.keys(fields).forEach((key) => {
     if (!EXTRA_KEYS.includes(key)) issues.extra.push(`${id}:未知字段 ${key}`);
     if (typeof fields[key] !== 'string' || !fields[key].trim()) issues.extra.push(`${id}:${key} 为空`);
+    if (key === 'isbn' && !validIsbn13(fields[key])) issues.extra.push(`${id}:ISBN 校验失败 ${fields[key]}`);
+    if (key === 'jd' && !/^\d{4}(-\d{2}){0,2}$/.test(fields[key])) issues.extra.push(`${id}:日文版日期异常 ${fields[key]}`);
   });
 });
 if (!extraMatch) issues.extra.push('未找到 window.LN_EXTRA');

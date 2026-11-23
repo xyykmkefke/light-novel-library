@@ -99,6 +99,17 @@ function infoboxValue(infobox, keys) {
   return '';
 }
 
+function isbnValue(infobox) {
+  if (!Array.isArray(infobox)) return '';
+  for (const entry of infobox) {
+    if (!entry || !/isbn/i.test(String(entry.key || ''))) continue;
+    const digits = flattenValue(entry.value).replace(/[^0-9Xx]/g, '');
+    if (digits.length === 13) return digits;
+    if (digits.length === 10) return digits.toUpperCase();
+  }
+  return '';
+}
+
 // 中文版/台版的书系常嵌在「版本:xxx」对象里
 function nestedVersionValue(infobox, keys) {
   if (!Array.isArray(infobox)) return '';
@@ -158,6 +169,7 @@ function slim(item) {
     il: rawIllust || art || infoboxValue(infobox, ['人物原案']),
     pub: infoboxValue(infobox, ['出版社', '发行', '出版商', '発行']),
     line,
+    isbn: isbnValue(infobox),
     ns: item.nsfw === true,
     rt: tags,
   };
