@@ -122,6 +122,17 @@ const core = JSON.parse(coreRaw.match(/window\.LN_DATA\s*=\s*(\[[\s\S]*\]);?/)[1
 const volumeRaw = await readFile(path.join(ROOT, 'data', 'light-novels-volumes.js'), 'utf8');
 const volumes = JSON.parse(volumeRaw.match(/window\.LN_VOLUMES\s*=\s*(\[[\s\S]*\]);?/)[1]);
 
+// 可选：Bangumi 中文名映射（scripts/link-ranobedb-cn.mjs 产出），无文件时全部留空
+const CN_FILE = path.join(ROOT, 'data', 'ranobedb-cn.json');
+let cnMatches = {};
+try {
+  const cnRaw = JSON.parse(await readFile(CN_FILE, 'utf8'));
+  cnMatches = cnRaw && typeof cnRaw.matches === 'object' ? cnRaw.matches : {};
+  console.log(`中文名映射：${Object.keys(cnMatches).length} 条`);
+} catch {
+  console.log('中文名映射：未找到 data/ranobedb-cn.json，扩展条目保持日文标题');
+}
+
 const localTitles = [];
 [...core, ...volumes].forEach((x) => {
   const n = norm(x.n);
@@ -153,17 +164,21 @@ picked.sort((a, b) => (Number(b.c_start_date) || 0) - (Number(a.c_start_date) ||
 
 const entries = picked.map((s) => {
   const filename = s.book && s.book.image && s.book.image.filename;
+  const cnHit = cnMatches[String(s.id)] || null;
+  const cn = cnHit && String(cnHit.cn || '').trim() ? String(cnHit.cn).trim() : '';
   return {
     i: ID_BASE + Number(s.id),
     n: String(s.title_orig).trim(),
     en: String(s.title || '').trim(),
+    ...(cn ? { cn } : {}),
+    ...(cn && Number(cnHit.bgm) > 0 ? { bgm: Number(cnHit.bgm) } : {}),
     d: fmtDate(s.c_start_date),
     v: Number(s.c_num_books) || 0,
     sv: true,
     c: false,
     ns: false,
     img: filename ? `https://images.ranobedb.org/${filename}` : '',
-    py: initials(s.title_orig),
+    py: initials(cn || s.title_orig),
     rn: true,
     rid: Number(s.id),
   };
@@ -174,6 +189,7 @@ const meta = {
   generatedAt: new Date().toISOString(),
   count: entries.length,
   volumes: entries.reduce((n, x) => n + (Number(x.v) || 0), 0),
+  cnMapped: entries.filter((x) => x.cn).length,
   minDate: dates[0] || '',
   maxDate: dates[dates.length - 1] || '',
   minVolumes: MIN_VOLUMES,

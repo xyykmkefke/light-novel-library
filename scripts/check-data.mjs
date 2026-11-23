@@ -193,10 +193,24 @@ if (!rnMetaMatch || !rnDataMatch) {
     if (x.img && !/^https:\/\/images\.ranobedb\.org\//.test(x.img)) issues.rn.push(`${id}:封面 ${x.img}`);
     if (x.ch != null) issues.rn.push(`${id}:扩展系列不应有 ch`);
     if (x.en != null && typeof x.en !== 'string') issues.rn.push(`${id}:en 类型错误`);
+    if (x.cn != null) {
+      const cn = String(x.cn).trim();
+      if (!cn) issues.rn.push(`${id}:cn 为空字符串`);
+      if (cn === String(x.n || '').trim()) issues.rn.push(`${id}:cn 与日文标题相同`);
+      if (x.bgm != null && (!Number.isInteger(Number(x.bgm)) || Number(x.bgm) <= 0)) {
+        issues.rn.push(`${id}:bgm=${x.bgm}`);
+      }
+    } else if (x.bgm != null) {
+      issues.rn.push(`${id}:有 bgm 但缺少 cn`);
+    }
   });
   if (Number(rnMeta.count) !== rn.length) issues.rn.push(`meta.count=${rnMeta.count}，实际=${rn.length}`);
   const rnVolumes = rn.reduce((n, x) => n + (Number(x.v) || 0), 0);
   if (Number(rnMeta.volumes) !== rnVolumes) issues.rn.push(`meta.volumes=${rnMeta.volumes}，实际=${rnVolumes}`);
+  if (rnMeta.cnMapped != null) {
+    const mapped = rn.filter((x) => x.cn).length;
+    if (Number(rnMeta.cnMapped) !== mapped) issues.rn.push(`meta.cnMapped=${rnMeta.cnMapped}，实际=${mapped}`);
+  }
   if (rnMeta.source !== 'RanobeDB' || rnMeta.license !== 'ODbL') issues.rn.push('来源或授权标记缺失');
 }
 
