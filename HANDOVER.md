@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.8.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 181/181）
+- 当前状态：**v1.9.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 183/183）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.8.0（已达成，功能：系列一键加入全部子卷）
+- 目标版本：v1.9.0（已达成，功能：加载性能优化）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v24`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v25`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：181/181）
+### Step 5 验收（已完成：183/183）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -562,6 +562,17 @@ PWA / 移动端：
 - 数据体积 4007 条约 1.16 MB（新增索引约 20 KB）。
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.8.0；SW 缓存名升到 `yuc-ln-shell-v24`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 181/181（新增子卷索引 1 项、一键加入 3 项）。
+
+## 9.25 v1.9.0 性能优化记录（2026-11-23）
+
+- 拆包：`data/light-novels.js` 只保留首屏字段（960 KB，gzip 268 KB）；作者、插图、出版社、书系移入 `data/light-novels-extra.js`（370 KB，gzip 60 KB）。
+- 按需加载：打开详情、进入统计、导出 CSV/Markdown、搜索含 `作者:` / `出版社:` / `书系:` 时注入 `light-novels-extra.js`，合并进同一份数据对象后重渲染。
+- 封面：数据只存相对路径（`pic/cover/...`），页面启动时补全 `https://bgmimg.anibt.net/r/400/`；网格仍走 `r/200` srcset。
+- 首屏：先渲染 60 张卡片，`requestIdleCallback` 补齐到 240；旧渲染任务用序号作废，避免重复插入。
+- 首包对比：数据由 1.43 MB / gzip 373 KB 降到 960 KB / gzip 268 KB（-28%）；详情包按需再取 60 KB。
+- 版本与缓存：1.9.0；SW `yuc-ln-shell-v25` 预缓存核心包与详情包。
+- 测试：`check-data` 0 问题（新增拆包与封面路径校验）；`test-merge` 20/20；`verify` 183/183（新增首屏未加载详情包、按需加载合并 2 项）。
+- 未改托管：GitHub Pages 国内带宽仍是主要瓶颈，后续可迁 Cloudflare Pages / Vercel。
 
 ## 10. 已知风险与决策
 

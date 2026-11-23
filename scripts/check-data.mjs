@@ -16,6 +16,13 @@ if (!metaMatch || !dataMatch) {
 const meta = JSON.parse(metaMatch[1]);
 const data = JSON.parse(dataMatch[1]);
 
+// 详情字段拆包：读取 extra 并在校验时合并，确保字段覆盖统计仍然准确
+const extraRaw = await readFile(path.join(ROOT, 'data', 'light-novels-extra.js'), 'utf8').catch(() => '');
+const extraMatch = extraRaw.match(/window\.LN_EXTRA\s*=\s*(\{[\s\S]*\});?/);
+const extra = extraMatch ? JSON.parse(extraMatch[1]) : {};
+const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
+const merged = data.map((x) => ({ ...x, ...(extra[String(x.i)] || {}) }));
+
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
 const label = {
   duplicate: '重复 ID',
@@ -29,11 +36,13 @@ const label = {
   flags: '布尔字段异常',
   kind: '类型字段异常',
   children: '系列子卷索引异常',
+  extra: '详情拆包异常',
+  img: '封面字段异常',
   meta: '元信息异常',
 };
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
-  genre: [], leak: [], flags: [], kind: [], children: [], meta: [],
+  genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], meta: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
@@ -50,6 +59,12 @@ data.forEach((x, idx) => {
   if (x.v != null && (!Number.isInteger(Number(x.v)) || Number(x.v) < 0)) issues.volumes.push(`${x.i}:${x.v}`);
   if (!String(x.cn || '').trim() && !String(x.n || '').trim()) issues.title.push(String(x.i));
   if (x.rt) issues.leak.push(String(x.i));
+  EXTRA_KEYS.forEach((key) => {
+    if (key in x) issues.extra.push(`${x.i}:核心包不应包含 ${key}`);
+  });
+  if (x.img && !/^https?:\/\//.test(x.img) && !/^(pic\/cover\/|\d{2}\/\d{2}\/)/.test(x.img)) {
+    issues.img.push(`${x.i}:${x.img}`);
+  }
   if (typeof x.sv !== 'boolean' || typeof x.c !== 'boolean' || typeof x.ns !== 'boolean') {
     issues.flags.push(`${x.i}:sv=${x.sv},c=${x.c},ns=${x.ns}`);
   }
@@ -82,6 +97,20 @@ data.forEach((x, idx) => {
   }
 });
 
+Object.keys(extra).forEach((id) => {
+  if (!byIdAll.has(id)) issues.extra.push(`${id}:extra 指向不存在的条目`);
+  const fields = extra[id];
+  if (!fields || typeof fields !== 'object') {
+    issues.extra.push(`${id}:字段格式错误`);
+    return;
+  }
+  Object.keys(fields).forEach((key) => {
+    if (!EXTRA_KEYS.includes(key)) issues.extra.push(`${id}:未知字段 ${key}`);
+    if (typeof fields[key] !== 'string' || !fields[key].trim()) issues.extra.push(`${id}:${key} 为空`);
+  });
+});
+if (!extraMatch) issues.extra.push('未找到 window.LN_EXTRA');
+
 if (Number(meta.count) !== data.length) {
   issues.meta.push(`count=${meta.count}，实际=${data.length}`);
 }
@@ -109,14 +138,14 @@ const dist = GENRES.filter((g) => genreCounts[g.id])
   .map((g) => `${g.label} ${genreCounts[g.id]}`).join(' · ');
 
 const missing = {
-  au: data.filter((x) => !String(x.au || '').trim()).length,
-  il: data.filter((x) => !String(x.il || '').trim()).length,
-  pub: data.filter((x) => !String(x.pub || '').trim()).length,
-  line: data.filter((x) => !String(x.line || '').trim()).length,
-  img: data.filter((x) => !String(x.img || '').trim()).length,
-  d: data.filter((x) => !String(x.d || '').trim()).length,
-  vSeries: data.filter((x) => x.sv && !Number(x.v)).length,
-  vSingles: data.filter((x) => !x.sv && !Number(x.v)).length,
+  au: merged.filter((x) => !String(x.au || '').trim()).length,
+  il: merged.filter((x) => !String(x.il || '').trim()).length,
+  pub: merged.filter((x) => !String(x.pub || '').trim()).length,
+  line: merged.filter((x) => !String(x.line || '').trim()).length,
+  img: merged.filter((x) => !String(x.img || '').trim()).length,
+  d: merged.filter((x) => !String(x.d || '').trim()).length,
+  vSeries: merged.filter((x) => x.sv && !Number(x.v)).length,
+  vSingles: merged.filter((x) => !x.sv && !Number(x.v)).length,
 };
 const kinds = { manga: 0, artbook: 0, guide: 0 };
 data.forEach((x) => { if (x.kind) kinds[x.kind] += 1; });
@@ -133,6 +162,7 @@ console.log(`字段缺失：作者 ${missing.au} / 插图 ${missing.il} / 出版
 console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 ${missing.vSeries}`);
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
 console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
+console.log(`拆包：详情 ${Object.keys(extra).length} 条 / 封面路径 ${data.filter((x) => x.img && !/^https?:/.test(x.img)).length} 条`);
 
 for (const keyword of ['文学少女', '无职转生', '白夜行', '人间失格']) {
   const visible = data.filter((x) => !x.c && matches(x, keyword));

@@ -172,10 +172,21 @@ export async function buildData(records, relations = new Map(), {
   const fallbackAdded = fallback ? markTitleChildren(records, relations, flags) : 0;
   const childrenByParent = buildChildrenMap(records, relations, flags);
 
+  // 拆包：详情字段按需加载，网格首屏不下载；封面只存路径，运行时再拼图片域名
+  const EXTRA_KEYS = ['au', 'il', 'pub', 'line'];
+  const IMG_BASE_RE = /^https?:\/\/bgmimg\.anibt\.net\/r\/400\//;
+  const extra = {};
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };
     if (!Array.isArray(out.tg) || !out.tg.length) delete out.tg;
     if (out.sv && childrenByParent.has(String(rest.i))) out.ch = childrenByParent.get(String(rest.i));
+    const fields = {};
+    EXTRA_KEYS.forEach((key) => {
+      if (out[key]) fields[key] = out[key];
+      delete out[key];
+    });
+    if (Object.keys(fields).length) extra[String(out.i)] = fields;
+    if (typeof out.img === 'string') out.img = out.img.replace(IMG_BASE_RE, '');
     return out;
   });
 
@@ -201,6 +212,11 @@ export async function buildData(records, relations = new Map(), {
   await mkdir(path.dirname(outFile), { recursive: true });
   await writeFile(outFile, content, 'utf8');
 
+  const extraFile = outFile.replace(/\.js$/, '-extra.js');
+  const extraContent = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n' +
+    `window.LN_EXTRA = ${JSON.stringify(extra)};\n`;
+  await writeFile(extraFile, extraContent, 'utf8');
+
   return {
     total: final.length,
     series: final.filter((x) => x.sv).length,
@@ -212,6 +228,8 @@ export async function buildData(records, relations = new Map(), {
     fallbackAdded,
     inherited,
     outFile,
+    extraFile,
+    extraCount: Object.keys(extra).length,
   };
 }
 

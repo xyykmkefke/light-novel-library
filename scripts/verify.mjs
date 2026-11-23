@@ -229,6 +229,21 @@ async function main() {
     })()`);
     check('首屏脚本解析在 4 秒内', perf.dcl > 0 && perf.dcl < 4000, `DCL ${perf.dcl}ms / FCP ${perf.paint}ms`);
 
+    // 详情字段拆包：首屏不应下载，按需加载后才合并进数据
+    const lazyExtra = await cdp.evaluate(`(() => ({
+      ready: window.__LN_EXTRA_READY === true,
+      script: !!document.querySelector('script[src*="light-novels-extra"]'),
+      coreHasAuthor: (window.LN_DATA || []).some((x) => x.au),
+    }))()`);
+    check('首屏未加载详情包',
+      lazyExtra.ready === false && lazyExtra.script === false && lazyExtra.coreHasAuthor === false,
+      JSON.stringify(lazyExtra));
+    const extraReady = await cdp.evaluate(`(async () => {
+      await window.__lnLoadExtra();
+      return window.__LN_EXTRA_READY === true && (window.LN_DATA || []).some((x) => x.au);
+    })()`);
+    check('详情包按需加载并合并', extraReady === true);
+
     const stats = await cdp.evaluate(`(() => {
       const d = window.LN_DATA || [];
       return {
@@ -1188,7 +1203,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.8.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.8.0'));
+    check('页脚版本为 v1.9.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.9.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1225,7 +1240,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.8.0', manifest.version === '1.8.0');
+    check('manifest 版本为 1.9.0', manifest.version === '1.9.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1247,8 +1262,8 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v24'));
-    check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v25'));
+    check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
     const indexTxt = await (await fetch(`http://127.0.0.1:${PORT}/index.html`)).text();

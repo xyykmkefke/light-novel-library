@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.8.0">
+<meta name="version" content="1.9.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2874,7 +2874,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.8.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.9.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3003,6 +3003,12 @@
 
 <script src="data/light-novels.js"></script>
 <script>
+  // 封面在数据里只存相对路径，运行时补全图片域名，减小首包体积
+  (window.LN_DATA || []).forEach(function (x) {
+    if (x.img && !/^https?:/.test(x.img)) x.img = 'https://bgmimg.anibt.net/r/400/' + x.img;
+  });
+</script>
+<script>
 (function () {
   'use strict';
 
@@ -3019,6 +3025,42 @@
 
   adoptData();
   window.__FULL_DATA_READY = fullReady;
+
+  // 详情字段（作者/插图/出版社/书系）单独成包：默认不下载，打开详情、统计、导出或按这些字段搜索时再加载
+  var extraLoaded = false;
+  var extraLoading = null;
+  function loadExtra() {
+    if (extraLoaded) return Promise.resolve();
+    if (extraLoading) return extraLoading;
+    extraLoading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'data/light-novels-extra.js';
+      script.onload = function () {
+        var extra = window.LN_EXTRA || {};
+        DATA.forEach(function (x) {
+          var fields = extra[String(x.i)];
+          if (!fields) return;
+          Object.keys(fields).forEach(function (key) { x[key] = fields[key]; });
+        });
+        extraLoaded = true;
+        window.__LN_EXTRA_READY = true;
+        document.dispatchEvent(new CustomEvent('ln-extra-ready'));
+        resolve();
+      };
+      script.onerror = function () {
+        extraLoading = null;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return extraLoading;
+  }
+  window.__lnLoadExtra = loadExtra;
+  document.addEventListener('ln-extra-ready', function () {
+    if (modalId) renderDetail(modalId);
+    if (state.tab === 'stats') renderStatsPage();
+    else if (/(作者|出版社|书系)[:：]/.test(state.q || '')) render();
+  });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
   var PREFS_KEY = 'yuc_ln_prefs_v1';
   var HIST_KEY = 'yuc_ln_hist_v1';
@@ -3133,6 +3175,8 @@
   var gridEl = $('grid');
   // 分批渲染：首屏最多 240 张，其余按需追加，避免一次性插入近万节点
   var PAGE_SIZE = 240;
+  var FIRST_BATCH = 60;
+  var renderSeq = 0;
 
   function updateLoadMore(total, shown, paged) {
     var rest = paged && total > shown ? total - shown : 0;
@@ -5136,6 +5180,8 @@
   }
 
   function render() {
+    renderSeq += 1;
+    var currentRender = renderSeq;
     // 状态筛选只在「我的阅读」或搜索时生效，其他场景静默清掉，避免出现无效条件
     if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
     // 视图与 tab 不匹配时回退，避免看板在错误的数据集上显示空列
@@ -5157,6 +5203,7 @@
       $('continueRow').hidden = true;
       gridEl.hidden = true;
       $('statsPanel').hidden = false;
+      loadExtra();
       renderStatsPage();
       writeHash();
       savePrefs();
@@ -5222,12 +5269,15 @@
       (state.tab === 'mine' && state.group && !board ? ' timeline' : '');
     var grouped = state.tab === 'mine' && state.group && !board;
     // 看板与分组一次展示全部；网格、列表按批渲染
+    var paged = !grouped && !board;
     var shown = board || grouped ? list : list.slice(0, PAGE_SIZE);
+    // 首屏先建 60 张，剩余在当前批内空闲补齐，减少首帧主线程占用
+    var initial = paged ? shown.slice(0, FIRST_BATCH) : shown;
     gridEl.innerHTML = board
       ? boardHtml(list)
       : grouped
         ? (state.groupBy === 'status' ? statusGroupsHtml(shown) : timelineHtml(shown))
-        : shown.map(cardHtml).join('');
+        : initial.map(cardHtml).join('');
     gridEl.setAttribute('aria-busy', 'false');
     // 只让第一张卡片进入 Tab 序列，其余用方向键移动，避免逐卡 Tab 数百次
     var cardLinks = gridEl.querySelectorAll('.card-link');
@@ -5240,7 +5290,20 @@
       firstImgs[bi].setAttribute('loading', 'eager');
       firstImgs[bi].setAttribute('fetchpriority', 'high');
     }
-    updateLoadMore(list.length, shown.length, !grouped && !board);
+    updateLoadMore(list.length, shown.length, paged);
+    if (paged && shown.length > initial.length) {
+      var appendRest = function () {
+        if (currentRender !== renderSeq || !gridEl.isConnected) return;
+        var rest = shown.slice(initial.length);
+        if (!rest.length) return;
+        gridEl.insertAdjacentHTML('beforeend', rest.map(cardHtml).join(''));
+        var restLinks = gridEl.querySelectorAll('.card-link');
+        for (var ri = initial.length; ri < restLinks.length; ri += 1) restLinks[ri].tabIndex = -1;
+        updateLoadMore(list.length, shown.length, true);
+      };
+      if (window.requestIdleCallback) requestIdleCallback(appendRest, { timeout: 500 });
+      else setTimeout(appendRest, 120);
+    }
     emptyEl.hidden = list.length > 0;
     emptyActions = [];
     if (!list.length) {
@@ -5357,6 +5420,7 @@
   }
 
   function renderDetail(id) {
+    loadExtra();
     var item = byId.get(id);
     if (!item) return;
     var collected = !!myMap[id];
@@ -6219,6 +6283,7 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () {
       state.q = searchEl.value;
+      if (/(作者|出版社|书系)[:：]/.test(state.q)) loadExtra();
       // 全库搜索清空后，状态过滤随之失效，避免下次搜索被静默限制
       if (state.tab === 'all' && !state.q.trim()) state.status = 'all';
       render();
@@ -7146,6 +7211,7 @@
   });
 
   $('exportCsv').addEventListener('click', function () {
+    if (!extraLoaded) { loadExtra().then(function () { $('exportCsv').click(); }); return; }
     var rows = [['条目ID', '中文名', '原名', '作者', '出版社', '书系', '题材', '发售日', '册数', '状态', '已读卷', '我的评分', '短评', '笔记', '读完日期', '加入时间']];
     sortedMine().forEach(function (id) {
       var x = byId.get(id);
@@ -7168,6 +7234,7 @@
   });
 
   $('exportMd').addEventListener('click', function () {
+    if (!extraLoaded) { loadExtra().then(function () { $('exportMd').click(); }); return; }
     var ids = sortedMine();
     var lines = [
       '# 我的轻小说',
