@@ -20,18 +20,6 @@ export function normalizeTitle(value) {
     .replace(/[\s\u3000'"“”‘’·・:：,，.。!！?？、\-—~～()（）\[\]【】《》〈〉<>]/g, '');
 }
 
-function volumeRelationIds(relations) {
-  const ids = new Set();
-  for (const rels of relations.values()) {
-    for (const rel of Array.isArray(rels) ? rels : []) {
-      if (String(rel?.relation || '').trim() !== '单行本') continue;
-      if (rel?.type != null && Number(rel.type) !== 1) continue;
-      ids.add(String(rel.id));
-    }
-  }
-  return ids;
-}
-
 function seriesWithVolumeRelations(relations) {
   const ids = new Set();
   for (const [seriesId, rels] of relations.entries()) {
@@ -43,26 +31,46 @@ function seriesWithVolumeRelations(relations) {
   return ids;
 }
 
-// 用 Bangumi 关联接口的「单行本」精确标记子卷
+// 用 Bangumi 关联接口的「单行本」精确标记子卷；父系列不在库内时不标记，避免出现没有归属的子卷
 export function markRelationChildren(records, relations) {
   const byId = new Map(records.map((x) => [String(x.i), x]));
   const flags = new Set();
-  for (const id of volumeRelationIds(relations)) {
-    const child = byId.get(id);
-    if (!child || child.sv) continue;
-    flags.add(id);
+  for (const [parentId, rels] of relations.entries()) {
+    if (!byId.has(String(parentId))) continue;
+    for (const rel of Array.isArray(rels) ? rels : []) {
+      if (String(rel?.relation || '').trim() !== '单行本') continue;
+      if (rel?.type != null && Number(rel.type) !== 1) continue;
+      const child = byId.get(String(rel.id));
+      if (!child || child.sv) continue;
+      flags.add(String(rel.id));
+    }
   }
   return flags;
 }
 
 // 关联数据缺失时的兜底规则，避免完全没有子卷清洗
-export function markTitleChildren(records, relations, flags) {
-  const trusted = seriesWithVolumeRelations(relations);
-  const series = records
+function seriesKeys(records) {
+  return records
     .filter((x) => x.sv)
     .map((x) => ({ id: String(x.i), key: normalizeTitle(x.cn || x.n) }))
     .filter((x) => x.key)
     .sort((a, b) => b.key.length - a.key.length);
+}
+
+function titleParentId(item, seriesList) {
+  const key = normalizeTitle(item.cn || item.n);
+  if (!key) return null;
+  for (const s of seriesList) {
+    if (key.length <= s.key.length || !key.startsWith(s.key)) continue;
+    const rest = key.slice(s.key.length);
+    if (VOLUME_RE.test(rest) || SUFFIX_RE.test(rest)) return s.id;
+  }
+  return null;
+}
+
+export function markTitleChildren(records, relations, flags) {
+  const trusted = seriesWithVolumeRelations(relations);
+  const series = seriesKeys(records);
 
   let added = 0;
   for (const item of records) {
@@ -157,6 +165,24 @@ function buildChildrenMap(records, relations, flags) {
       return da.localeCompare(db) || Number(a) - Number(b);
     });
   }
+  // 标题兜底标记的子卷没有关联记录，按标题前缀补进所属系列，保证 ch 索引完整
+  const covered = new Set();
+  children.forEach((list) => list.forEach((id) => covered.add(id)));
+  const seriesList = seriesKeys(records);
+  for (const item of records) {
+    const cid = String(item.i);
+    if (!flags.has(cid) || covered.has(cid)) continue;
+    const pid = titleParentId(item, seriesList);
+    if (!pid || pid === cid) continue;
+    if (!children.has(pid)) children.set(pid, []);
+    children.get(pid).push(cid);
+    covered.add(cid);
+  }
+  children.forEach((list) => list.sort((a, b) => {
+    const da = String(byId.get(a)?.d || '');
+    const db = String(byId.get(b)?.d || '');
+    return da.localeCompare(db) || Number(a) - Number(b);
+  }));
   return children;
 }
 
@@ -202,6 +228,7 @@ export async function buildData(records, relations = new Map(), {
   const meta = {
     generatedAt,
     count: final.length,
+    general: final.filter((x) => x.gn).length,
     minDate: dates[0] || '',
     maxDate: dates[dates.length - 1] || '',
   };
@@ -244,12 +271,18 @@ export async function loadCachedPages() {
 
   const seen = new Set();
   const all = [];
-  for (const file of files) {
+  // 轻小说分页排在前面；只出现在「小说」分页里的条目标记为一般小说
+  const ordered = files
+    .filter((f) => !f.startsWith('page-novel-'))
+    .concat(files.filter((f) => f.startsWith('page-novel-')));
+  for (const file of ordered) {
+    const isNovel = file.startsWith('page-novel-');
     const page = JSON.parse(await readFile(path.join(BUILD_DIR, file), 'utf8'));
     for (const item of Array.isArray(page) ? page : []) {
       const id = String(item.i);
       if (seen.has(id)) continue;
       seen.add(id);
+      if (isNovel) item.gn = true;
       all.push(item);
     }
   }

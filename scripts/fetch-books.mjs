@@ -1,8 +1,9 @@
-// 从 Bangumi 镜像抓取「轻小说」标签下的书籍，分页缓存后生成 data/light-novels.js
+// 从 Bangumi 镜像抓取「轻小说」与「小说」标签下的书籍，分页缓存后生成 data/light-novels.js
 // 用法：node scripts/fetch-books.mjs [--refresh] [--no-relations]
 //
-// 搜索接口单次最多只能翻到 offset=980（1000 条），因此按评分人数分区抓取：
-// 各分区均小于 1000 条，合并后覆盖全部 total（当前 4004 条）。
+// 搜索接口单次最多只能翻到 offset=980（1000 条），因此按评分人数分区抓取；
+// 单个分区仍超过 1000 时自动继续二分。两个标签合并去重，
+// 只在「小说」标签出现、没有「轻小说」标签的条目标记为 gn（一般小说），默认隐藏。
 // 已抓取的分页与系列关联会自动跳过，可重复运行增量补齐。
 
 import { mkdir, writeFile, readFile, access, rm, readdir } from 'node:fs/promises';
@@ -19,7 +20,13 @@ const REFRESH = process.argv.includes('--refresh');
 // --refresh-pages：只重抓分页，保留已缓存的系列关联（用于新增字段后重算）
 const REFRESH_PAGES = process.argv.includes('--refresh-pages');
 const NO_RELATIONS = process.argv.includes('--no-relations');
-const META_SCHEMA = 'rating-count-partitions-v1';
+const META_SCHEMA = 'tag-partitions-v2';
+
+// 抓取顺序很重要：先轻小说，再小说，后者的重复条目会被跳过
+const TAGS = [
+  { key: 'ln', name: '轻小说' },
+  { key: 'novel', name: '小说' },
+];
 
 // rating_count 分区：全部满足 >=min 且 <max，最后一段为开区间
 const PARTITIONS = [
@@ -40,9 +47,10 @@ const buildDir = path.join(rootDir, 'data', 'build');
 const metaFile = path.join(buildDir, 'meta.json');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const pageFile = (partition, index) => path.join(
+// 轻小说沿用旧文件名，避免已有缓存全部重抓；小说单独加前缀
+const pageFile = (tagKey, partition, index) => path.join(
   buildDir,
-  `page-${partition.key}-${String(index).padStart(4, '0')}.json`,
+  `page-${tagKey === 'ln' ? '' : tagKey + '-'}${partition.key}-${String(index).padStart(4, '0')}.json`,
 );
 const relFile = (id) => path.join(buildDir, `rel-${id}.json`);
 
@@ -173,25 +181,25 @@ async function requestJson(url, options, label) {
   }
 }
 
-function partitionFilter(partition) {
+function partitionFilter(partition, tagName) {
   const ratingCount = partition.max == null
     ? [`>=${partition.min}`]
     : [`>=${partition.min}`, `<${partition.max}`];
-  return { type: [1], tag: ['轻小说'], rating_count: ratingCount };
+  return { type: [1], tag: [tagName], rating_count: ratingCount };
 }
 
-function requestPage(partition, offset) {
+function requestPage(partition, offset, tagName) {
   const payload = {
     keyword: '',
     sort: 'heat',
-    filter: partitionFilter(partition),
+    filter: partitionFilter(partition, tagName),
   };
   const url = `${BASE}/v0/search/subjects?limit=${PAGE_SIZE}&offset=${offset}`;
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'User-Agent': USER_AGENT },
     body: JSON.stringify(payload),
-  }, `${partition.key}@${offset}`);
+  }, `${tagName}-${partition.key}@${offset}`);
 }
 
 function requestRelations(id) {
@@ -205,11 +213,99 @@ async function readMeta() {
   if (REFRESH || REFRESH_PAGES || !await exists(metaFile)) return null;
   try {
     const meta = JSON.parse(await readFile(metaFile, 'utf8'));
-    if (meta.schema !== META_SCHEMA || !Array.isArray(meta.partitions)) return null;
+    if (meta.schema !== META_SCHEMA || !meta.tags || typeof meta.tags !== 'object') return null;
     return meta;
   } catch {
     return null;
   }
+}
+
+// 分区仍超过搜索接口上限时继续二分
+function splitPartition(partition) {
+  if (partition.max == null) {
+    const nextMax = Math.max(partition.min + 1, partition.min * 2 || 1000);
+    return [
+      { key: `${partition.key}-a`, label: `${partition.min}-${nextMax - 1}`, min: partition.min, max: nextMax },
+      { key: `${partition.key}-b`, label: `${nextMax}+`, min: nextMax, max: null },
+    ];
+  }
+  if (partition.max - partition.min <= 1) return null;
+  const mid = partition.min + Math.floor((partition.max - partition.min) / 2);
+  return [
+    { key: `${partition.key}-a`, label: `${partition.min}-${mid - 1}`, min: partition.min, max: mid },
+    { key: `${partition.key}-b`, label: `${mid}-${partition.max - 1}`, min: mid, max: partition.max },
+  ];
+}
+
+// 分区拆分后清掉父级分页，避免离线重算时把重复条目再读回来
+async function clearPartitionPages(tagKey, partition) {
+  const prefix = `page-${tagKey === 'ln' ? '' : tagKey + '-'}${partition.key}-`;
+  const files = await readdir(buildDir).catch(() => []);
+  await Promise.all(files
+    .filter((f) => f.startsWith(prefix) && f.endsWith('.json'))
+    .map((f) => rm(path.join(buildDir, f), { force: true })));
+}
+
+async function collectTag(tag, cachedPartitions, state) {
+  const { seen, all, lnIds } = state;
+
+  const leaves = [];
+  // 有缓存时直接从上次的分区叶子开始，避免每次重查基础分区总数
+  const queue = Array.isArray(cachedPartitions) && cachedPartitions.length
+    ? cachedPartitions.map((p) => ({ ...p }))
+    : PARTITIONS.map((p) => ({ ...p }));
+  let fetched = 0;
+
+  while (queue.length) {
+    const partition = queue.shift();
+    let total = partition.total == null ? null : Number(partition.total);
+    let firstPage = null;
+    if (total == null) {
+      const first = await requestPage(partition, 0, tag.name);
+      total = Number(first.total) || 0;
+      firstPage = (Array.isArray(first.data) ? first.data : []).map(slim);
+      console.log(`[${tag.name}] 分区 ${partition.label}：${total} 条`);
+    }
+
+    if (total > 1000) {
+      const parts = splitPartition(partition);
+      if (!parts) throw new Error(`[${tag.name}] 分区 ${partition.label} 有 ${total} 条且无法继续拆分`);
+      await clearPartitionPages(tag.key, partition);
+      console.log(`[${tag.name}] 分区 ${partition.label} 超过 1000 条，拆为 ${parts.map((p) => p.label).join(' / ')}`);
+      queue.unshift(...parts);
+      continue;
+    }
+
+    const pageCount = Math.ceil(total / PAGE_SIZE);
+    for (let index = 0; index < pageCount; index += 1) {
+      const offset = index * PAGE_SIZE;
+      const cacheFile = pageFile(tag.key, partition, index);
+      let page;
+      if (index === 0 && firstPage) {
+        page = firstPage;
+        await writeFile(cacheFile, JSON.stringify(page), 'utf8');
+      } else if (!REFRESH && await exists(cacheFile)) {
+        page = JSON.parse(await readFile(cacheFile, 'utf8'));
+      } else {
+        const data = await requestPage(partition, offset, tag.name);
+        page = (Array.isArray(data.data) ? data.data : []).map(slim);
+        await writeFile(cacheFile, JSON.stringify(page), 'utf8');
+      }
+      for (const item of Array.isArray(page) ? page : []) {
+        const id = String(item.i);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        all.push(item);
+        fetched += 1;
+        if (tag.key === 'ln') lnIds.add(id);
+      }
+      if (!page.length) break;
+    }
+    leaves.push({ key: partition.key, label: partition.label, min: partition.min, max: partition.max, total });
+    console.log(`[${tag.name}] 分区 ${partition.label} 完成，累计 ${all.length} 条`);
+  }
+
+  return { leaves, fetched };
 }
 
 async function main() {
@@ -229,67 +325,40 @@ async function main() {
   }
 
   const cachedMeta = await readMeta();
-  const totals = new Map();
-  if (cachedMeta) {
-    cachedMeta.partitions.forEach((p) => totals.set(p.key, Number(p.total) || 0));
-  }
-
   const seen = new Set();
+  const lnIds = new Set();
   const all = [];
+  const tagMeta = {};
 
-  for (const partition of PARTITIONS) {
-    let total = totals.get(partition.key);
-    if (total == null) {
-      const first = await requestPage(partition, 0);
-      total = Number(first.total) || 0;
-      const page = (Array.isArray(first.data) ? first.data : []).map(slim);
-      await writeFile(pageFile(partition, 0), JSON.stringify(page), 'utf8');
-      totals.set(partition.key, total);
-      console.log(`分区 ${partition.label}：${total} 条`);
-    }
-    if (total > 1000) {
-      throw new Error(`分区 ${partition.label} 有 ${total} 条，超过搜索接口 1000 条上限，需要继续细分`);
-    }
-
-    const pageCount = Math.ceil(total / PAGE_SIZE);
-    for (let index = 0; index < pageCount; index += 1) {
-      const offset = index * PAGE_SIZE;
-      const cacheFile = pageFile(partition, index);
-      let page;
-      if (!REFRESH && await exists(cacheFile)) {
-        page = JSON.parse(await readFile(cacheFile, 'utf8'));
-      } else {
-        const data = await requestPage(partition, offset);
-        page = (Array.isArray(data.data) ? data.data : []).map(slim);
-        await writeFile(cacheFile, JSON.stringify(page), 'utf8');
-      }
-      for (const item of Array.isArray(page) ? page : []) {
-        const id = String(item.i);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        all.push(item);
-      }
-      if (!page.length) break;
-    }
-    console.log(`分区 ${partition.label} 完成，累计 ${all.length} 条`);
+  for (const tag of TAGS) {
+    const cache = cachedMeta && cachedMeta.tags ? cachedMeta.tags[tag.key] : null;
+    const result = await collectTag(tag, cache && cache.partitions, { seen, all, lnIds });
+    tagMeta[tag.key] = {
+      name: tag.name,
+      total: result.leaves.reduce((n, p) => n + p.total, 0),
+      fetched: result.fetched,
+      partitions: result.leaves,
+    };
+    console.log(`[${tag.name}] 完成：新增 ${result.fetched} 条，累计 ${all.length} 条`);
   }
 
-  const partitionSum = [...totals.values()].reduce((n, v) => n + v, 0);
-  await writeFile(metaFile, JSON.stringify({
+  // 只在「小说」标签出现、没有「轻小说」标签的条目，标记为一般小说
+  let generalCount = 0;
+  all.forEach((item) => {
+    if (lnIds.has(String(item.i))) return;
+    item.gn = true;
+    generalCount += 1;
+  });
+
+  const metaInfo = {
     schema: META_SCHEMA,
-    total: partitionSum,
-    fetched: all.length,
-    partitions: PARTITIONS.map((p) => ({
-      key: p.key,
-      label: p.label,
-      total: totals.get(p.key) || 0,
-    })),
+    total: all.length,
+    general: generalCount,
+    tags: tagMeta,
     generatedAt: new Date().toISOString(),
-  }), 'utf8');
+  };
 
-  if (all.length < partitionSum) {
-    console.warn(`警告：分区合计 ${partitionSum} 条，实际去重 ${all.length} 条，可能有遗漏或跨区重复`);
-  }
+  console.log(`合并去重：${all.length} 条（轻小说 ${tagMeta.ln.total} / 小说 ${tagMeta.novel.total} / 一般小说新增 ${generalCount}）`);
 
   const relations = new Map();
   if (NO_RELATIONS) {
@@ -332,6 +401,32 @@ async function main() {
       }
     }
   }
+
+  // 与轻小说系列有关联的条目仍按轻小说处理，避免系列子卷被默认隐藏
+  const lnRelated = new Set();
+  for (const [parentId, rels] of relations.entries()) {
+    if (!lnIds.has(String(parentId))) continue;
+    for (const rel of Array.isArray(rels) ? rels : []) {
+      if (String(rel?.relation || '').trim() !== '单行本') continue;
+      if (rel?.type != null && Number(rel.type) !== 1) continue;
+      lnRelated.add(String(rel.id));
+    }
+  }
+  let adjusted = 0;
+  all.forEach((item) => {
+    if (!item.gn) return;
+    const rels = relations.get(String(item.i)) || [];
+    const hasLnChild = rels.some((rel) => lnIds.has(String(rel?.id)));
+    if (lnRelated.has(String(item.i)) || hasLnChild) {
+      delete item.gn;
+      adjusted += 1;
+    }
+  });
+  if (adjusted) console.log(`系列关联修正：${adjusted} 条一般小说随系列保留为轻小说`);
+
+  metaInfo.total = all.length;
+  metaInfo.general = all.filter((x) => x.gn).length;
+  await writeFile(metaFile, JSON.stringify(metaInfo), 'utf8');
 
   const stats = await buildData(all, relations);
   console.log(`完成：${stats.total} 条（系列 ${stats.series} / 单册 ${stats.singles} / 子卷 ${stats.children} / 默认可见 ${stats.visible}）`);

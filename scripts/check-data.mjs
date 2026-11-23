@@ -38,11 +38,12 @@ const label = {
   children: '系列子卷索引异常',
   extra: '详情拆包异常',
   img: '封面字段异常',
+  source: '来源标记异常',
   meta: '元信息异常',
 };
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
-  genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], meta: [],
+  genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], meta: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
@@ -73,6 +74,7 @@ data.forEach((x, idx) => {
   if (x.kind != null && !['manga', 'artbook', 'guide'].includes(x.kind)) {
     issues.kind.push(`${x.i}:${x.kind}`);
   }
+  if (x.gn != null && x.gn !== true) issues.source.push(`${x.i}:gn=${x.gn}`);
   if (x.tg != null) {
     if (!Array.isArray(x.tg) || !x.tg.length) {
       issues.genre.push(`${x.i}:${JSON.stringify(x.tg)}`);
@@ -113,6 +115,10 @@ if (!extraMatch) issues.extra.push('未找到 window.LN_EXTRA');
 
 if (Number(meta.count) !== data.length) {
   issues.meta.push(`count=${meta.count}，实际=${data.length}`);
+}
+const general = data.filter((x) => x.gn).length;
+if (Number(meta.general) !== general) {
+  issues.meta.push(`general=${meta.general}，实际=${general}`);
 }
 const dates = data.map((x) => x.d).filter(Boolean).sort();
 const minDate = dates[0] || '';
@@ -155,6 +161,7 @@ function matches(x, keyword) {
 }
 
 console.log(`条目总数：${data.length}；系列 ${series} / 单册 ${singles} / 子卷 ${children} / 默认可见 ${data.length - children}`);
+console.log(`来源：轻小说 ${data.length - general} / 一般小说 ${general}；默认可见轻小说 ${data.filter((x) => !x.c && !x.gn).length}`);
 console.log(`日期范围：${minDate || '—'} ~ ${maxDate || '—'}`);
 console.log(`题材覆盖：${withGenre}/${data.length}（${(withGenre / data.length * 100).toFixed(1)}%）`);
 console.log(`题材分布：${dist || '无'}`);

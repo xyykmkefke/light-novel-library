@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.9.0">
+<meta name="version" content="1.10.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2764,6 +2764,7 @@
           <option value="mineRating" title="按我的评分从高到低">按我的评分</option>
         </select>
         <button class="btn adv-filter" id="hideChildrenBtn" type="button" aria-pressed="true" title="隐藏系列下的单卷条目，只显示系列与独立作品">隐藏系列子卷</button>
+        <button class="btn adv-filter" id="includeNovelBtn" type="button" aria-pressed="false" title="显示只收录在 Bangumi「小说」标签下的一般小说">含一般小说</button>
         <button class="btn adv-filter" id="onlyMineBtn" type="button" aria-pressed="false" title="只显示已加入我的阅读的条目">只看已收藏</button>
         <button class="btn adv-filter" id="highScoreBtn" type="button" aria-pressed="false" title="只显示评分 8.0 及以上的作品">高分 ≥8.0</button>
         <button class="btn adv-filter" id="hideMineBtn" type="button" aria-pressed="false" title="隐藏已加入我的阅读的条目，只看还没收藏的">隐藏已收藏</button>
@@ -2874,7 +2875,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.9.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.10.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3147,6 +3148,7 @@
     highScore: false,
     hideMine: false,
     hideChildren: true,
+    includeNovel: false,
     view: 'grid',
     group: false,
     groupBy: 'year',
@@ -3454,6 +3456,9 @@
     else if (y >= YEAR_START && y <= YEAR_END) state.year = String(y);
     if (map.kd === 'all' || map.kd === 'novel' || KIND_LABEL[map.kd]) state.kind = map.kd;
     if (map.hc === '1' || map.hc === '0') state.hideChildren = map.hc === '1';
+    if (map.gn === '1' || map.gn === '0' || typeof map.gn === 'boolean') {
+      state.includeNovel = map.gn === '1' || map.gn === true;
+    }
     if (map.gr === 'all' || Object.prototype.hasOwnProperty.call(GENRE_LABEL, map.gr)) state.genre = map.gr;
     if (['score', 'heat', 'date', 'name', 'vol', 'mineRating'].indexOf(map.o) >= 0) state.sort = map.o;
     if (['all'].concat(STATUS_ORDER).indexOf(map.st) >= 0) state.status = map.st;
@@ -3504,6 +3509,7 @@
         y: state.year,
         kd: state.kind,
         hc: state.hideChildren ? '1' : '0',
+        gn: state.includeNovel ? '1' : '0',
         gr: state.genre,
         o: state.sort,
         st: state.status,
@@ -3659,6 +3665,7 @@
       'y=' + encodeURIComponent(state.year),
       'kd=' + encodeURIComponent(state.kind),
       'hc=' + (state.hideChildren ? '1' : '0'),
+      'gn=' + (state.includeNovel ? '1' : '0'),
       'gr=' + encodeURIComponent(state.genre),
       'o=' + encodeURIComponent(state.sort),
       'st=' + encodeURIComponent(state.status),
@@ -3731,6 +3738,11 @@
     if (childBtn) {
       childBtn.setAttribute('aria-pressed', state.hideChildren ? 'true' : 'false');
       childBtn.classList.toggle('primary', state.hideChildren);
+    }
+    var includeNovelBtn = $('includeNovelBtn');
+    if (includeNovelBtn) {
+      includeNovelBtn.setAttribute('aria-pressed', state.includeNovel ? 'true' : 'false');
+      includeNovelBtn.classList.toggle('primary', state.includeNovel);
     }
     var groupBtn = $('groupBtn');
     if (groupBtn) {
@@ -4054,6 +4066,11 @@
       list = list.filter(function (x) { return !x.c; });
     }
 
+    // 默认只显示轻小说；一般小说（仅「小说」标签）开关打开后才进入结果
+    if (state.tab === 'all' && !state.includeNovel) {
+      list = list.filter(function (x) { return !x.gn; });
+    }
+
     // 类型筛选：novel 表示普通轻小说（数据里没有 kind）
     if (state.tab === 'all' && state.kind !== 'all') {
       list = list.filter(function (x) {
@@ -4331,6 +4348,7 @@
     if (state.status !== 'all') chips.push({ k: 'status', label: '状态', v: STATUS[state.status] || state.status });
     if (state.year !== 'all') chips.push({ k: 'year', label: '年份', v: state.year + ' 年' });
     if (!state.hideChildren) chips.push({ k: 'hideChildren', label: '范围', v: '显示系列子卷' });
+    if (state.includeNovel) chips.push({ k: 'includeNovel', label: '范围', v: '含一般小说' });
     if (state.onlyMine) chips.push({ k: 'onlyMine', label: '范围', v: '只看已收藏' });
     if (state.highScore) chips.push({ k: 'highScore', label: '评分', v: '≥8.0' });
     if (state.hideMine) chips.push({ k: 'hideMine', label: '范围', v: '隐藏已收藏' });
@@ -4366,6 +4384,8 @@
       state.year = 'all';
     } else if (key === 'hideChildren') {
       state.hideChildren = true;
+    } else if (key === 'includeNovel') {
+      state.includeNovel = false;
     } else if (key === 'onlyMine') {
       state.onlyMine = false;
     } else if (key === 'highScore') {
@@ -4479,7 +4499,8 @@
     return {
       name: name,
       tab: state.tab, q: state.q, year: state.year, kind: state.kind,
-      hideChildren: state.hideChildren, genre: state.genre, sort: state.sort,
+      hideChildren: state.hideChildren, includeNovel: state.includeNovel,
+      genre: state.genre, sort: state.sort,
       status: state.status, onlyMine: state.onlyMine, highScore: state.highScore,
       hideMine: state.hideMine, view: state.view, group: state.group,
       groupBy: state.groupBy, mineSort: state.mineSort
@@ -4490,6 +4511,7 @@
     applyStateMap({
       tab: v.tab, y: v.year, kd: v.kind || 'all',
       hc: v.hideChildren === false ? '0' : '1',
+      gn: !!v.includeNovel,
       gr: v.genre || 'all', o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
       hm: !!v.hideMine, v: v.view, ms: v.mineSort,
       gb: v.group ? v.groupBy : '', q: v.q || ''
@@ -4540,6 +4562,7 @@
     if (state.year !== 'all') add('year', '切到全部年份', { year: 'all' });
     if (state.genre !== 'all') add('genre', '去掉题材「' + (GENRE_LABEL[state.genre] || state.genre) + '」', { genre: 'all' });
     if (state.kind !== 'all') add('kind', '去掉类型限制', { kind: 'all' });
+    if (!state.includeNovel) add('includeNovel', '含一般小说', { includeNovel: true });
     if (state.hideChildren) add('hideChildren', '显示系列子卷', { hideChildren: false });
     if (state.highScore) add('highScore', '去掉高分限制', { highScore: false });
     if (state.status !== 'all') add('status', '查看全部状态', { status: 'all' });
@@ -5220,7 +5243,8 @@
       (state.genre !== 'all' ? 1 : 0) +
       (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
       (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) +
-      (!state.hideChildren ? 1 : 0) + (state.q.trim() ? 1 : 0);
+      (!state.hideChildren ? 1 : 0) + (state.includeNovel ? 1 : 0) +
+      (state.q.trim() ? 1 : 0);
     var activeFilters = filterCount - (state.status !== 'all' ? 1 : 0) -
       (state.q.trim() ? 1 : 0) + (state.sort !== 'score' ? 1 : 0);
     $('filterToggle').textContent = activeFilters ? '筛选 · ' + activeFilters : '筛选';
@@ -5458,6 +5482,7 @@
     if (item.il) pairs.push(['插图', item.il]);
     if (item.pub) pairs.push(['出版社', item.pub]);
     if (item.line) pairs.push(['书系', item.line]);
+    if (item.gn) pairs.push(['收录', '一般小说（Bangumi「小说」标签）']);
     if (item.kind && KIND_LABEL[item.kind]) pairs.push(['类型', KIND_LABEL[item.kind]]);
     // 收藏后补充加入时间与读完时间
     if (collected && myMap[id].t) {
@@ -5775,6 +5800,13 @@
     render();
   });
 
+  // 含一般小说：把仅「小说」标签的条目也纳入全库浏览与搜索
+  $('includeNovelBtn').addEventListener('click', function () {
+    state.includeNovel = !state.includeNovel;
+    syncControls();
+    render();
+  });
+
   // 隐藏已收藏：只看还没加入清单的书，便于发现新作
   $('hideMineBtn').addEventListener('click', function () {
     state.hideMine = !state.hideMine;
@@ -5792,6 +5824,7 @@
     state.highScore = false;
     state.hideMine = false;
     state.hideChildren = true;
+    state.includeNovel = false;
     state.q = '';
     searchEl.value = '';
     syncControls();
@@ -5836,7 +5869,7 @@
     if (!sheet || !sheet.hidden) return;
     // 有高级条件生效时直接展开，避免用户以为筛选没生效
     var advActive = state.kind !== 'all' ||
-      state.onlyMine || state.highScore || state.hideMine || !state.hideChildren;
+      state.onlyMine || state.highScore || state.hideMine || !state.hideChildren || state.includeNovel;
     $('filters').classList.toggle('adv-open', advActive);
     syncAdvFilterToggle(advActive);
     $('filterSheetBody').appendChild($('filters'));
@@ -6053,6 +6086,7 @@
       { name: '只看已收藏', kind: '筛选', run: function () { state.onlyMine = true; state.hideMine = false; syncControls(); render(); } },
       { name: '隐藏已收藏', kind: '筛选', run: function () { state.hideMine = true; state.onlyMine = false; syncControls(); render(); } },
       { name: '显示系列子卷', kind: '筛选', run: function () { state.hideChildren = false; syncControls(); render(); } },
+      { name: '切换含一般小说', kind: '筛选', run: function () { state.includeNovel = !state.includeNovel; syncControls(); render(); } },
       { name: '只看轻小说', kind: '筛选', run: function () { state.kind = 'novel'; syncControls(); render(); } },
       { name: '切换明暗主题', kind: '外观', run: function () { $('themeBtn').click(); } },
       { name: '云同步设置', kind: '数据', run: function () { $('syncBtn').click(); } },
@@ -7798,7 +7832,14 @@
   function updateDataHint() {
     var el = $('dataHint');
     if (!el) return;
-    el.textContent = DATA.length ? '共 ' + DATA.length + ' 本' : '数据未就绪';
+    if (!DATA.length) {
+      el.textContent = '数据未就绪';
+      return;
+    }
+    var general = DATA.filter(function (x) { return x.gn; }).length;
+    el.textContent = '共 ' + (DATA.length - general) + ' 本轻小说' +
+      (general ? ' · 另有 ' + general + ' 本一般小说' : '');
+    el.title = general ? '一般小说仅在开启「含一般小说」后显示与搜索' : '';
   }
 
   // 页脚展示数据快照时间（本地时区），让用户知道数据新鲜度
