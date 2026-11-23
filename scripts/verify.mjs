@@ -638,6 +638,17 @@ async function main() {
     check('导出 JSON 含评分与短评',
       exportedItem?.rating === 9 && exportedItem?.review === '测试短评',
       JSON.stringify({ r: exportedItem?.rating, rv: exportedItem?.review }));
+
+    // 评: 字段搜索短评与笔记正文
+    await setSearch('评:测试短评');
+    const reviewSearch = await cdp.evaluate(`(() => ({
+      count: Number(document.getElementById('resultCount').textContent),
+      ids: [...document.querySelectorAll('.card')].map((c) => c.dataset.id),
+    }))()`);
+    check('评: 搜索书评正文', reviewSearch.count >= 1 && reviewSearch.ids.includes(String(pick.id)),
+      `${reviewSearch.count} 条`);
+    await setSearch('');
+
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(300);
 
@@ -1150,7 +1161,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.7.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.7.0'));
+    check('页脚版本为 v1.7.1', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.7.1'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1187,7 +1198,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.7.0', manifest.version === '1.7.0');
+    check('manifest 版本为 1.7.1', manifest.version === '1.7.1');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1209,7 +1220,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v21'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v22'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
