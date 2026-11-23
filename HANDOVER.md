@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.13.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 193/193）
+- 当前状态：**v1.13.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 193/193）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.13.0（已达成，功能：书系筛选与 RanobeDB 补全）
+- 目标版本：v1.13.1（已达成，功能：复核 RanobeDB 差异并补 2 个漏卷）
 
 ## 1. 目标与边界
 
@@ -59,7 +59,7 @@ User-Agent: yuc-light-novel-list/1.0
 
 - `series: true` 1306 条：系列主条目
 - `series: false` 3545 条：单册，或某个系列的卷
-- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2158 条；默认可见轻小说 1904 条
+- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2160 条；默认可见轻小说 1902 条
 - 仅「小说」标签、没有「轻小说」标签的 789 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说
 - 关联中还有、库中没有的 7617 卷（单行本 + 番外篇）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
 - 需要「隐藏系列子卷」清洗，否则搜索一个系列会出现多条重复
@@ -273,7 +273,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v29`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v30`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
@@ -607,8 +607,15 @@ PWA / 移动端：
 - 书系筛选：`#lineFilter` 首次点击时才调用 `loadExtra()` 并生成前 80 个高频书系；`state.line` 写入 hash（`ln=`）与偏好；清除筛选会一并重置。
 - ISBN 反查：NDL / Google Books 在当前网络不可达，改用 RanobeDB 公共 API v0（`/api/v0/releases`，60 次/分钟以内）。`scripts/find-isbn-ranobedb.mjs` 查询热度前 300 条缺 ISBN 条目，累计补 11 个单册 ISBN、226 个系列首卷 ISBN；匹配时优先完全同名，并排除 AA / SP / 公式指南等外传。
 - 字段：新增 `fisbn`（系列首卷 ISBN），详情显示「首卷 ISBN」；校验逻辑与 `isbn` 相同。
-- 校验报告：`scripts/validate-ranobedb.mjs` 抽样热度前 120 个系列（只接受完全同名），匹配 50 个：卷数一致 34、我们更多 11、RanobeDB 更多 5；最大差异是《关于我转生变成史莱姆这档事》（我们 31 / RanobeDB 46），可人工复核。报告写入 `reports/ranobedb-validate-2026-11-23.md`，不回写数据。
+- 校验报告：`scripts/validate-ranobedb.mjs` 抽样热度前 120 个系列（只接受完全同名），匹配 50 个：卷数一致 34、我们更多 11、RanobeDB 更多 5。复核后确认 2 个真实漏卷（8691 `encore pieces`、16868 `『i』`），已写入 `data/manual-relations.json`；史莱姆差异是上/中/下拆分版本，零之使魔多出的是 Memorial BOOK，均不新增。报告写入 `reports/ranobedb-validate-2026-11-23.md`。
 - 验收：`verify` 新增书系筛选、首卷 ISBN 覆盖 2 项，共 193 项。
+
+## 9.30 v1.13.1 RanobeDB 差异复核（2026-11-23）
+
+- 逐条复核“RanobeDB 更多”的 5 个系列：2 个真实漏卷（8691 `encore pieces`、16868 `『i』`）已通过 `data/manual-relations.json` 加入；史莱姆 46 条是上/中/下拆分版本，零之使魔第 23 项是 Memorial BOOK，均不新增。
+- `buildData` 在标记子卷前合并人工关系；若同一 ID 已有非「单行本」关系，会额外补一条「单行本」边。
+- 当前子卷 2160 条，默认可见轻小说 1902 条；卷包 7617 条不变。
+- 验收仍为 193/193。
 
 ## 10. 已知风险与决策
 

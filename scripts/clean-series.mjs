@@ -251,11 +251,29 @@ export async function buildData(records, relations = new Map(), {
   outFile = OUT_FILE,
   volumePack = { volumes: [], parentById: new Map() },
 } = {}) {
+  // 人工确认的漏卷关系：Bangumi 上存在但未被系列关联覆盖
+  try {
+    const manual = JSON.parse(await readFile(path.join(ROOT, 'data', 'manual-relations.json'), 'utf8'));
+    Object.entries(manual).forEach(([parentId, childIds]) => {
+      const existingKey = [...relations.keys()].find((k) => String(k) === String(parentId));
+      const key = existingKey === undefined ? String(parentId) : existingKey;
+      const list = relations.get(key) || [];
+      (Array.isArray(childIds) ? childIds : []).forEach((childId) => {
+        const exists = list.some((rel) => String(rel?.id) === String(childId) &&
+          String(rel?.relation || '').trim() === '单行本' &&
+          (rel?.type == null || Number(rel.type) === 1));
+        if (!exists) list.push({ id: Number(childId), type: 1, relation: '单行本', name: '' });
+      });
+      relations.set(key, list);
+    });
+  } catch { /* 没有人工关系文件时跳过 */ }
+
   const parentsByChild = buildParentMap(records, relations);
   const inherited = inheritFromParents(records, parentsByChild);
   const flags = markRelationChildren(records, relations);
   const relationChildren = flags.size;
   const fallbackAdded = fallback ? markTitleChildren(records, relations, flags) : 0;
+
   const childrenByParent = buildChildrenMap(records, relations, flags);
 
   // 懒加载卷包：只把新卷挂到父系列的 ch，不放进首屏核心包
