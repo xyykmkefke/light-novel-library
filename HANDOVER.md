@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.7.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 177/177）
+- 当前状态：**v1.8.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 181/181）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.7.2（已达成，功能：年度小结导出）
+- 目标版本：v1.8.0（已达成，功能：系列一键加入全部子卷）
 
 ## 1. 目标与边界
 
@@ -271,11 +271,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v23`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v24`，SHELL 包含 `./data/light-novels.js`；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：177/177）
+### Step 5 验收（已完成：181/181）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -554,6 +554,14 @@ PWA / 移动端：
 - 参考：Goodreads「Year in Books」年度回顾的分享形态（<https://readingszone.com/my-year-in-books/>、<https://thereadinglane.com/2025/12/28/rear-in-books-goodreads-2025/>）。
 - 版本与缓存：页脚、meta、manifest、package.json 升至 1.7.2；SW 缓存名升到 `yuc-ln-shell-v23`。
 - 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 177/177（新增年度小结导出 2 项）。
+
+## 9.24 v1.8.0 功能记录（2026-11-23）
+
+- 数据：`clean-series.mjs` 新增父系列→子卷索引；415 个系列写入 `ch`，共 2028 条子卷引用，覆盖全部子卷；`check-data` 新增索引完整性与归属校验。
+- 详情：系列条目新增「加入全部 N 卷 / 加入其余 N 卷」按钮，一键把子卷以「想读」加入；已存在条目保持原状，全部加入后按钮置灰显示「已加入全部 N 卷」；详情元信息增加「系列子卷」数量。
+- 数据体积 4007 条约 1.16 MB（新增索引约 20 KB）。
+- 版本与缓存：页脚、meta、manifest、package.json 升至 1.8.0；SW 缓存名升到 `yuc-ln-shell-v24`。
+- 测试：`check-data` 问题 0；`test-merge` 20/20；`verify` 181/181（新增子卷索引 1 项、一键加入 3 项）。
 
 ## 10. 已知风险与决策
 

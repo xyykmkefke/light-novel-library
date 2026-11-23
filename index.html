@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.7.2">
+<meta name="version" content="1.8.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2874,7 +2874,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.7.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.8.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2895,6 +2895,7 @@
       <div class="similar" id="detailSimilar"></div>
       <div class="modal-actions">
         <button class="btn primary" id="detailToggle">加入我的阅读</button>
+        <button class="btn" id="detailAddChildren" type="button" hidden></button>
         <button class="btn" id="detailShare" type="button">复制链接</button>
         <a class="btn" id="detailLink" target="_blank" rel="noreferrer">Bangumi</a>
         <button class="btn" id="modalClose">关闭</button>
@@ -5407,6 +5408,9 @@
     if (collected && myMap[id].r) {
       pairs.push(['我的评分', myMap[id].r + ' / 10']);
     }
+    if (Array.isArray(item.ch) && item.ch.length) {
+      pairs.push(['系列子卷', item.ch.length + ' 卷']);
+    }
     // 作者、出版社、书系单独渲染成可点击标签，一键筛选同一来源的作品
     pairs = pairs.filter(function (p) {
       return p[0] !== '作者' && p[0] !== '出版社' && p[0] !== '书系';
@@ -5460,6 +5464,21 @@
     btn.textContent = collected ? '移出我的阅读' : '加入我的阅读';
     btn.className = 'btn' + (collected ? ' danger' : ' primary');
     $('detailLink').href = 'https://bgm.tv/subject/' + id;
+
+    // 系列条目：一键把全部子卷加入想读（已存在的条目保持原样）
+    var addChildrenBtn = $('detailAddChildren');
+    var childIds = Array.isArray(item.ch) ? item.ch.map(String) : [];
+    if (item.sv && childIds.length) {
+      var missingChildren = childIds.filter(function (cid) { return !myMap[cid]; });
+      addChildrenBtn.hidden = false;
+      addChildrenBtn.disabled = missingChildren.length === 0;
+      addChildrenBtn.textContent = missingChildren.length
+        ? '加入' + (missingChildren.length === childIds.length ? '全部 ' : '其余 ') + missingChildren.length + ' 卷'
+        : '已加入全部 ' + childIds.length + ' 卷';
+      addChildrenBtn.title = '把该系列下的 ' + childIds.length + ' 个单卷加入「我的阅读」（想读）';
+    } else {
+      addChildrenBtn.hidden = true;
+    }
 
     // 我的书评：加入阅读后才可评分与记录；文本仅存本机（云同步时随记录合并）
     var reviewEl = $('detailReview');
@@ -6600,6 +6619,31 @@
     saveMine();
     render();
     renderDetail(id);
+  });
+
+  // 系列详情：一键把该系列全部子卷加入想读
+  $('detailAddChildren').addEventListener('click', function () {
+    if (!modalId) return;
+    var item = byId.get(modalId);
+    if (!item || !Array.isArray(item.ch)) return;
+    var now = Date.now();
+    var added = 0;
+    item.ch.forEach(function (cid, i) {
+      var key = String(cid);
+      if (myMap[key]) return;
+      myMap[key] = { s: 'want', t: now + i, vol: 0, u: now + i, f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+      clearDeleted(key);
+      added += 1;
+    });
+    if (!added) {
+      toast('该系列子卷已全部在阅读列表');
+      return;
+    }
+    markDay();
+    saveMine();
+    render();
+    renderDetail(modalId);
+    toast('已把 ' + added + ' 卷加入想读');
   });
 
   // 详情内一键进度：局部刷新，避免重建书评输入区丢失未保存草稿

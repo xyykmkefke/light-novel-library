@@ -246,6 +246,13 @@ async function main() {
         rt: d.filter((x) => 'rt' in x).length,
         noDate: d.filter((x) => !x.d).length,
         zeroVol: d.filter((x) => !x.v).length,
+        chSeries: d.filter((x) => Array.isArray(x.ch)).length,
+        chRefs: d.reduce((n, x) => n + (Array.isArray(x.ch) ? x.ch.length : 0), 0),
+        chBad: d.reduce((n, x) => {
+          if (!Array.isArray(x.ch)) return n;
+          const byId = new Map(d.map((v) => [String(v.i), v]));
+          return n + x.ch.filter((cid) => !byId.get(String(cid))?.c).length;
+        }, 0),
       };
     })()`);
     check('条目数不少于 3900', stats.total >= 3900, `${stats.total} 条`);
@@ -260,6 +267,9 @@ async function main() {
     check('漫画/画集/指南标记存在',
       (stats.kind.manga || 0) > 0 && (stats.kind.artbook || 0) > 0,
       JSON.stringify(stats.kind));
+    check('系列子卷索引完整',
+      stats.chSeries > 300 && stats.chRefs === stats.c && stats.chBad === 0,
+      `${stats.chSeries} 系列 / ${stats.chRefs} 引用 / 异常 ${stats.chBad}`);
 
     // ---- 默认筛选 ----
     const visibleDefault = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
@@ -1178,7 +1188,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.7.2', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.7.2'));
+    check('页脚版本为 v1.8.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.8.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1215,7 +1225,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.7.2', manifest.version === '1.7.2');
+    check('manifest 版本为 1.8.0', manifest.version === '1.8.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1237,7 +1247,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v23'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v24'));
     check('Service Worker 缓存全库数据', swTxt.includes('data/light-novels.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
@@ -1297,6 +1307,42 @@ async function main() {
     check('关闭详情后解除背景 inert',
       (await cdp.evaluate(`(() => !document.querySelector('main').hasAttribute('inert'))()`)) === true);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
+
+    // ---- 系列一键加入全部子卷 ----
+    const seriesPick = await cdp.evaluate(`(() => {
+      const s = window.LN_DATA.find((x) => x.sv && Array.isArray(x.ch) && x.ch.length >= 3);
+      return s ? { id: String(s.i), n: s.ch.length } : null;
+    })()`);
+    const mineBeforeSeries = await cdp.evaluate(`localStorage.getItem('yuc_ln_mine_v1') || '{}'`);
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(seriesPick.id)}; })()`);
+    await sleep(400);
+    const addChildrenBtn = await cdp.evaluate(`(() => {
+      const b = document.getElementById('detailAddChildren');
+      return { hidden: b.hidden, disabled: b.disabled, text: b.textContent };
+    })()`);
+    check('系列详情显示一键加入子卷',
+      addChildrenBtn.hidden === false && /加入/.test(addChildrenBtn.text), addChildrenBtn.text);
+    await cdp.evaluate(`document.getElementById('detailAddChildren').click()`);
+    await sleep(500);
+    const seriesAdded = await cdp.evaluate(`(() => {
+      const map = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      const s = window.LN_DATA.find((x) => String(x.i) === ${JSON.stringify(seriesPick.id)});
+      const b = document.getElementById('detailAddChildren');
+      return { inMap: s.ch.filter((cid) => map[String(cid)]).length, total: s.ch.length, text: b.textContent, disabled: b.disabled };
+    })()`);
+    check('一键加入全部子卷', seriesAdded.inMap === seriesAdded.total,
+      `${seriesAdded.inMap}/${seriesAdded.total}`);
+    check('全部加入后按钮置为已加入',
+      seriesAdded.disabled === true && /已加入/.test(seriesAdded.text), seriesAdded.text);
+    // 还原阅读记录，避免影响后续移动端用例
+    await cdp.evaluate(`localStorage.setItem('yuc_ln_mine_v1', ${JSON.stringify(mineBeforeSeries)})`);
+    await cdp.send('Page.reload', { ignoreCache: true });
+    for (let i = 0; i < 80; i += 1) {
+      if ((await cdp.evaluate("document.querySelectorAll('.card').length").catch(() => 0)) > 0) break;
+      await sleep(150);
+    }
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(200);
 
     // ---- 移动端 375×812 ----
     await cdp.send('Emulation.setDeviceMetricsOverride', {

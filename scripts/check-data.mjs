@@ -28,13 +28,15 @@ const label = {
   leak: '缓存字段泄漏',
   flags: '布尔字段异常',
   kind: '类型字段异常',
+  children: '系列子卷索引异常',
   meta: '元信息异常',
 };
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
-  genre: [], leak: [], flags: [], kind: [], meta: [],
+  genre: [], leak: [], flags: [], kind: [], children: [], meta: [],
 };
 const seen = new Map();
+const byIdAll = new Map(data.map((x) => [String(x.i), x]));
 
 data.forEach((x, idx) => {
   const id = Number(x.i);
@@ -65,6 +67,19 @@ data.forEach((x, idx) => {
       if (new Set(x.tg).size !== x.tg.length) issues.genre.push(`${x.i}:重复`);
     }
   }
+  if (x.ch != null) {
+    if (!x.sv || !Array.isArray(x.ch) || !x.ch.length) {
+      issues.children.push(`${x.i}:ch 只能出现在系列条目且不能为空`);
+    } else {
+      if (new Set(x.ch).size !== x.ch.length) issues.children.push(`${x.i}:ch 重复`);
+      if (x.ch.includes(String(x.i))) issues.children.push(`${x.i}:ch 含自身`);
+      x.ch.forEach((cid) => {
+        const child = byIdAll.get(String(cid));
+        if (!child) issues.children.push(`${x.i}:子卷 ${cid} 不存在`);
+        else if (!child.c) issues.children.push(`${x.i}:${cid} 未标记为子卷`);
+      });
+    }
+  }
 });
 
 if (Number(meta.count) !== data.length) {
@@ -85,6 +100,8 @@ Object.keys(issues).forEach((key) => {
 const series = data.filter((x) => x.sv).length;
 const singles = data.filter((x) => !x.sv).length;
 const children = data.filter((x) => x.c).length;
+const indexed = data.filter((x) => Array.isArray(x.ch)).length;
+const indexedRefs = data.reduce((n, x) => n + (Array.isArray(x.ch) ? x.ch.length : 0), 0);
 const withGenre = data.filter((x) => Array.isArray(x.tg) && x.tg.length).length;
 const genreCounts = {};
 data.forEach((x) => (x.tg || []).forEach((g) => { genreCounts[g] = (genreCounts[g] || 0) + 1; }));
@@ -115,6 +132,7 @@ console.log(`题材分布：${dist || '无'}`);
 console.log(`字段缺失：作者 ${missing.au} / 插图 ${missing.il} / 出版社 ${missing.pub} / 书系 ${missing.line} / 封面 ${missing.img} / 日期 ${missing.d}`);
 console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 ${missing.vSeries}`);
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
+console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
 
 for (const keyword of ['文学少女', '无职转生', '白夜行', '人间失格']) {
   const visible = data.filter((x) => !x.c && matches(x, keyword));

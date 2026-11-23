@@ -137,6 +137,29 @@ function inheritFromParents(records, parentsByChild) {
   return filled;
 }
 
+// 父系列 → 子卷索引：用于「一键加入系列全部子卷」
+function buildChildrenMap(records, relations, flags) {
+  const parentsByChild = buildParentMap(records, relations);
+  const byId = new Map(records.map((x) => [String(x.i), x]));
+  const children = new Map();
+  for (const [childId, parents] of parentsByChild.entries()) {
+    if (!flags.has(childId)) continue;
+    const parent = parents[0];
+    if (!parent) continue;
+    const pid = String(parent.i);
+    if (!children.has(pid)) children.set(pid, []);
+    children.get(pid).push(childId);
+  }
+  for (const list of children.values()) {
+    list.sort((a, b) => {
+      const da = String(byId.get(a)?.d || '');
+      const db = String(byId.get(b)?.d || '');
+      return da.localeCompare(db) || Number(a) - Number(b);
+    });
+  }
+  return children;
+}
+
 export async function buildData(records, relations = new Map(), {
   fallback = true,
   generatedAt = new Date().toISOString(),
@@ -147,10 +170,12 @@ export async function buildData(records, relations = new Map(), {
   const flags = markRelationChildren(records, relations);
   const relationChildren = flags.size;
   const fallbackAdded = fallback ? markTitleChildren(records, relations, flags) : 0;
+  const childrenByParent = buildChildrenMap(records, relations, flags);
 
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };
     if (!Array.isArray(out.tg) || !out.tg.length) delete out.tg;
+    if (out.sv && childrenByParent.has(String(rest.i))) out.ch = childrenByParent.get(String(rest.i));
     return out;
   });
 
