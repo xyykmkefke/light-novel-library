@@ -299,6 +299,22 @@ export async function buildData(records, relations = new Map(), {
   // 懒加载卷包：只把新卷挂到父系列的 ch，不放进首屏核心包
   const volumes = Array.isArray(volumePack?.volumes) ? volumePack.volumes : [];
   const volumeParentById = volumePack?.parentById || new Map();
+  // RanobeDB 人工核对的补卷：只在父系列存在时合并，避免把卷挂到不存在的条目
+  try {
+    const fixes = JSON.parse(await readFile(path.join(ROOT, 'data', 'ranobedb-volume-fixes.json'), 'utf8'));
+    const knownIds = new Set(volumes.map((v) => String(v.i)));
+    const parentIds = new Set(records.map((x) => String(x.i)));
+    Object.entries(fixes.parents || {}).forEach(([parentId, info]) => {
+      if (!parentIds.has(String(parentId))) return;
+      (Array.isArray(info?.volumes) ? info.volumes : []).forEach((v) => {
+        const id = String(v?.i);
+        if (!id || knownIds.has(id) || parentIds.has(id)) return;
+        knownIds.add(id);
+        volumes.push(v);
+        volumeParentById.set(id, String(parentId));
+      });
+    });
+  } catch { /* 没有补卷文件时跳过 */ }
   volumeParentById.forEach((pid, cid) => {
     if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
     const list = childrenByParent.get(pid);
@@ -308,9 +324,22 @@ export async function buildData(records, relations = new Map(), {
 
   // 拆包：详情字段按需加载，网格首屏不下载；封面只存路径，运行时再拼图片域名
   const EXTRA_KEYS = ['au', 'il', 'pub', 'line', 'isbn', 'fisbn', 'jd'];
+  // 重建时保留 openBD / RanobeDB 已写回 extra 的补全字段，避免清洗覆盖
+  let previousExtra = {};
+  try {
+    const extraRaw = await readFile(path.join(ROOT, 'data', 'light-novels-extra.js'), 'utf8');
+    const extraMatch = extraRaw.match(/window\.LN_EXTRA\s*=\s*(\{[\s\S]*\});?/);
+    if (extraMatch) previousExtra = JSON.parse(extraMatch[1]);
+  } catch { /* 首次构建没有 extra 文件 */ }
   const extra = {};
   const final = records.map(({ rt, ...rest }) => {
     const out = { ...rest, c: flags.has(String(rest.i)) };
+    const prev = previousExtra[String(rest.i)];
+    if (prev) {
+      EXTRA_KEYS.forEach((key) => {
+        if (!out[key] && prev[key]) out[key] = prev[key];
+      });
+    }
     if (!Array.isArray(out.tg) || !out.tg.length) delete out.tg;
     if (out.isbn) {
       const isbn = normalizeIsbn(out.isbn);

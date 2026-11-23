@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.14.0">
+<meta name="version" content="1.15.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2769,6 +2769,7 @@
         <button class="btn adv-filter" id="hideChildrenBtn" type="button" aria-pressed="true" title="隐藏系列下的单卷条目，只显示系列与独立作品">隐藏系列子卷</button>
         <button class="btn adv-filter" id="includeNovelBtn" type="button" aria-pressed="false" title="显示只收录在 Bangumi「小说」标签下的一般小说">含一般小说</button>
         <button class="btn adv-filter" id="showVersionsBtn" type="button" aria-pressed="false" title="显示同名系列的其他版本，默认隐藏">显示重复版本</button>
+        <button class="btn adv-filter" id="showRnBtn" type="button" aria-pressed="false" title="显示 RanobeDB 扩展书目（≥2 卷），默认隐藏并按需加载">显示扩展书目</button>
         <button class="btn adv-filter" id="onlyMineBtn" type="button" aria-pressed="false" title="只显示已加入我的阅读的条目">只看已收藏</button>
         <button class="btn adv-filter" id="highScoreBtn" type="button" aria-pressed="false" title="只显示评分 8.0 及以上的作品">高分 ≥8.0</button>
         <button class="btn adv-filter" id="hideMineBtn" type="button" aria-pressed="false" title="隐藏已加入我的阅读的条目，只看还没收藏的">隐藏已收藏</button>
@@ -2879,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 通过镜像接口生成 · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="Bangumi 数据快照生成时间">—</span> · <span title="项目版本">v1.14.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3113,6 +3114,54 @@
       openDetail(id);
     }
   });
+
+  // RanobeDB 扩展书目：默认不下载，打开「显示扩展书目」后按需加载
+  var rnLoaded = false;
+  var rnLoading = null;
+  var RN_META = {};
+  function loadRn() {
+    if (rnLoaded) return Promise.resolve();
+    if (rnLoading) return rnLoading;
+    rnLoading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'data/light-novels-rn.js';
+      script.onload = function () {
+        var list = window.LN_RN || [];
+        RN_META = window.LN_RN_META || {};
+        var added = 0;
+        list.forEach(function (v) {
+          var id = String(v && v.i);
+          if (!id || byId.has(id)) return;
+          DATA.push(v);
+          byId.set(id, v);
+          added += 1;
+        });
+        rnLoaded = true;
+        window.LN_DATA = DATA;
+        window.__LN_RN_READY = true;
+        window.__LN_RN_COUNT = added;
+        document.dispatchEvent(new CustomEvent('ln-rn-ready'));
+        resolve();
+      };
+      script.onerror = function () {
+        rnLoading = null;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return rnLoading;
+  }
+  window.__lnLoadRn = loadRn;
+  document.addEventListener('ln-rn-ready', function () {
+    if (modalId) renderDetail(modalId);
+    if (state.tab === 'stats') renderStatsPage();
+    else render();
+    if (pendingDetail && byId.has(pendingDetail)) {
+      var id = pendingDetail;
+      pendingDetail = null;
+      openDetail(id);
+    }
+  });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
   var PREFS_KEY = 'yuc_ln_prefs_v1';
   var HIST_KEY = 'yuc_ln_hist_v1';
@@ -3202,6 +3251,7 @@
     hideChildren: true,
     includeNovel: false,
     showVersions: false,
+    showRn: false,
     view: 'grid',
     group: false,
     groupBy: 'year',
@@ -3214,6 +3264,17 @@
 
   var myMap = loadMine();
   var myDeleted = loadDeleted();
+  // 已收藏的扩展书目条目：启动或同步后自动加载扩展包，否则「我的阅读」里只有记录没有书目
+  function mineHasRn() {
+    return Object.keys(myMap).some(function (id) {
+      var n = Number(id);
+      return n >= 800000000 && n < 810000000;
+    });
+  }
+  function ensureRnForMine() {
+    if (!mineHasRn() || rnLoaded) return Promise.resolve();
+    return loadRn();
+  }
   // 探测本地存储是否可用，不可用时给出常驻提示
   var canStore = (function () {
     try {
@@ -3515,6 +3576,9 @@
     if (map.dup === '1' || map.dup === '0' || typeof map.dup === 'boolean') {
       state.showVersions = map.dup === '1' || map.dup === true;
     }
+    if (map.rn === '1' || map.rn === '0' || typeof map.rn === 'boolean') {
+      state.showRn = map.rn === '1' || map.rn === true;
+    }
     if (map.gr === 'all' || Object.prototype.hasOwnProperty.call(GENRE_LABEL, map.gr)) state.genre = map.gr;
     if (typeof map.ln === 'string') state.line = map.ln;
     if (['score', 'heat', 'date', 'name', 'vol', 'mineRating'].indexOf(map.o) >= 0) state.sort = map.o;
@@ -3568,6 +3632,7 @@
         hc: state.hideChildren ? '1' : '0',
         gn: state.includeNovel ? '1' : '0',
         dup: state.showVersions ? '1' : '0',
+        rn: state.showRn ? '1' : '0',
         gr: state.genre,
         ln: state.line,
         o: state.sort,
@@ -3726,6 +3791,7 @@
       'hc=' + (state.hideChildren ? '1' : '0'),
       'gn=' + (state.includeNovel ? '1' : '0'),
       'dup=' + (state.showVersions ? '1' : '0'),
+      'rn=' + (state.showRn ? '1' : '0'),
       'gr=' + encodeURIComponent(state.genre),
       'o=' + encodeURIComponent(state.sort),
       'st=' + encodeURIComponent(state.status),
@@ -3810,6 +3876,11 @@
     if (showVersionsBtn) {
       showVersionsBtn.setAttribute('aria-pressed', state.showVersions ? 'true' : 'false');
       showVersionsBtn.classList.toggle('primary', state.showVersions);
+    }
+    var showRnBtn = $('showRnBtn');
+    if (showRnBtn) {
+      showRnBtn.setAttribute('aria-pressed', state.showRn ? 'true' : 'false');
+      showRnBtn.classList.toggle('primary', state.showRn);
     }
     var groupBtn = $('groupBtn');
     if (groupBtn) {
@@ -4009,8 +4080,10 @@
     if (state.tab === 'mine') {
       return DATA.filter(function (x) { return myMap[String(x.i)]; });
     }
-    if (state.showVersions) return DATA;
-    return DATA.filter(function (x) { return !x.ver; });
+    if (state.showVersions && state.showRn) return DATA;
+    return DATA.filter(function (x) {
+      return (state.showVersions || !x.ver) && (state.showRn || !x.rn);
+    });
   }
 
   // 搜索分词：按空白拆分，多个关键词取交集（AND），便于用「作品名 + 季数」缩小范围
@@ -4023,8 +4096,9 @@
   function searchRank(x, q) {
     var cn = String(x.cn || '').toLowerCase();
     var n = String(x.n || '').toLowerCase();
+    var en = String(x.en || '').toLowerCase();
     var py = String(x.py || '');
-    var fields = [cn, n];
+    var fields = [cn, n, en];
     var best = 3;
     fields.forEach(function (f) {
       if (!f) return;
@@ -4055,10 +4129,11 @@
   function matchesQuery(x, token) {
     var cn = String(x.cn || '').toLowerCase();
     var n = String(x.n || '').toLowerCase();
+    var en = String(x.en || '').toLowerCase();
     var py = String(x.py || '');
     var au = String(x.au || '').toLowerCase();
-    return cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 || au.indexOf(token) >= 0 ||
-      (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
+    return cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 || en.indexOf(token) >= 0 ||
+      au.indexOf(token) >= 0 || (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
   }
 
   // 高级搜索字段：作者:、出版社:、书系:、评:、年:、分:、题材:（也接受全角冒号）
@@ -4452,6 +4527,7 @@
     if (!state.hideChildren) chips.push({ k: 'hideChildren', label: '范围', v: '显示系列子卷' });
     if (state.includeNovel) chips.push({ k: 'includeNovel', label: '范围', v: '含一般小说' });
     if (state.showVersions) chips.push({ k: 'showVersions', label: '范围', v: '显示重复版本' });
+    if (state.showRn) chips.push({ k: 'showRn', label: '范围', v: '显示扩展书目' });
     if (state.onlyMine) chips.push({ k: 'onlyMine', label: '范围', v: '只看已收藏' });
     if (state.highScore) chips.push({ k: 'highScore', label: '评分', v: '≥8.0' });
     if (state.hideMine) chips.push({ k: 'hideMine', label: '范围', v: '隐藏已收藏' });
@@ -4491,6 +4567,8 @@
       state.includeNovel = false;
     } else if (key === 'showVersions') {
       state.showVersions = false;
+    } else if (key === 'showRn') {
+      state.showRn = false;
     } else if (key === 'onlyMine') {
       state.onlyMine = false;
     } else if (key === 'highScore') {
@@ -4605,7 +4683,7 @@
       name: name,
       tab: state.tab, q: state.q, year: state.year, kind: state.kind,
       hideChildren: state.hideChildren, includeNovel: state.includeNovel,
-      showVersions: state.showVersions,
+      showVersions: state.showVersions, showRn: state.showRn,
       genre: state.genre, sort: state.sort,
       status: state.status, onlyMine: state.onlyMine, highScore: state.highScore,
       hideMine: state.hideMine, view: state.view, group: state.group,
@@ -4619,6 +4697,7 @@
       hc: v.hideChildren === false ? '0' : '1',
       gn: !!v.includeNovel,
       dup: !!v.showVersions,
+      rn: !!v.showRn,
       gr: v.genre || 'all', o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
       hm: !!v.hideMine, v: v.view, ms: v.mineSort,
       gb: v.group ? v.groupBy : '', q: v.q || ''
@@ -4629,8 +4708,9 @@
     bulkSel = Object.create(null);
     // syncControls 会把 tab / 搜索框等控件一并同步到 state
     syncControls();
-    if (!state.hideChildren) loadVolumes().then(render);
-    else render();
+    if (!state.hideChildren) loadVolumes();
+    if (state.showRn) loadRn();
+    render();
   }
   function renderViewsMenu() {
     var menu = $('viewsMenu');
@@ -5215,6 +5295,7 @@
           '<div class="stat-num"><b>' + (Number(META.physicalVolumes) || 0) + '</b><span>系列册数</span></div>' +
           '<div class="stat-num"><b>' + (Number(META.storyVolumes) || 0) + '</b><span>故事卷</span></div>' +
           '<div class="stat-num"><b>' + (Number(META.versions) || 0) + '</b><span>重复版本</span></div>' +
+          (RN_META.count ? '<div class="stat-num"><b>' + (Number(RN_META.count) || 0) + '</b><span>扩展书目</span></div>' : '') +
         '</div></div>' +
         '<div class="stat-card"><h3>' + year + ' 年目标</h3>' +
           '<div class="goal-line"><span class="review-hint">今年读完</span>' +
@@ -5358,7 +5439,7 @@
       (state.status !== 'all' ? 1 : 0) + (state.onlyMine ? 1 : 0) +
       (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) +
       (!state.hideChildren ? 1 : 0) + (state.includeNovel ? 1 : 0) +
-      (state.showVersions ? 1 : 0) +
+      (state.showVersions ? 1 : 0) + (state.showRn ? 1 : 0) +
       (state.q.trim() ? 1 : 0);
     var activeFilters = filterCount - (state.status !== 'all' ? 1 : 0) -
       (state.q.trim() ? 1 : 0) + (state.sort !== 'score' ? 1 : 0);
@@ -5570,7 +5651,9 @@
       : '<span>无封面</span>';
     var detailTitle = item.cn || item.n || '未知书目';
     $('modalTitle').innerHTML = highlightHtml(detailTitle, keywordQuery());
-    $('modalSub').textContent = item.cn && item.n && item.cn !== item.n ? item.n : '';
+    $('modalSub').textContent = item.cn && item.n && item.cn !== item.n
+      ? item.n
+      : (item.rn && item.en && item.en !== item.n ? item.en : '');
     // 在当前筛选结果中定位，提供上一本 / 下一本；不在结果内时隐藏
     var seq = filteredList();
     var pos = -1;
@@ -5589,10 +5672,14 @@
     }
     var pairs = [
       ['发售日', item.d || '未知'],
-      ['册数', item.v ? item.v + ' 卷' : '未知'],
-      ['评分', item.s ? Number(item.s).toFixed(1) : '暂无'],
-      ['排名', item.rk ? '#' + item.rk : '未上榜']
+      ['册数', item.v ? item.v + ' 卷' : '未知']
     ];
+    if (!item.rn) {
+      pairs.push(['评分', item.s ? Number(item.s).toFixed(1) : '暂无']);
+      pairs.push(['排名', item.rk ? '#' + item.rk : '未上榜']);
+    } else {
+      pairs.push(['收录', 'RanobeDB 扩展书目（ODbL）']);
+    }
     if (item.au) pairs.push(['作者', item.au]);
     if (item.il) pairs.push(['插图', item.il]);
     if (item.pub) pairs.push(['出版社', item.pub]);
@@ -5675,7 +5762,14 @@
     var btn = $('detailToggle');
     btn.textContent = collected ? '移出我的阅读' : '加入我的阅读';
     btn.className = 'btn' + (collected ? ' danger' : ' primary');
-    $('detailLink').href = 'https://bgm.tv/subject/' + id;
+    var detailLink = $('detailLink');
+    if (item.rn) {
+      detailLink.href = 'https://ranobedb.org/series/' + item.rid;
+      detailLink.textContent = 'RanobeDB';
+    } else {
+      detailLink.href = 'https://bgm.tv/subject/' + id;
+      detailLink.textContent = 'Bangumi';
+    }
 
     // 系列条目：一键把全部子卷加入想读（已存在的条目保持原样）
     var addChildrenBtn = $('detailAddChildren');
@@ -5936,6 +6030,14 @@
     updateDataHint();
     render();
   });
+  // 扩展书目：首次打开时才下载 RanobeDB 包，关闭后仅从列表隐藏，不卸载数据
+  $('showRnBtn').addEventListener('click', function () {
+    state.showRn = !state.showRn;
+    syncControls();
+    updateDataHint();
+    if (state.showRn) loadRn().then(updateDataHint);
+    render();
+  });
 
   // 隐藏已收藏：只看还没加入清单的书，便于发现新作
   $('hideMineBtn').addEventListener('click', function () {
@@ -5971,6 +6073,7 @@
     state.hideChildren = true;
     state.includeNovel = false;
     state.showVersions = false;
+    state.showRn = false;
     state.q = '';
     searchEl.value = '';
     syncControls();
@@ -6015,7 +6118,8 @@
     if (!sheet || !sheet.hidden) return;
     // 有高级条件生效时直接展开，避免用户以为筛选没生效
     var advActive = state.kind !== 'all' ||
-      state.onlyMine || state.highScore || state.hideMine || !state.hideChildren || state.includeNovel;
+      state.onlyMine || state.highScore || state.hideMine || !state.hideChildren ||
+      state.includeNovel || state.showVersions || state.showRn;
     $('filters').classList.toggle('adv-open', advActive);
     syncAdvFilterToggle(advActive);
     $('filterSheetBody').appendChild($('filters'));
@@ -6234,6 +6338,13 @@
       { name: '显示系列子卷', kind: '筛选', run: function () { state.hideChildren = false; syncControls(); loadVolumes().then(render); } },
       { name: '切换含一般小说', kind: '筛选', run: function () { state.includeNovel = !state.includeNovel; syncControls(); render(); } },
       { name: '切换重复版本', kind: '筛选', run: function () { state.showVersions = !state.showVersions; syncControls(); render(); } },
+      { name: '切换扩展书目', kind: '筛选', run: function () {
+        state.showRn = !state.showRn;
+        syncControls();
+        updateDataHint();
+        if (state.showRn) loadRn().then(updateDataHint);
+        render();
+      } },
       { name: '只看轻小说', kind: '筛选', run: function () { state.kind = 'novel'; syncControls(); render(); } },
       { name: '切换明暗主题', kind: '外观', run: function () { $('themeBtn').click(); } },
       { name: '云同步设置', kind: '数据', run: function () { $('syncBtn').click(); } },
@@ -6250,6 +6361,8 @@
         state.highScore = false;
         state.hideMine = false;
         state.hideChildren = true;
+        state.showVersions = false;
+        state.showRn = false;
         syncControls();
         render();
       } }
@@ -6435,6 +6548,7 @@
     state.hideMine = false;
     state.hideChildren = true;
     state.showVersions = false;
+    state.showRn = false;
     renderYears();
     syncControls();
     render();
@@ -7007,7 +7121,7 @@
   $('themeBtn').addEventListener('click', toggleTheme);
 
   // ---- 离线缓存概览：设置面板展示封面缓存数量与占用，并可清理封面 ----
-  var IMG_CACHE_RE = /bgmimg|anibt/;
+  var IMG_CACHE_RE = /bgmimg|anibt|ranobedb/;
 
   function listCachedImages() {
     var out = [];
@@ -7473,10 +7587,14 @@
         var added = 0;
         var merged = 0;
         var skipped = 0;
+        var needRn = false;
         raw.forEach(function (entry, index) {
           var isObj = entry && typeof entry === 'object';
           var id = String(isObj ? entry.id : entry);
-          if (!byId.has(id)) { skipped += 1; return; }
+          // 扩展书目 ID 预留 8 亿段：即使当前未加载扩展包，也先保留记录，随后按需加载数据
+          var rnId = /^\d+$/.test(id) && Number(id) >= 800000000 && Number(id) < 810000000;
+          if (!byId.has(id) && !rnId) { skipped += 1; return; }
+          if (rnId && !byId.has(id)) needRn = true;
           var status = isObj && STATUS[entry.status] ? entry.status : 'done';
           var vol = Math.max(0, Math.round(Number(isObj && (entry.vol != null ? entry.vol : entry.ep)) || 0));
           var finished = isObj && Number(entry.finishedAt) || 0;
@@ -7509,6 +7627,7 @@
         });
         saveMine();
         render();
+        if (needRn) loadRn().then(render);
         toast('导入完成：新增 ' + added + ' 本，合并 ' + merged + ' 本' +
           (skipped ? '，跳过 ' + skipped + ' 条无效记录' : ''));
       } catch (err) {
@@ -7874,6 +7993,7 @@
       if (changed) {
         saveMine({ fromSync: true });
         render();
+        ensureRnForMine().then(render);
       }
       return gistPush(cfg, buildPayload());
     }).then(function () {
@@ -7951,6 +8071,8 @@
         var wanted = hashDetailId();
         syncControls();
         pendingDetail = wanted && !byId.has(wanted) ? wanted : null;
+        if (!state.hideChildren) loadVolumes();
+        if (state.showRn || (wanted && Number(wanted) >= 800000000)) loadRn();
         render();
         if (wanted && byId.has(wanted)) openDetail(wanted);
         else closeDetail();
@@ -7990,15 +8112,19 @@
     }
     var general = DATA.filter(function (x) { return x.gn; }).length;
     var versions = DATA.filter(function (x) { return x.ver; }).length;
-    var books = DATA.filter(function (x) { return !x.gn && (state.showVersions || !x.ver); }).length;
+    var rn = DATA.filter(function (x) { return x.rn; }).length;
+    var books = DATA.filter(function (x) {
+      return !x.gn && (state.showVersions || !x.ver) && (state.showRn || !x.rn);
+    }).length;
     var volumes = Number(META.volumes) || 0;
     var split = Math.max(0, (Number(META.physicalVolumes) || 0) - (Number(META.storyVolumes) || 0));
     el.textContent = '共 ' + books + ' 本轻小说' +
       (versions ? ' · ' + (state.showVersions ? '含 ' + versions + ' 个重复版本' : '已隐藏 ' + versions + ' 个重复版本') : '') +
+      (rn ? ' · ' + (state.showRn ? '含 ' + rn + ' 部扩展书目' : '已隐藏 ' + rn + ' 部扩展书目') : '') +
       (volumes ? ' · 另有 ' + volumes + ' 卷' : '') +
       (split ? ' · 拆分卷 ' + split + ' 册' : '') +
       (general ? ' · ' + general + ' 本一般小说' : '');
-    el.title = '系列新卷按需加载；拆分卷按「册」统计，上/中/下折合为故事卷；一般小说与重复版本默认隐藏';
+    el.title = '系列新卷与扩展书目按需加载；拆分卷按「册」统计，上/中/下折合为故事卷；一般小说、重复版本与扩展书目默认隐藏';
   }
 
   // 页脚展示数据快照时间（本地时区），让用户知道数据新鲜度
@@ -8073,6 +8199,8 @@
   syncControls();
   render();
   if (!state.hideChildren) loadVolumes().then(render);
+  if (state.showRn || (initialDetail && Number(initialDetail) >= 800000000)) loadRn().then(render);
+  else ensureRnForMine().then(render);
   if (state.line) ensureLineOptions().then(render);
   if (initialDetail && byId.has(initialDetail)) openDetail(initialDetail);
   updateDataHint();

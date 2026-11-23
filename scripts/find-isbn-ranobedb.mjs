@@ -12,7 +12,7 @@ const BASE = 'https://ranobedb.org/api/v0';
 const DELAY_MS = 1100;
 const UA = 'yuc-light-novel-list/1.0';
 const limitArg = process.argv.find((x) => x.startsWith('--limit='));
-const LIMIT = limitArg ? Math.max(1, Number(limitArg.split('=')[1]) || 300) : 300;
+const LIMIT = limitArg ? Math.max(1, Number(limitArg.split('=')[1]) || 1000) : 1000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -80,13 +80,25 @@ const dataRaw = await readFile(path.join(ROOT, 'data', 'light-novels.js'), 'utf8
 const data = JSON.parse(dataRaw.match(/window\.LN_DATA\s*=\s*(\[[\s\S]*\]);?/)[1]);
 
 const targets = data
-  .filter((x) => !extra[String(x.i)]?.isbn && !x.gn)
+  .filter((x) => {
+    const fields = extra[String(x.i)] || {};
+    if (x.gn) return false;
+    // RanobeDB 只覆盖日文书志；中文 / 英文标题不再逐条查询
+    if (!/[\u3040-\u30ff]/.test(x.n || '')) return false;
+    if (x.sv) return !fields.isbn && !fields.fisbn;
+    return !fields.isbn;
+  })
   .sort((a, b) => (b.h || 0) - (a.h || 0))
   .slice(0, LIMIT);
 
 let singleFilled = 0;
 let seriesFilled = 0;
 let matched = 0;
+const header = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
+// 每 20 条写回一次，长任务中断也不会丢掉已查到的 ISBN
+async function flush() {
+  await writeFile(EXTRA_FILE, header + `window.LN_EXTRA = ${JSON.stringify(extra)};\n`, 'utf8');
+}
 
 for (let i = 0; i < targets.length; i += 1) {
   const item = targets[i];
@@ -116,8 +128,8 @@ for (let i = 0; i < targets.length; i += 1) {
     }
   }
   console.log(`进度 ${i + 1}/${targets.length}：${title} ${fields.isbn || fields.fisbn || '未匹配'}`);
+  if ((i + 1) % 20 === 0) await flush();
 }
 
-const header = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
-await writeFile(EXTRA_FILE, header + `window.LN_EXTRA = ${JSON.stringify(extra)};\n`, 'utf8');
+await flush();
 console.log(`RanobeDB 完成：查询 ${targets.length} 条，有 ISBN 结果 ${matched} 条，单册补 ${singleFilled}，系列补首卷 ${seriesFilled}`);

@@ -1,10 +1,10 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.14.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 195/195）
+- 当前状态：**v1.15.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 199/199）
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.14.0（已达成，功能：重复版本隐藏与册/故事卷统计）
+- 目标版本：v1.15.0（已达成，功能：RanobeDB 扩展书目、补卷与 ISBN 回填）
 
 ## 1. 目标与边界
 
@@ -55,6 +55,18 @@ User-Agent: yuc-light-novel-list/1.0
 - 搜索结果已包含 `infobox`、`tags`、`rating`、`collection`，无需逐条请求详情。
 - 建议请求间隔 800ms，失败重试 4 次（2s / 4s / 6s 退避）。
 
+RanobeDB 公共 API（ODbL，请求间隔 1.1s）：
+
+```http
+GET https://ranobedb.org/api/v0/series?limit=250&page=1   # 全量目录，共 23194 个系列
+GET https://ranobedb.org/api/v0/series/{id}               # 系列详情，含 books / staff / publishers
+GET https://ranobedb.org/api/v0/releases?q={title}        # 单册 ISBN
+```
+
+- 目录缓存在 `data/build/ranobedb-catalog/`，详情缓存在 `data/build/ranobedb-series-detail/`，均可断点续跑。
+- 扩展书目只收 `title_orig` 为日文、`c_num_books >= 2` 且与本地标题不重复的系列；封面来自 `https://images.ranobedb.org/`。
+- 补卷只接受系列标题精确同名，避免把外传 / 不同版本挂到主系列。
+
 数据构成（实测 4851 条）：
 
 - `series: true` 1306 条：系列主条目
@@ -62,7 +74,8 @@ User-Agent: yuc-light-novel-list/1.0
 - 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2160 条；默认可见轻小说 1925 条
 - 同名系列保留卷数最多、收藏最高的为主条目，其余 79 条标记 `ver` 并默认隐藏
 - 仅「小说」标签、没有「轻小说」标签的 789 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说
-- 关联中还有、库中没有的 7617 卷（单行本 + 番外篇）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
+- 关联中还有、库中没有的 7639 卷（单行本 + 番外篇 + RanobeDB 补卷）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
+- RanobeDB 扩展书目：≥2 卷、日文原名、与 Bangumi 标题去重后 8487 个系列 / 31254 卷，写入 `data/light-novels-rn.js`，默认隐藏、按需加载；ODbL 授权，详情链接到 RanobeDB
 - 需要「隐藏系列子卷」清洗，否则搜索一个系列会出现多条重复
 
 ## 3. 抓取与产出
@@ -274,11 +287,11 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v31`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包不预缓存，首次展开时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v32`，SHELL 包含 `./data/light-novels.js` 与 `./data/light-novels-extra.js`；卷包与扩展书目不预缓存，首次展开 / 打开开关时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
-### Step 5 验收（已完成：195/195）
+### Step 5 验收（已完成：199/199）
 
 1. `scripts/verify.mjs` 复用 CDP 骨架，端口 HTTP `8791`、CDP `9337`。
 2. 覆盖数据、筛选、搜索、排序、阅读记录、卷进度、看板、分组、批量、命令面板、设置、空状态、hash、PWA、无障碍、移动端与控制台错误。
@@ -624,6 +637,16 @@ PWA / 移动端：
 - UI：`state.showVersions` 默认 false，`baseList` 过滤 `ver`；工具栏新增「显示重复版本」，写入 hash `dup=1`、偏好与视图；详情显示「重复版本，主条目：…」。
 - 统计：构建时计算每个系列的 `chs`（上/中/下折合故事卷）和全局 `physicalVolumes` / `storyVolumes`；当前 9777 册 → 9685 故事卷。详情显示「N 册 / M 故事卷」，统计页新增「库内规模」卡片。
 - 校验：`check-data` 增加 `ver` 指向、`chs` 范围、全局册/故事卷一致性；`verify` 增加拆分统计、版本默认隐藏与切换 2 项，共 195 项。
+
+## 9.32 v1.15.0 RanobeDB 扩展书目（2026-11-23）
+
+- 新增 `scripts/build-ranobedb.mjs`：从 RanobeDB 全量目录筛选日文原名、≥2 卷、与 Bangumi 标题去重的系列，生成 `data/light-novels-rn.js`；当前 8487 个系列 / 31254 卷，ODbL 授权。
+- 扩展条目使用 `rn: true` 与 `rid`，ID 预留 `800000000 + rid`；`sv: true` 但无 `ch`，不参与系列子卷统计。UI 默认隐藏，`state.showRn` 控制，hash `rn=1`、偏好与视图均保存；打开开关才下载 2.38 MB 扩展包。
+- 详情：扩展条目显示日文原名 / 英文名、册数、起始发售日、RanobeDB 链接与 ODbL 来源；不显示 Bangumi 评分与排名。
+- 补卷：`scripts/fill-ranobedb-volumes.mjs` 精确同名匹配 RanobeDB，生成 `data/ranobedb-volume-fixes.json`；当前 10 个系列 / 22 卷，卷 ID 预留 `810000000 + book.id`，由 `clean-series.mjs` 合并进卷包并写入父系列 `ch`。
+- 清洗：`buildData` 重建时从现有 extra 文件回填 openBD / RanobeDB 已补字段，避免 `clean-series` 覆盖 ISBN 与日文版日期。
+- ISBN：继续用 RanobeDB 回填日文条目，单册 ISBN 3364 条不变，系列首卷 ISBN 从 216 补到 421 条；脚本每 20 条写回，可中断续跑。
+- 校验：`check-data` 增加扩展包结构、ID / rid、日期、来源授权与 `meta` 一致性检查；`verify` 增加扩展书目默认隐藏、按需加载、关闭恢复、详情链接与 SW 不预缓存 4 项，共 199 项。
 
 ## 10. 已知风险与决策
 

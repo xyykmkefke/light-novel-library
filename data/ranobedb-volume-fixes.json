@@ -1,0 +1,354 @@
+{
+  "generatedAt": "2026-11-23T12:58:25.660Z",
+  "source": "RanobeDB",
+  "sourceUrl": "https://ranobedb.org",
+  "license": "ODbL",
+  "parents": {
+    "14546": {
+      "name": "吸血歼鬼",
+      "seriesId": 388,
+      "volumes": [
+        {
+          "i": 810001611,
+          "n": "吸血殲鬼ヴェドゴニア WHITE NIGHT",
+          "cn": "",
+          "d": "2003-02-01",
+          "img": "https://images.ranobedb.org/C5Z5MtbXWMdsbt78.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "xxjgwhitenight",
+          "rvol": true,
+          "rid": 1611
+        },
+        {
+          "i": 810001636,
+          "n": "吸血殲鬼ヴェドゴニア MOON TEARS",
+          "cn": "",
+          "d": "2003-03-01",
+          "img": "https://images.ranobedb.org/JNCms0kDk8QxDtFd.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "xxjgmoontears",
+          "rvol": true,
+          "rid": 1636
+        }
+      ]
+    },
+    "17219": {
+      "name": "FLCL",
+      "seriesId": 238,
+      "volumes": [
+        {
+          "i": 810001019,
+          "n": "フリクリ 1",
+          "cn": "",
+          "d": "",
+          "img": "https://images.ranobedb.org/ikq7WlqB1rPpmSiX.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "1",
+          "rvol": true,
+          "rid": 1019
+        },
+        {
+          "i": 810001078,
+          "n": "フリクリ 2",
+          "cn": "",
+          "d": "",
+          "img": "https://images.ranobedb.org/afxsg7z6cunpWtMh.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "2",
+          "rvol": true,
+          "rid": 1078
+        },
+        {
+          "i": 810001163,
+          "n": "フリクリ 3",
+          "cn": "",
+          "d": "",
+          "img": "https://images.ranobedb.org/Jre3nyTicJrF596N.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "3",
+          "rvol": true,
+          "rid": 1163
+        }
+      ]
+    },
+    "108115": {
+      "name": "东池袋迷途猫",
+      "seriesId": 3601,
+      "volumes": [
+        {
+          "i": 810012736,
+          "n": "東池袋ストレイキャッツ",
+          "cn": "",
+          "d": "2014-06-10",
+          "img": "https://images.ranobedb.org/Eyj6ne7q7SmAy5ul.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "dcd",
+          "rvol": true,
+          "rid": 12736
+        }
+      ]
+    },
+    "177863": {
+      "name": "喜欢本大爷的竟然就你一个？",
+      "seriesId": 5356,
+      "volumes": [
+        {
+          "i": 810016858,
+          "n": "俺を好きなのはお前だけかよ",
+          "cn": "",
+          "d": "2016-02-10",
+          "img": "https://images.ranobedb.org/oYfV0WZhYpVYqORP.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "ahq",
+          "rvol": true,
+          "rid": 16858
+        }
+      ]
+    },
+    "225313": {
+      "name": "八尺乌系列",
+      "seriesId": 19725,
+      "volumes": [
+        {
+          "i": 810048533,
+          "n": "烏に単は似合わない 八咫烏シリーズ1",
+          "cn": "",
+          "d": "2014-06-10",
+          "img": "https://images.ranobedb.org/MPFeKPujktj44AAo.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "wdshbzw1",
+          "rvol": true,
+          "rid": 48533
+        },
+        {
+          "i": 810048534,
+          "n": "烏は主を選ばない 八咫烏シリーズ2",
+          "cn": "",
+          "d": "2015-06-10",
+          "img": "https://images.ranobedb.org/Ekad1d1OE5V6cat0.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "wzxbzw2",
+          "rvol": true,
+          "rid": 48534
+        },
+        {
+          "i": 810048535,
+          "n": "黄金の烏 八咫烏シリーズ3",
+          "cn": "",
+          "d": "2016-06-10",
+          "img": "https://images.ranobedb.org/KiOqiIg80QkWrw4q.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "hjwbzw3",
+          "rvol": true,
+          "rid": 48535
+        },
+        {
+          "i": 810048536,
+          "n": "空棺の烏 八咫烏シリーズ4",
+          "cn": "",
+          "d": "2017-06-08",
+          "img": "https://images.ranobedb.org/8sneQPqnt4BzAXch.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "kgwbzw4",
+          "rvol": true,
+          "rid": 48536
+        },
+        {
+          "i": 810048537,
+          "n": "玉依姫 八咫烏シリーズ5",
+          "cn": "",
+          "d": "2018-05-10",
+          "img": "https://images.ranobedb.org/eAQqTSoxclTcB8B7.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "yyzbzw5",
+          "rvol": true,
+          "rid": 48537
+        },
+        {
+          "i": 810048538,
+          "n": "弥栄の烏 八咫烏シリーズ6",
+          "cn": "",
+          "d": "2019-05-09",
+          "img": "https://images.ranobedb.org/t4Slp84ts734UyBs.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "mrwbzw6",
+          "rvol": true,
+          "rid": 48538
+        }
+      ]
+    },
+    "233845": {
+      "name": "关于我的房间成为了地下城的休息点的事情",
+      "seriesId": 6477,
+      "volumes": [
+        {
+          "i": 810019469,
+          "n": "僕の部屋がダンジョンの休憩所になってしまった件",
+          "cn": "",
+          "d": "2017-02-10",
+          "img": "https://images.ranobedb.org/GJiJqGlkCctfDUi1.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "pbwxqsj",
+          "rvol": true,
+          "rid": 19469
+        },
+        {
+          "i": 810020387,
+          "n": "僕の部屋がダンジョンの休憩所になってしまった件2",
+          "cn": "",
+          "d": "2017-06-10",
+          "img": "https://images.ranobedb.org/K9XcnTS18lx8G92M.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "pbwxqsj2",
+          "rvol": true,
+          "rid": 20387
+        },
+        {
+          "i": 810021536,
+          "n": "僕の部屋がダンジョンの休憩所になってしまった件3",
+          "cn": "",
+          "d": "2017-11-10",
+          "img": "https://images.ranobedb.org/R49rGoiocGoUBrog.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "pbwxqsj3",
+          "rvol": true,
+          "rid": 21536
+        }
+      ]
+    },
+    "336493": {
+      "name": "转生大圣女的异世界悠哉纪行",
+      "seriesId": 11831,
+      "volumes": [
+        {
+          "i": 810031424,
+          "n": "転生大聖女の異世界のんびり紀行",
+          "cn": "",
+          "d": "2021-02-26",
+          "img": "https://images.ranobedb.org/1Xfq4rE3jtWr2tWR.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "zsdsnysjjx",
+          "rvol": true,
+          "rid": 31424
+        },
+        {
+          "i": 810032948,
+          "n": "転生大聖女の異世界のんびり紀行 2",
+          "cn": "",
+          "d": "2021-08-31",
+          "img": "https://images.ranobedb.org/jDjvCWn4KNx1QYUL.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "zsdsnysjjx2",
+          "rvol": true,
+          "rid": 32948
+        }
+      ]
+    },
+    "459944": {
+      "name": "君を食べさせて?私を殺していいから",
+      "seriesId": 15974,
+      "volumes": [
+        {
+          "i": 810040765,
+          "n": "君を食べさせて?私を殺していいから",
+          "cn": "",
+          "d": "2023-12-28",
+          "img": "https://images.ranobedb.org/Fe1F6hk3vmHLFxFX.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "jsss",
+          "rvol": true,
+          "rid": 40765
+        }
+      ]
+    },
+    "606026": {
+      "name": "境界的Melody",
+      "seriesId": 16613,
+      "volumes": [
+        {
+          "i": 810042183,
+          "n": "境界のメロディ",
+          "cn": "",
+          "d": "2024-05-24",
+          "img": "https://images.ranobedb.org/uegN6zd2nYftZ3RW.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "jj",
+          "rvol": true,
+          "rid": 42183
+        },
+        {
+          "i": 810050858,
+          "n": "境界のメロディ2",
+          "cn": "",
+          "d": "2025-11-25",
+          "img": "https://images.ranobedb.org/LWmwU0bW6xNUqzhm.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "jj2",
+          "rvol": true,
+          "rid": 50858
+        }
+      ]
+    },
+    "719055": {
+      "name": "辺境貴族の俺と婚約した黒幕公爵家の令嬢が可愛すぎた件",
+      "seriesId": 23042,
+      "volumes": [
+        {
+          "i": 810055488,
+          "n": "辺境貴族の俺と婚約した黒幕公爵家の令嬢が可愛すぎた件 1巻",
+          "cn": "",
+          "d": "2026-11-06",
+          "img": "https://images.ranobedb.org/jHUPKi7aGMrKfJsy.jpg",
+          "sv": false,
+          "c": true,
+          "ns": false,
+          "py": "djgzahyhmgjjlnkaj1j",
+          "rvol": true,
+          "rid": 55488
+        }
+      ]
+    }
+  }
+}

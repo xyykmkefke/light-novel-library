@@ -373,15 +373,27 @@ async function main() {
       await writeFile(path.join(SHOT_DIR, 'desktop.png'), Buffer.from(shotDesktop.result.data, 'base64'));
     }
 
-    check('显示系列子卷后总数增加', await (async () => {
+    const showChildren = await (async () => {
       await cdp.evaluate('window.__lnLoadVolumes()');
       await click('#hideChildrenBtn');
-      const n = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
-      const expected = await cdp.evaluate(`(() =>
-        (window.LN_DATA || []).filter((x) => !x.gn && !x.ver).length)()`);
+      const debug = await cdp.evaluate(`(() => {
+        const d = window.LN_DATA || [];
+        return {
+          n: Number(document.getElementById('resultCount').textContent),
+          expected: d.filter((x) => !x.gn && !x.ver).length,
+          total: d.length,
+          gn: d.filter((x) => x.gn).length,
+          ver: d.filter((x) => x.ver).length,
+          both: d.filter((x) => x.gn && x.ver).length,
+          hc: document.getElementById('hideChildrenBtn').getAttribute('aria-pressed'),
+          dup: document.getElementById('showVersionsBtn').getAttribute('aria-pressed'),
+        };
+      })()`);
       await click('#hideChildrenBtn');
-      return n === expected;
-    })(), `全部 ${stats.total - stats.general + stats.volumes - stats.versions}`);
+      return debug;
+    })();
+    check('显示系列子卷后总数增加', showChildren.n === showChildren.expected,
+      JSON.stringify(showChildren));
 
     check('重复版本默认隐藏且可切换', await (async () => {
       const before = await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
@@ -1316,7 +1328,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.14.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.14.0'));
+    check('页脚版本为 v1.15.0', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.0'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1353,7 +1365,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.14.0', manifest.version === '1.14.0');
+    check('manifest 版本为 1.15.0', manifest.version === '1.15.0');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1375,8 +1387,9 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v31'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v32'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
+    check('Service Worker 不预缓存扩展包', !swTxt.includes('light-novels-rn'));
     check('Service Worker 缓存全库数据与详情包', swTxt.includes('data/light-novels.js') && swTxt.includes('data/light-novels-extra.js'));
     check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
     check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
@@ -1552,6 +1565,86 @@ async function main() {
       check(`移动端 ${width}px 无横向滚动`, overflow <= 1, `${overflow}px`);
     }
     await cdp.send('Emulation.clearDeviceMetricsOverride');
+
+    // ---- RanobeDB 扩展书目 ----
+    // 先重载，避免前面移动端抽屉与筛选状态影响按钮点击与计数
+    await reload();
+    await click('.tab[data-tab="all"]');
+    await setSearch('');
+    await sleep(300);
+    const rnBefore = await cdp.evaluate(`(() => ({
+      count: Number(document.getElementById('resultCount').textContent),
+      script: !!document.querySelector('script[src*="light-novels-rn"]'),
+      ready: window.__LN_RN_READY === true,
+    }))()`);
+    await click('#showRnBtn');
+    await sleep(500);
+    const rnClick = await cdp.evaluate(`(async () => ({
+      pressed: document.getElementById('showRnBtn').getAttribute('aria-pressed'),
+      script: !!document.querySelector('script[src*="light-novels-rn"]'),
+      src: document.querySelector('script[src*="light-novels-rn"]')?.src || '',
+      fetchStatus: await fetch('data/light-novels-rn.js').then((r) => r.status).catch((e) => 'ERR:' + e.message),
+      ready: window.__LN_RN_READY === true,
+    }))()`);
+    if (!rnClick.ready) {
+      await cdp.evaluate('window.__lnLoadRn()');
+      await sleep(2500);
+    }
+    for (let i = 0; i < 60; i += 1) {
+      if (await cdp.evaluate('window.__LN_RN_READY === true')) break;
+      await sleep(150);
+    }
+    const rnAfter = await cdp.evaluate(`(() => ({
+      count: Number(document.getElementById('resultCount').textContent),
+      expected: (window.LN_DATA || []).filter((x) => !x.c && !x.gn && !x.ver).length,
+      meta: window.LN_RN_META || {},
+      ready: window.__LN_RN_READY === true,
+      pressed: document.getElementById('showRnBtn').getAttribute('aria-pressed'),
+      sample: (window.LN_DATA || []).find((x) => x.rn) || null,
+    }))()`);
+    check('扩展书目默认隐藏并按需加载',
+      rnBefore.script === false && rnBefore.ready === false &&
+      rnAfter.meta.count > 8000 && rnAfter.count === rnAfter.expected && rnAfter.pressed === 'true',
+      JSON.stringify({
+        before: rnBefore.count, after: rnAfter.count, expected: rnAfter.expected,
+        meta: rnAfter.meta.count, ready: rnAfter.ready, scriptBefore: rnBefore.script,
+        click: rnClick,
+      }));
+    await click('#showRnBtn');
+    const rnOff = await cdp.evaluate(`(() => ({
+      count: Number(document.getElementById('resultCount').textContent),
+      pressed: document.getElementById('showRnBtn').getAttribute('aria-pressed'),
+    }))()`);
+    check('关闭扩展书目后恢复原列表',
+      rnOff.count === rnBefore.count && rnOff.pressed === 'false', `${rnOff.count}/${rnBefore.count}`);
+
+    await click('#showRnBtn');
+    const rnDetail = await cdp.evaluate(`(async () => {
+      const x = (window.LN_DATA || []).find((v) => v.rn);
+      if (!x) return { ok: false };
+      const el = document.getElementById('search');
+      el.value = x.n;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 400));
+      const card = document.querySelector('.card[data-id="' + x.i + '"]');
+      if (!card) return { ok: false, reason: 'no-card' };
+      card.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const link = document.getElementById('detailLink');
+      return {
+        ok: true,
+        title: document.getElementById('modalTitle').textContent,
+        href: link.href,
+        label: link.textContent,
+        source: document.getElementById('detailMeta').textContent,
+      };
+    })()`);
+    check('扩展书目详情标注来源并链接 RanobeDB',
+      rnDetail.ok === true && /ranobedb\.org\/series\//.test(rnDetail.href) &&
+      rnDetail.label === 'RanobeDB' && rnDetail.source.includes('扩展书目'), JSON.stringify(rnDetail));
+    await click('#modalClose');
+    await click('#showRnBtn');
+    await setSearch('');
 
     // ---- 控制台错误 ----
     const jsErrors = cdp.events.filter(

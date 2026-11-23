@@ -3,12 +3,15 @@
   "name": "轻小说库 · 我的阅读",
   "short_name": "轻小说库",
   "description": "本地优先的轻小说浏览与阅读记录",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "categories": ["books", "lifestyle"],
+  "categories": [
+    "books",
+    "lifestyle"
+  ],
   "background_color": "#0a0b0d",
   "theme_color": "#0a0b0d",
   "icons": [

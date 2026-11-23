@@ -27,9 +27,20 @@ const merged = data.map((x) => ({ ...x, ...(extra[String(x.i)] || {}) }));
 const volumeRaw = await readFile(path.join(ROOT, 'data', 'light-novels-volumes.js'), 'utf8').catch(() => '');
 const volumeMatch = volumeRaw.match(/window\.LN_VOLUMES\s*=\s*(\[[\s\S]*\]);?/);
 const volumes = volumeMatch ? JSON.parse(volumeMatch[1]) : [];
+const rnRaw = await readFile(path.join(ROOT, 'data', 'light-novels-rn.js'), 'utf8').catch(() => '');
+const rnMetaMatch = rnRaw.match(/window\.LN_RN_META\s*=\s*(\{[\s\S]*?\});/);
+const rnDataMatch = rnRaw.match(/window\.LN_RN\s*=\s*(\[[\s\S]*\]);?/);
+const rnMeta = rnMetaMatch ? JSON.parse(rnMetaMatch[1]) : {};
+const rn = rnDataMatch ? JSON.parse(rnDataMatch[1]) : [];
 const coreIds = new Set(data.map((x) => String(x.i)));
 
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
+function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
 function validIsbn13(code) {
   if (!/^\d{13}$/.test(code)) return false;
   const sum = code.slice(0, 12).split('').reduce((n, d, i) => n + Number(d) * (i % 2 ? 3 : 1), 0);
@@ -50,6 +61,7 @@ const label = {
   version: '重复版本标记异常',
   split: '册/故事卷统计异常',
   extra: '详情拆包异常',
+  rn: '扩展书目异常',
   img: '封面字段异常',
   source: '来源标记异常',
   volume: '卷包异常',
@@ -58,7 +70,7 @@ const label = {
 const issues = {
   duplicate: [], date: [], score: [], volumes: [], title: [], id: [],
   genre: [], leak: [], flags: [], kind: [], children: [], extra: [], img: [], source: [], volume: [], meta: [],
-  version: [], split: [],
+  version: [], split: [], rn: [],
 };
 const seen = new Map();
 const byIdAll = new Map(data.map((x) => [String(x.i), x]));
@@ -148,7 +160,38 @@ volumes.forEach((v) => {
     issues.volume.push(`${id}:封面 ${v.img}`);
   }
   if (!refIds.has(id)) issues.volume.push(`${id}:未被任何系列 ch 引用`);
+  if (v.d && !validDate(v.d)) issues.volume.push(`${id}:日期 ${v.d}`);
 });
+
+if (!rnMetaMatch || !rnDataMatch) {
+  issues.rn.push('未找到 window.LN_RN_META 或 window.LN_RN');
+} else {
+  const RN_ID_BASE = 800000000;
+  const seenRn = new Set();
+  rn.forEach((x) => {
+    const id = String(x && x.i);
+    if (!/^\d+$/.test(id) || Number(id) < RN_ID_BASE) issues.rn.push(`非法 ID：${id}`);
+    if (coreIds.has(id) || seenVolume.has(id)) issues.rn.push(`${id}:与核心包或卷包重复`);
+    if (seenRn.has(id)) issues.rn.push(`${id}:扩展包内重复`);
+    seenRn.add(id);
+    if (!String(x.n || '').trim()) issues.rn.push(`${id}:缺少标题`);
+    if (!/[\u3040-\u30ff]/.test(String(x.n || ''))) issues.rn.push(`${id}:标题不是日文`);
+    if (x.rn !== true || x.sv !== true || x.c !== false || x.ns !== false) {
+      issues.rn.push(`${id}:rn=${x.rn},sv=${x.sv},c=${x.c},ns=${x.ns}`);
+    }
+    if (!Number.isInteger(Number(x.rid)) || Number(x.rid) <= 0) issues.rn.push(`${id}:rid 非法`);
+    else if (Number(id) !== RN_ID_BASE + Number(x.rid)) issues.rn.push(`${id}:ID 与 rid 不匹配`);
+    if (!Number.isInteger(Number(x.v)) || Number(x.v) < 2) issues.rn.push(`${id}:v=${x.v}`);
+    if (x.d && !validDate(x.d)) issues.rn.push(`${id}:日期 ${x.d}`);
+    if (x.img && !/^https:\/\/images\.ranobedb\.org\//.test(x.img)) issues.rn.push(`${id}:封面 ${x.img}`);
+    if (x.ch != null) issues.rn.push(`${id}:扩展系列不应有 ch`);
+    if (x.en != null && typeof x.en !== 'string') issues.rn.push(`${id}:en 类型错误`);
+  });
+  if (Number(rnMeta.count) !== rn.length) issues.rn.push(`meta.count=${rnMeta.count}，实际=${rn.length}`);
+  const rnVolumes = rn.reduce((n, x) => n + (Number(x.v) || 0), 0);
+  if (Number(rnMeta.volumes) !== rnVolumes) issues.rn.push(`meta.volumes=${rnMeta.volumes}，实际=${rnVolumes}`);
+  if (rnMeta.source !== 'RanobeDB' || rnMeta.license !== 'ODbL') issues.rn.push('来源或授权标记缺失');
+}
 
 Object.keys(extra).forEach((id) => {
   if (!byIdAll.has(id)) issues.extra.push(`${id}:extra 指向不存在的条目`);
@@ -235,6 +278,7 @@ console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 $
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
 console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
 console.log(`懒加载卷包：${volumes.length} 条；全部条目 ${data.length + volumes.length} 条`);
+console.log(`扩展书目：${rn.length} 个系列 / ${(Number(rnMeta.volumes) || 0)} 卷（RanobeDB，默认隐藏）`);
 console.log(`拆包：详情 ${Object.keys(extra).length} 条 / 封面路径 ${data.filter((x) => x.img && !/^https?:/.test(x.img)).length} 条`);
 
 for (const keyword of ['文学少女', '无职转生', '白夜行', '人间失格']) {

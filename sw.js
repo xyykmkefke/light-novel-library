@@ -1,5 +1,5 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-ln-shell-v31';
+var CACHE = 'yuc-ln-shell-v32';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/light-novels.js', './data/light-novels-extra.js'];
 var IMG_LIMIT = 400;
 
@@ -7,7 +7,7 @@ var IMG_LIMIT = 400;
 function trimImageCache(cache) {
   return cache.keys().then(function (keys) {
     var imgs = keys.filter(function (req) {
-      return req.destination === 'image' || /bgmimg|anibt/.test(req.url);
+      return req.destination === 'image' || /bgmimg|anibt|ranobedb/.test(req.url);
     });
     if (imgs.length <= IMG_LIMIT) return null;
     var drop = imgs.slice(0, imgs.length - IMG_LIMIT);
