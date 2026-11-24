@@ -1360,7 +1360,7 @@ async function main() {
     // ---- 分享与 hash ----
     const hash = await cdp.evaluate(`(() => location.hash)()`);
     check('URL hash 同步筛选状态', /tab=/.test(hash), hash.slice(0, 60));
-    check('页脚版本为 v1.15.3', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.3'));
+    check('页脚版本为 v1.15.4', (await cdp.evaluate(`(() => document.querySelector('footer').textContent)()`)).includes('v1.15.4'));
 
     // ---- 数据边界 ----
     const noDate = await cdp.evaluate(`(() => {
@@ -1397,7 +1397,7 @@ async function main() {
     // ---- PWA ----
     const manifest = await (await fetch(`http://127.0.0.1:${PORT}/manifest.webmanifest`)).json();
     check('manifest 名称正确', manifest.name.includes('轻小说'), manifest.name);
-    check('manifest 版本为 1.15.3', manifest.version === '1.15.3');
+    check('manifest 版本为 1.15.4', manifest.version === '1.15.4');
     check('manifest 声明稳定 id', manifest.id === './', String(manifest.id));
     const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
     check('manifest 提供桌面快捷方式', shortcuts.length >= 3, `${shortcuts.length} 个`);
@@ -1419,7 +1419,7 @@ async function main() {
     })()`);
     check('SW 注册支持主动更新检查', swReg.reg === true && swReg.fn === true, JSON.stringify(swReg));
     const swTxt = await (await fetch(`http://127.0.0.1:${PORT}/sw.js`)).text();
-    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v35'));
+    check('Service Worker 缓存名独立', swTxt.includes('yuc-ln-shell-v36'));
     check('Service Worker 不预缓存卷包', !swTxt.includes('light-novels-volumes'));
     check('Service Worker 不预缓存扩展包', !swTxt.includes('light-novels-rn'));
     check('Service Worker 不预缓存剩余核心', !swTxt.includes('light-novels-rest'));

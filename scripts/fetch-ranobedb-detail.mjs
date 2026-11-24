@@ -20,6 +20,8 @@ const SHARDS = Math.max(1, Number(arg('shards', 1)) || 1);
 const SHARD = Math.min(SHARDS, Math.max(1, Number(arg('shard', 1)) || 1));
 const LIMIT = Math.max(1, Number(arg('limit', 999999)) || 999999);
 const DELAY_MS = Math.max(300, Number(arg('delay', 1100)) || 1100);
+// --refresh：重抓并覆盖已有缓存（缓存结构升级时用）
+const REFRESH = process.argv.includes('--refresh');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -43,12 +45,19 @@ function trim(series) {
     name: String(x.name || ''),
     lang: String(x.lang || ''),
   })).filter((x) => x.name);
+  // 多语言标题：zh-Hant / zh-Hans 是官方中文名，比回查 Bangumi 更准
+  const titles = (series.titles || []).map((x) => ({
+    title: String(x.title || '').trim(),
+    lang: String(x.lang || ''),
+    official: Boolean(x.official),
+  })).filter((x) => x.title);
   return {
     id: Number(series.id),
     fetchedAt: new Date().toISOString(),
     title: String(series.title_orig || ''),
     staff,
     publishers,
+    titles,
   };
 }
 
@@ -87,7 +96,7 @@ let skipped = 0;
 for (const id of targets) {
   done += 1;
   const file = path.join(CACHE_DIR, `${id}.json`);
-  if (await exists(file)) {
+  if (!REFRESH && await exists(file)) {
     skipped += 1;
     continue;
   }

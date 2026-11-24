@@ -1,6 +1,6 @@
 {
   "name": "light-novel-library",
-  "version": "1.15.3",
+  "version": "1.15.4",
   "private": true,
   "description": "本地优先的轻小说浏览与阅读记录，内置 Bangumi 轻小说条目",
   "license": "MIT",
@@ -19,6 +19,7 @@
     "verify": "node scripts/verify.mjs"
   },
   "devDependencies": {
+    "opencc-js": "^1.4.2",
     "pinyin-pro": "^3.29.5"
   }
 }

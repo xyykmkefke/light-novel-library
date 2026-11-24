@@ -3,7 +3,22 @@
 // 数据来源：https://ranobedb.org（ODbL），目录缓存在 data/build/ranobedb-catalog/
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import OpenCC from 'opencc-js';
 import { initials } from './build-pinyin.mjs';
+
+// RanobeDB 的中文标题多为繁体（台湾版），统一转简体，保证简体输入能搜到
+const toHans = OpenCC.Converter({ from: 'tw', to: 'cn' });
+
+// 从详情的多语言标题里挑官方中文名；没有汉字的不算（如「JK」这种音译缩写）
+function pickChineseTitle(detail) {
+  if (!detail || !Array.isArray(detail.titles)) return '';
+  const zh = detail.titles.filter((t) => /^zh/i.test(String(t.lang || '')) && t.title);
+  if (!zh.length) return '';
+  const official = zh.find((t) => t.official) || zh[0];
+  const raw = String(official.title).trim();
+  if (!/[\u4e00-\u9fff]/.test(raw)) return '';
+  return /hant|tw|hk/i.test(String(official.lang || '')) ? toHans(raw) : raw;
+}
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const CACHE_DIR = path.join(ROOT, 'data', 'build', 'ranobedb-catalog');
@@ -181,8 +196,10 @@ picked.sort((a, b) => (Number(b.c_start_date) || 0) - (Number(a.c_start_date) ||
 const entries = picked.map((s) => {
   const filename = s.book && s.book.image && s.book.image.filename;
   const cnHit = cnMatches[String(s.id)] || null;
-  const cn = cnHit && String(cnHit.cn || '').trim() ? String(cnHit.cn).trim() : '';
+  const bangumiCn = cnHit && String(cnHit.cn || '').trim() ? String(cnHit.cn).trim() : '';
   const detail = details.get(Number(s.id)) || null;
+  const ranobeCn = bangumiCn ? '' : pickChineseTitle(detail);
+  const cn = bangumiCn || ranobeCn;
   const staff = detail && Array.isArray(detail.staff) ? detail.staff : [];
   const role = (x) => String((x && (x.role || x.role_type)) || '');
   const authors = [...new Set(staff.filter((x) => /^author$/i.test(role(x))).map((x) => String(x.name || '').trim()))]
@@ -197,7 +214,7 @@ const entries = picked.map((s) => {
     n: String(s.title_orig).trim(),
     en: String(s.title || '').trim(),
     ...(cn ? { cn } : {}),
-    ...(cn && Number(cnHit.bgm) > 0 ? { bgm: Number(cnHit.bgm) } : {}),
+    ...(bangumiCn && cnHit && Number(cnHit.bgm) > 0 ? { bgm: Number(cnHit.bgm) } : {}),
     ...(authors.length ? { au: authors.join(' / ') } : {}),
     ...(publisher && publisher.name ? { pub: String(publisher.name).trim() } : {}),
     ...(imprint && imprint.name ? { line: String(imprint.name).trim() } : {}),
@@ -213,12 +230,19 @@ const entries = picked.map((s) => {
   };
 });
 
+const ranobeCnCount = picked.filter((s) => {
+  const hit = cnMatches[String(s.id)];
+  if (hit && String(hit.cn || '').trim()) return false;
+  return Boolean(pickChineseTitle(details.get(Number(s.id))));
+}).length;
+
 const dates = entries.map((x) => x.d).filter(Boolean).sort();
 const meta = {
   generatedAt: new Date().toISOString(),
   count: entries.length,
   volumes: entries.reduce((n, x) => n + (Number(x.v) || 0), 0),
   cnMapped: entries.filter((x) => x.cn).length,
+  cnFromRanobedb: ranobeCnCount,
   withAuthors: entries.filter((x) => x.au).length,
   withPublishers: entries.filter((x) => x.pub || x.line).length,
   minDate: dates[0] || '',
@@ -236,5 +260,6 @@ const content = '// 由 scripts/build-ranobedb.mjs 生成，请勿手动修改\n
 await writeFile(OUT_FILE, content, 'utf8');
 
 console.log(`RanobeDB 扩展书目：${entries.length} 个系列 / ${meta.volumes} 卷`);
-console.log(`日期范围：${meta.minDate || '—'} ~ ${meta.maxDate || '—'}`);
+console.log(`中文名：${meta.cnMapped} 条（其中 RanobeDB 官方标题 ${meta.cnFromRanobedb} 条）；作者 ${meta.withAuthors} / 出版社与文库 ${meta.withPublishers}`);
+console.log(`日期范围：${meta.minDate || '—'} ~ ${meta.maxDate || '—'} `);
 console.log(`输出：${OUT_FILE}`);
