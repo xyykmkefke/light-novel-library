@@ -1,12 +1,12 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.15.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 205/205）
+- 当前状态：**v1.15.4 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 205/205）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.15.3（已达成，功能：扩展书目作者 / 出版社 / 文库 + 导入竞态修复 + ISBN 补齐）
+- 目标版本：v1.15.4（已达成，功能：中文名扩容到 310 条，接入 RanobeDB 官方中文标题）
 
 ## 1. 目标与边界
 
@@ -165,7 +165,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v35` |
+| SW 缓存 | `yuc-ln-shell-v36` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -289,7 +289,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 
 ### Step 4 PWA（已完成）
 
-1. `sw.js` 缓存名 `yuc-ln-shell-v35`，SHELL 包含 `./data/light-novels-lite.js` 与 `./data/light-novels-extra.js`；剩余核心、卷包与扩展书目不预缓存，首屏后 / 首次展开 / 打开开关时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
+1. `sw.js` 缓存名 `yuc-ln-shell-v36`，SHELL 包含 `./data/light-novels-lite.js` 与 `./data/light-novels-extra.js`；剩余核心、卷包与扩展书目不预缓存，首屏后 / 首次展开 / 打开开关时按需下载并进入运行时缓存；封面缓存上限 400 张，超出按插入顺序清理。
 2. manifest 为「轻小说库」/「轻小说库」，主题色沿用石墨黑 + 靛蓝。
 3. 已生成 180 / 192 / 512 PNG 图标，iOS meta 完整。
 
@@ -681,6 +681,15 @@ PWA / 移动端：
 - 校验：`check-data` 增加 au / pub / line 类型断言，问题总数 0；`test-merge` 20/20；`verify` 增加「扩展条目详情显示作者」，共 205 项。
 - 版本 1.15.3，SW `yuc-ln-shell-v35`。
 
+## 9.36 v1.15.4 中文名扩容：接入 RanobeDB 官方中文标题（2026-11-24）
+
+- 探索：Bangumi 对冷门书目覆盖 ~2.8% 已是瓶颈。对比三个候选源——RanobeDB 详情自带官方多语言标题（抽样约 3%，与 Bangumi 重叠极低，各 1/40）；Wikidata 仅 8% 系列有 ID 且查询接口慢；均无更高上限，选 RanobeDB。
+- 抓取：`fetch-ranobedb-detail.mjs` 缓存结构加入 `titles`（多语言标题）并支持 `--refresh` 整体重抓，8487 个系列约 31 分钟。
+- 构建：`build-ranobedb.mjs` 引入 `opencc-js`（devDependency）做繁→简转换；优先级 Bangumi 中文名 > RanobeDB 官方标题；中文标题必须含汉字（过滤「JK」这类音译缩写）。
+- 结果：中文名 240 → **310 条（3.7%）**，其中 RanobeDB 官方 70 条（`meta.cnFromRanobedb`）；70 条逐一人工核对，均为官方译名，无错配。gzip 719 → 721 KB。
+- 校验：`check-data` 0、`test-merge` 20/20、`verify` 205/205。
+- 版本 1.15.4，SW `yuc-ln-shell-v36`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -694,4 +703,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.3 已完成，后续按第 10 节风险与决策、第 9.35 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（205 项），push/PR 由 CI 自动跑前两项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.4 已完成，后续按第 10 节风险与决策、第 9.36 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（205 项），push/PR 由 CI 自动跑前两项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

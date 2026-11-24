@@ -129,3 +129,11 @@ git -c http.version=HTTP/1.1 push origin main
 - 脚本健壮性：分片状态加 `shards` 校验、合并按 `rid` 去重（此前换分片数会导致重复计数）。
 - 校验：`check-data` 0 问题（新增 au/pub/line 断言）、`test-merge` 20/20、`verify` 205/205（新增「扩展条目详情显示作者」）。
 - 版本 1.15.2 → 1.15.3，SW `yuc-ln-shell-v34` → `v35`。
+
+## 10. v1.15.4 中文名扩容：接入 RanobeDB 官方中文标题（2026-11-24 01:28–10:55）
+
+- 结论先行：Bangumi 对这批冷门书目覆盖 2.8% 已接近天花板；RanobeDB 详情自带官方多语言标题（约 3%、与 Bangumi 重叠极低），是最合适的补充源。Wikidata 仅 8% 有 ID 且接口慢，放弃。
+- 抓取：`fetch-ranobedb-detail.mjs` 缓存加入 `titles` 并支持 `--refresh` 重抓，6 分片约 31 分钟。
+- 构建：`build-ranobedb.mjs` 引入 `opencc-js` 繁转简；优先级 Bangumi > RanobeDB 官方标题，且须含汉字。
+- 结果：中文名 240 → 310 条（3.7%），RanobeDB 官方 70 条全部人工核对无误配；gzip 719 → 721 KB。
+- 校验：`check-data` 0、`test-merge` 20/20、`verify` 205/205。版本 1.15.4，SW `yuc-ln-shell-v36`。

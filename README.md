@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7639 卷懒加载卷包，合计 12490 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3367 个单册 ISBN、850 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.15.3 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 205 项）
+状态：**v1.15.4 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 205 项）
+
+v1.15.4：中文名扩容——接入 RanobeDB 官方中文标题（繁体自动转简体），中文名从 240 条扩到 310 条（3.7%）；详情抓取与构建支持 `--refresh`。
 
 v1.15.3：扩展书目详情与导入修复——为 8487 个系列补作者、出版社、文库（8468 / 8484 / 8232 条），详情页可直接查看；修复慢网下导入备份会把未补载条目当无效记录丢弃的问题；ISBN 覆盖从 3785 补到 4217 条（87%）。
 
@@ -124,7 +126,7 @@ npm run verify        # 无头浏览器自动化验收（203 项）
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v35`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v36`。
 
 ## 部署
 
