@@ -20,7 +20,14 @@ jobs:
         run: npm run check-data
       - name: 合并逻辑测试
         run: npm run test-merge
+      - name: 安装 Chromium
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+        id: setup-chrome
       - name: 浏览器端自动化验收
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: node scripts/verify.mjs
       - name: 上传失败截图
         if: failure()
