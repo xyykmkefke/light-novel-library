@@ -153,3 +153,13 @@ git -c http.version=HTTP/1.1 push origin main
 - HANDOVER 新增 §10.1 发布检查清单，README 的 CI 说明同步。
 - 版本不变（1.15.4，SW `yuc-ln-shell-v36`），无运行时改动。
 - 本地 `check-data` 0、`test-merge` 20/20、`verify` 205/205；CI 三项全绿。
+
+## 13. 部署边界与历史 tag 回填（2026-11-24）
+
+- 部署边界：新增 `_config.yml`，用 Jekyll `exclude` 把构建/校验用完整核心 `data/light-novels.js`（1.24 MB）排除出 Pages；文件仍保留在仓库供 `check-data`、`find-isbn`、`build-*` 使用，页面与 Service Worker 均不引用它。
+- 守卫：新增 `scripts/check-deploy.mjs`（`npm run check-deploy`），校验 `_config.yml` 排除项、5 个运行时数据文件存在、页面/SW 不引用完整核心；已接入 `data-check` workflow，CI 现为四项（`check-data`、`test-merge`、`check-deploy`、`verify`）。
+- 历史 tag：回填 annotated tag `v1.15.0` → `27da74e`、`v1.15.1` → `1869d66`、`v1.15.2` → `0258e18`、`v1.15.3` → `f77294e`；`v1.15.4` 原指向 `9d69ac1`。远端 `git ls-remote --tags` 已确认全部存在且 peeled 提交正确。
+- 版本与 SW 不变（1.15.4 / `yuc-ln-shell-v36`），无运行时改动，按 §10.1 不升版本、不升缓存。
+- 本地：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过。
+- CI：commit `9658bf4` 四项全绿；Pages 构建 `built`。
+- 线上复核：`/data/light-novels.js` 返回 **404**，`/data/light-novels-lite.js` 返回 **200**（554,085 字节），首页 meta/页脚仍为 1.15.4，`sw.js` 仍为 v36。
