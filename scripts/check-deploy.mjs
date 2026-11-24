@@ -40,6 +40,7 @@ const RUNTIME_FILES = [
   'data/light-novels-lite.js',
   'data/light-novels-rest.js',
   'data/light-novels-extra.js',
+  'data/light-novels-ch.js',
   'data/light-novels-volumes.js',
   'data/light-novels-rn.js',
 ];

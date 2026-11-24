@@ -38,6 +38,9 @@ const liteData = liteDataMatch ? JSON.parse(liteDataMatch[1]) : [];
 const restRaw = await readFile(path.join(ROOT, 'data', 'light-novels-rest.js'), 'utf8').catch(() => '');
 const restDataMatch = restRaw.match(/window\.LN_REST\s*=\s*(\[[\s\S]*\]);?/);
 const restData = restDataMatch ? JSON.parse(restDataMatch[1]) : [];
+const chRaw = await readFile(path.join(ROOT, 'data', 'light-novels-ch.js'), 'utf8').catch(() => '');
+const chMatch = chRaw.match(/window\.LN_CH\s*=\s*(\{[\s\S]*\});?/);
+const chPack = chMatch ? JSON.parse(chMatch[1]) : null;
 const coreIds = new Set(data.map((x) => String(x.i)));
 
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
@@ -156,6 +159,29 @@ data.forEach((x, idx) => {
     }
   }
 });
+
+// 子卷索引包：与完整核心的 ch 必须逐条一致，运行时 lite/rest 不再携带 ch
+if (!chPack) {
+  issues.children.push('未找到 window.LN_CH');
+} else {
+  data.forEach((x) => {
+    const list = chPack[String(x.i)];
+    if (Array.isArray(x.ch)) {
+      if (!Array.isArray(list)) issues.children.push(`${x.i}:缺少子卷索引包条目`);
+      else if (list.length !== x.ch.length || list.some((id, i) => String(id) !== String(x.ch[i]))) {
+        issues.children.push(`${x.i}:子卷索引包与核心不一致`);
+      }
+    } else if (list) {
+      issues.children.push(`${x.i}:子卷索引包多出条目`);
+    }
+  });
+  Object.entries(chPack).forEach(([id, list]) => {
+    const parent = byIdAll.get(id);
+    if (!parent || !parent.sv) issues.children.push(`${id}:子卷索引包条目不是系列`);
+    if (!Array.isArray(list) || !list.length) issues.children.push(`${id}:子卷索引包为空`);
+    else if (new Set(list.map(String)).size !== list.length) issues.children.push(`${id}:子卷索引包重复`);
+  });
+}
 
 if (!volumeMatch) issues.volume.push('未找到 window.LN_VOLUMES');
 const seenVolume = new Set();
@@ -329,6 +355,7 @@ console.log(`字段缺失：作者 ${missing.au} / 插图 ${missing.il} / 出版
 console.log(`无卷数：单册 ${missing.vSingles} / 未完结或未知系列 ${missing.vSeries}`);
 console.log(`类型标记：漫画 ${kinds.manga} / 画集 ${kinds.artbook} / 指南 ${kinds.guide}`);
 console.log(`子卷索引：${indexed} 个系列 / ${indexedRefs} 条子卷引用`);
+console.log(`子卷索引包：${chPack ? Object.keys(chPack).length : 0} 个系列 / ${chPack ? Object.values(chPack).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0) : 0} 条引用`);
 console.log(`懒加载卷包：${volumes.length} 条；全部条目 ${data.length + volumes.length} 条`);
 console.log(`核心拆包：轻量 ${liteData.length} 条 / 剩余 ${restData.length} 条`);
 console.log(`扩展书目：${rn.length} 个系列 / ${(Number(rnMeta.volumes) || 0)} 卷（RanobeDB，默认隐藏）`);

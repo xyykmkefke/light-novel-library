@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.5">
+<meta name="version" content="1.15.6">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2880,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.5</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.6</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3175,10 +3175,12 @@
       script.src = 'data/light-novels-rest.js';
       script.onload = function () {
         var list = window.LN_REST || [];
+        var chMap = window.LN_CH || {};
         var added = 0;
         list.forEach(function (v) {
           var id = String(v && v.i);
           if (!id || byId.has(id)) return;
+          if (Array.isArray(chMap[id])) v.ch = chMap[id];
           DATA.push(v);
           byId.set(id, v);
           added += 1;
@@ -3213,6 +3215,39 @@
       pendingDetail = null;
       openDetail(id);
     }
+  });
+
+  // 系列子卷索引单独成包：首屏不携带，打开系列详情或一键加入子卷时加载
+  var chLoaded = false;
+  var chLoading = null;
+  function loadCh() {
+    if (chLoaded) return Promise.resolve();
+    if (chLoading) return chLoading;
+    chLoading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'data/light-novels-ch.js';
+      script.onload = function () {
+        var map = window.LN_CH || {};
+        DATA.forEach(function (x) {
+          var list = map[String(x.i)];
+          if (Array.isArray(list)) x.ch = list;
+        });
+        chLoaded = true;
+        window.__LN_CH_READY = true;
+        document.dispatchEvent(new CustomEvent('ln-ch-ready'));
+        resolve();
+      };
+      script.onerror = function () {
+        chLoading = null;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return chLoading;
+  }
+  window.__lnLoadCh = loadCh;
+  document.addEventListener('ln-ch-ready', function () {
+    if (modalId) renderDetail(modalId);
   });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
   var PREFS_KEY = 'yuc_ln_prefs_v1';
@@ -5713,6 +5748,8 @@
     loadExtra();
     var item = byId.get(id);
     if (!item) return;
+    // 系列子卷索引不在首屏核心里，打开系列详情时按需加载；加载完成后重渲染
+    if (item.sv && !item.rn && !Array.isArray(item.ch)) loadCh();
     var collected = !!myMap[id];
     $('detailCover').innerHTML = item.img
       ? '<img src="' + escapeHtml(item.img) + '"' +
@@ -7068,7 +7105,7 @@
   // 系列详情：一键把该系列全部子卷加入想读
   $('detailAddChildren').addEventListener('click', function () {
     if (!modalId) return;
-    loadVolumes().then(function () {
+    loadVolumes().then(loadCh).then(function () {
       var item = byId.get(modalId);
       if (!item || !Array.isArray(item.ch)) return;
       var now = Date.now();

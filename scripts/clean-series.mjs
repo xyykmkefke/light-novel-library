@@ -502,16 +502,25 @@ export async function buildData(records, relations = new Map(), {
   await writeFile(outFile, content, 'utf8');
 
   // 首屏轻量核心：只放默认可见条目；子卷、一般小说与重复版本后台加载
-  const lite = final.filter((x) => !x.c && !x.gn && !x.ver);
-  const rest = final.filter((x) => x.c || x.gn || x.ver);
+  // ch 索引单独成包，首屏核心不携带，打开系列详情时按需加载
+  const chPack = {};
+  final.forEach((x) => {
+    if (x.sv && Array.isArray(x.ch) && x.ch.length) chPack[String(x.i)] = x.ch;
+  });
+  const stripCh = ({ ch, ...rest }) => rest;
+  const lite = final.filter((x) => !x.c && !x.gn && !x.ver).map(stripCh);
+  const rest = final.filter((x) => x.c || x.gn || x.ver).map(stripCh);
   const liteFile = outFile.replace(/\.js$/, '-lite.js');
   const restFile = outFile.replace(/\.js$/, '-rest.js');
+  const chFile = outFile.replace(/\.js$/, '-ch.js');
   const header = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
   await writeFile(liteFile, header +
     `window.LN_META = ${JSON.stringify(meta)};\n` +
     `window.LN_DATA = ${JSON.stringify(lite)};\n`, 'utf8');
   await writeFile(restFile, header +
     `window.LN_REST = ${JSON.stringify(rest)};\n`, 'utf8');
+  await writeFile(chFile, header +
+    `window.LN_CH = ${JSON.stringify(chPack)};\n`, 'utf8');
 
   const extraFile = outFile.replace(/\.js$/, '-extra.js');
   const extraContent = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n' +
@@ -542,6 +551,9 @@ export async function buildData(records, relations = new Map(), {
     restFile,
     liteCount: lite.length,
     restCount: rest.length,
+    chFile,
+    chCount: Object.keys(chPack).length,
+    chRefs: Object.values(chPack).reduce((n, list) => n + list.length, 0),
     extraFile,
     extraCount: Object.keys(extra).length,
     volumeFile,
@@ -599,6 +611,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const stats = await buildData(records, relations, { volumePack });
   console.log(`完成：${stats.total} 条（系列 ${stats.series} / 单册 ${stats.singles} / 子卷 ${stats.children}）`);
   console.log(`懒加载卷包：${stats.volumes} 条 → ${stats.volumeFile}`);
+  console.log(`子卷索引包：${stats.chCount} 个系列 / ${stats.chRefs} 条引用 → ${stats.chFile}`);
   console.log(`关联覆盖 ${stats.relationSeries} 个系列，关联子卷 ${stats.relationChildren} 条，标题兜底 ${stats.fallbackAdded} 条`);
   console.log(`父系列继承：书系 ${stats.inherited.line} / 插图 ${stats.inherited.il} / 作者 ${stats.inherited.au} / 出版社 ${stats.inherited.pub} / 题材 ${stats.inherited.tg} / 类型 ${stats.inherited.kind}`);
   console.log(`子卷→系列继承：书系 ${stats.inheritedFromChildren.line} / 插图 ${stats.inheritedFromChildren.il} / 作者 ${stats.inheritedFromChildren.au} / 出版社 ${stats.inheritedFromChildren.pub} / 日期 ${stats.inheritedFromChildren.d} / 封面 ${stats.inheritedFromChildren.img}`);

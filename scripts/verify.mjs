@@ -233,13 +233,15 @@ async function main() {
       full: window.__FULL_DATA_READY === true,
       restReady: window.__LN_REST_READY === true,
       restScript: !!document.querySelector('script[src*="light-novels-rest"]'),
+      chScript: !!document.querySelector('script[src*="light-novels-ch"]'),
       metaCount: Number((window.LN_META || {}).count) || 0,
     }))()`);
     check('首屏加载轻量核心',
       liteCore.ready === true && liteCore.data > 1500 && liteCore.data < 2500,
       `${liteCore.data} 条`);
-    check('首屏未加载剩余核心',
-      liteCore.full === false && liteCore.restReady === false && liteCore.restScript === false,
+    check('首屏未加载剩余核心与子卷索引',
+      liteCore.full === false && liteCore.restReady === false && liteCore.restScript === false &&
+      liteCore.chScript === false,
       JSON.stringify(liteCore));
     const restCore = await cdp.evaluate(`(async () => {
       await window.__lnLoadRest();
@@ -312,6 +314,7 @@ async function main() {
     await cdp.evaluate('window.__lnLoadRest()');
     await cdp.evaluate('window.__lnLoadVolumes()');
     await cdp.evaluate('window.__lnLoadExtra()');
+    await cdp.evaluate('window.__lnLoadCh()');
 
     const stats = await cdp.evaluate(`(() => {
       // 统计只看核心包，排除按需加载的卷包

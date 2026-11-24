@@ -1,12 +1,12 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.15.5 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 206/206）
+- 当前状态：**v1.15.6 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 206/206）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.15.5（已达成，功能：补回 125 条缺失发售日，系列字段从子卷共识继承）
+- 目标版本：v1.15.6（已达成，功能：子卷索引 ch 拆包，首屏 gzip 191.7→153.5 KB）
 
 ## 1. 目标与边界
 
@@ -165,7 +165,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v37` |
+| SW 缓存 | `yuc-ln-shell-v38` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -245,14 +245,24 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 ```
 轻小说/
 ├── index.html                 # 单文件应用
-├── data/light-novels.js       # 生成的全库数据（提交）
-├── data/build/                # 抓取分页缓存（不提交）
+├── data/
+│   ├── light-novels.js        # 完整核心（构建/校验输入，不部署）
+│   ├── light-novels-lite.js   # 首屏默认可见
+│   ├── light-novels-rest.js   # 子卷 / 一般小说 / 重复版本（后台补载）
+│   ├── light-novels-ch.js     # 系列子卷索引（打开系列详情时按需）
+│   ├── light-novels-extra.js  # 详情字段（按需）
+│   ├── light-novels-volumes.js
+│   ├── light-novels-rn.js
+│   ├── bgm-detail-fills.json  # 详情补全候选（构建输入）
+│   └── build/                 # 抓取分页缓存（不提交）
 ├── scripts/
 │   ├── fetch-books.mjs
 │   ├── clean-series.mjs
+│   ├── enrich-bgm-detail.mjs
 │   ├── genres.mjs
 │   ├── build-pinyin.mjs
 │   ├── check-data.mjs
+│   ├── check-deploy.mjs
 │   └── verify.mjs
 ├── sw.js
 ├── manifest.webmanifest
@@ -701,6 +711,17 @@ PWA / 移动端：
 - 校验：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 205/205。
 - 版本 1.15.5，SW `yuc-ln-shell-v37`。
 
+## 9.38 v1.15.6 子卷索引拆包（2026-11-24）
+
+- 首屏减负：`ch` 从 lite / rest 移除，单独生成 `data/light-novels-ch.js`（1071 个系列 / 9799 条引用，95,721 B，gzip 34,442 B）；完整核心仍保留 `ch` 供构建与校验。
+- 体积：lite 554,377 → **469,286 B**（gzip 191,748 → **153,492 B，约 -20%**）；rest 689,394 → 682,633 B（gzip 170,490 B）。
+- 运行时：新增 `loadCh()`，打开系列详情或一键加入子卷时加载并合并；`loadRest` 合并剩余核心时同步补 `ch`；`ln-ch-ready` 重渲染当前详情。
+- PWA：SW `SHELL` 加入 `./data/light-novels-ch.js`，缓存名升到 `yuc-ln-shell-v38`，离线打开系列详情仍可用。
+- 校验：`check-data` 新增索引包与完整核心 `ch` 的逐条一致性、系列归属、重复检查；`check-deploy` 运行时白名单加入 ch 包。
+- 验收：`verify` 首屏断言不加载 ch 脚本；加载 rest/volumes/extra 后补载 ch，再校验 `chSeries` / `chRefs` 完整。
+- 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 206/206。
+- 版本 1.15.6，SW `yuc-ln-shell-v38`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -726,4 +747,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.5 已完成，后续按第 10 节风险与决策、第 9.37 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（206 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.6 已完成，后续按第 10 节风险与决策、第 9.38 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（206 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
