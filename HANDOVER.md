@@ -743,7 +743,7 @@ PWA / 移动端：
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
 7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
 8. **许可**：MIT，署名 Deckard（见 `LICENSE`）。
-9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 18 项排除、12 个运行时文件未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
+9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 18 项排除、13 个运行时文件（6 个数据包）未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
 
 ## 11. 交接提示词
 

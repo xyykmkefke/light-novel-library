@@ -187,3 +187,16 @@ git -c http.version=HTTP/1.1 push origin main
 - 本地：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` **206/206**。
 - CI：commit `75e072f` 四项全绿；Pages `built`。
 - 线上复核：运行时 12 个文件全部 200；`/data/light-novels.js`、`/scripts/verify.mjs`、`/reports/…`、`/screenshots/desktop.png`、`/README.md`、`/HANDOVER.md`、`/package.json`、`/_config.yml` 等排除项均 404（少数首次探测遇到 CDN 503，重试后 404）。
+
+## 16. v1.15.6 子卷索引拆包（2026-11-24）
+
+- 首屏减负：`ch` 从 lite / rest 移除，完整核心保留供构建与校验，新增 `data/light-novels-ch.js`（1071 个系列 / 9799 条引用，95,721 B，gzip 34,442 B）。
+- 体积：lite 554,377 → **469,286 B**（gzip 191,748 → **153,492 B，约 -20%**，线上 gzip 传输 157,696 B）；rest 689,394 → 682,633 B（gzip 170,490 B）。
+- 运行时：`loadCh()` 在打开系列详情或一键加入子卷时加载并合并；`loadRest` 合并剩余核心时同步补 `ch`；`ln-ch-ready` 重渲染当前详情。
+- PWA：SW 缓存升到 `yuc-ln-shell-v38`，`SHELL` 预缓存 ch 包（34.4 KB）以保住离线系列详情；首屏关键路径仍不等待 ch。
+- 校验：`check-data` 新增索引包与核心 `ch` 的逐条一致性、系列归属、重复检查；`check-deploy` 运行时白名单加入 ch 包（13 个文件 / 6 个数据包）。
+- 验收：`verify` 首屏断言不加载 ch 脚本；加载 rest/volumes/extra 后补载 ch，再校验 `chSeries` / `chRefs` 完整。
+- 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 206/206。
+- 版本 1.15.6，SW `yuc-ln-shell-v38`；commit `a7e889e`。
+- CI 四项全绿；Pages `built`；线上版本 1.15.6、SW v38，lite / ch / rest / volumes / rn 均 200，完整核心 404。
+- 口径说明：lite 关键路径减少约 34 KB；因 ch 预缓存供离线使用，首次安装总传输约等于旧的 lite（157.7 + 35.6 KB），收益在首屏解析/执行不被 ch 阻塞。

@@ -141,6 +141,6 @@ GitHub Pages：<https://xyykmkefke.github.io/light-novel-library/>
 
 仓库根目录即站点根目录，无需构建步骤。推送后开启 `main` 分支根目录 Pages 即可。
 
-`_config.yml` 负责部署边界：只发布运行时文件（`index.html`、`manifest.webmanifest`、`sw.js`、`icon.svg`、`icons/` 与 5 个运行时数据包），脚本、报告、截图、文档、`package*.json` 与构建输入（完整核心、`data/*.json`）全部排除出 Jekyll 站点产物。构建输入仍保留在仓库中供 `check-data`、`find-isbn` 与各构建脚本使用；`npm run check-deploy` 会在 CI 中校验排除清单、运行时文件是否被误排除，以及页面/SW 引用是否齐全。
+`_config.yml` 负责部署边界：只发布运行时文件（`index.html`、`manifest.webmanifest`、`sw.js`、`icon.svg`、`icons/` 与 6 个运行时数据包），脚本、报告、截图、文档、`package*.json` 与构建输入（完整核心、`data/*.json`）全部排除出 Jekyll 站点产物。构建输入仍保留在仓库中供 `check-data`、`find-isbn` 与各构建脚本使用；`npm run check-deploy` 会在 CI 中校验排除清单、运行时文件是否被误排除，以及页面/SW 引用是否齐全。
 
 细节见 [HANDOVER.md](./HANDOVER.md)。
