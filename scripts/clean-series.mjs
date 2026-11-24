@@ -182,6 +182,51 @@ function inheritFromParents(records, parentsByChild) {
   return filled;
 }
 
+// 系列条目缺失的系列级字段，从子卷共识继承；首卷发售日取最早子卷日期
+const INHERIT_FROM_CHILDREN = ['line', 'il', 'au', 'pub'];
+
+function inheritFromChildren(records, childrenByParent) {
+  const byId = new Map(records.map((x) => [String(x.i), x]));
+  const filled = { line: 0, il: 0, au: 0, pub: 0, d: 0, img: 0 };
+  for (const [parentId, ids] of childrenByParent.entries()) {
+    const parent = byId.get(String(parentId));
+    if (!parent) continue;
+    const children = ids.map((id) => byId.get(String(id))).filter(Boolean);
+    if (!children.length) continue;
+    for (const key of INHERIT_FROM_CHILDREN) {
+      if (String(parent[key] || '').trim()) continue;
+      const values = children.map((c) => c[key]).filter((v) => String(v || '').trim());
+      if (!values.length) continue;
+      const freq = new Map();
+      values.forEach((v) => freq.set(v, (freq.get(v) || 0) + 1));
+      const [top, count] = [...freq.entries()].sort((a, b) => b[1] - a[1])[0];
+      // 单子卷直接采用；多子卷要求至少两票且过半，避免被单个外传带偏
+      const threshold = values.length === 1 ? 1 : Math.max(2, Math.ceil(values.length / 2));
+      if (count >= threshold) {
+        parent[key] = top;
+        filled[key] += 1;
+      }
+    }
+    if (!parent.d) {
+      const dates = children.map((c) => c.d).filter(Boolean).sort();
+      if (dates.length) {
+        parent.d = dates[0];
+        filled.d += 1;
+      }
+    }
+    if (!parent.img) {
+      const child = children
+        .filter((c) => c.img)
+        .sort((a, b) => String(a.d || '').localeCompare(String(b.d || '')))[0];
+      if (child) {
+        parent.img = child.img;
+        filled.img += 1;
+      }
+    }
+  }
+  return filled;
+}
+
 // 父系列 → 子卷索引：用于「一键加入系列全部子卷」
 function buildChildrenMap(records, relations, flags) {
   const parentsByChild = buildParentMap(records, relations);
@@ -288,6 +333,32 @@ export async function buildData(records, relations = new Map(), {
     });
   } catch { /* 没有人工关系文件时跳过 */ }
 
+  // Bangumi 详情补全候选：只填空字段，不覆盖已有值
+  let detailFills = {};
+  try {
+    const raw = JSON.parse(await readFile(path.join(ROOT, 'data', 'bgm-detail-fills.json'), 'utf8'));
+    detailFills = raw.fills || {};
+  } catch { /* 没有详情补全文件时跳过 */ }
+  const detailFilled = { date: 0, cover: 0, au: 0, pub: 0, line: 0, il: 0 };
+  for (const item of records) {
+    const fill = detailFills[String(item.i)];
+    if (!fill) continue;
+    if (!item.d && fill.date) {
+      item.d = fill.date;
+      detailFilled.date += 1;
+    }
+    if (!item.img && fill.cover) {
+      item.img = fill.cover;
+      detailFilled.cover += 1;
+    }
+    for (const [key, field] of [['author', 'au'], ['publisher', 'pub'], ['line', 'line'], ['illustrator', 'il']]) {
+      if (!String(item[field] || '').trim() && fill[key]) {
+        item[field] = fill[key];
+        detailFilled[field] += 1;
+      }
+    }
+  }
+
   const parentsByChild = buildParentMap(records, relations);
   const inherited = inheritFromParents(records, parentsByChild);
   const flags = markRelationChildren(records, relations);
@@ -295,6 +366,7 @@ export async function buildData(records, relations = new Map(), {
   const fallbackAdded = fallback ? markTitleChildren(records, relations, flags) : 0;
 
   const childrenByParent = buildChildrenMap(records, relations, flags);
+  const inheritedFromChildren = inheritFromChildren(records, childrenByParent);
 
   // 懒加载卷包：只把新卷挂到父系列的 ch，不放进首屏核心包
   const volumes = Array.isArray(volumePack?.volumes) ? volumePack.volumes : [];
@@ -397,6 +469,19 @@ export async function buildData(records, relations = new Map(), {
     });
   });
 
+  // 重复版本缺失的作者 / 插图从主条目继承；书系、出版社、日期可能因版本不同，不自动继承
+  const verInherited = { au: 0, il: 0 };
+  final.filter((x) => x.ver).forEach((item) => {
+    const primary = extra[String(item.ver)] || {};
+    const fields = extra[String(item.i)] || (extra[String(item.i)] = {});
+    for (const key of ['au', 'il']) {
+      if (!String(fields[key] || '').trim() && String(primary[key] || '').trim()) {
+        fields[key] = primary[key];
+        verInherited[key] += 1;
+      }
+    }
+  });
+
   const dates = final.map((x) => x.d).filter(Boolean).sort();
   const meta = {
     generatedAt,
@@ -449,6 +534,9 @@ export async function buildData(records, relations = new Map(), {
     relationChildren,
     fallbackAdded,
     inherited,
+    inheritedFromChildren,
+    verInherited,
+    detailFilled,
     outFile,
     liteFile,
     restFile,
@@ -513,5 +601,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`懒加载卷包：${stats.volumes} 条 → ${stats.volumeFile}`);
   console.log(`关联覆盖 ${stats.relationSeries} 个系列，关联子卷 ${stats.relationChildren} 条，标题兜底 ${stats.fallbackAdded} 条`);
   console.log(`父系列继承：书系 ${stats.inherited.line} / 插图 ${stats.inherited.il} / 作者 ${stats.inherited.au} / 出版社 ${stats.inherited.pub} / 题材 ${stats.inherited.tg} / 类型 ${stats.inherited.kind}`);
+  console.log(`子卷→系列继承：书系 ${stats.inheritedFromChildren.line} / 插图 ${stats.inheritedFromChildren.il} / 作者 ${stats.inheritedFromChildren.au} / 出版社 ${stats.inheritedFromChildren.pub} / 日期 ${stats.inheritedFromChildren.d} / 封面 ${stats.inheritedFromChildren.img}`);
+  console.log(`重复版本继承：作者 ${stats.verInherited.au} / 插图 ${stats.verInherited.il}`);
+  console.log(`详情补全：日期 ${stats.detailFilled.date} / 封面 ${stats.detailFilled.cover} / 作者 ${stats.detailFilled.au} / 出版社 ${stats.detailFilled.pub} / 书系 ${stats.detailFilled.line} / 插图 ${stats.detailFilled.il}`);
   console.log(`输出 ${stats.outFile}`);
 }

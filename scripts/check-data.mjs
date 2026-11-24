@@ -42,10 +42,16 @@ const coreIds = new Set(data.map((x) => String(x.i)));
 
 const GENRE_IDS = new Set(GENRES.map((g) => g.id));
 function validDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [y, m, d] = value.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  // 允许 YYYY / YYYY-MM / YYYY-MM-DD 三种精度，具体到日时再做日历回验
+  const s = String(value || '');
+  if (!/^\d{4}(-\d{2}){0,2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  if (m != null && (m < 1 || m > 12)) return false;
+  if (d != null) {
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+  return true;
 }
 function validIsbn13(code) {
   if (!/^\d{13}$/.test(code)) return false;
@@ -94,7 +100,7 @@ data.forEach((x, idx) => {
   else seen.set(String(x.i), idx);
 
   const d = String(x.d || '');
-  if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) issues.date.push(`${x.i}:${d}`);
+  if (d && !validDate(d)) issues.date.push(`${x.i}:${d}`);
   if (x.s != null && (Number(x.s) < 0 || Number(x.s) > 10)) issues.score.push(`${x.i}:${x.s}`);
   if (x.v != null && (!Number.isInteger(Number(x.v)) || Number(x.v) < 0)) issues.volumes.push(`${x.i}:${x.v}`);
   if (!String(x.cn || '').trim() && !String(x.n || '').trim()) issues.title.push(String(x.i));

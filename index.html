@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.4">
+<meta name="version" content="1.15.5">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2880,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.4</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.5</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4036,6 +4036,14 @@
     return /^\d{4}$/.test(y) ? y : '';
   }
 
+  // 上游日期可能是年 / 月精度，显示时按实际精度呈现，不臆造具体日
+  function dateText(dateStr) {
+    var t = String(dateStr || '');
+    if (t.length === 4) return t + ' 年';
+    if (t.length === 7) return t.slice(0, 4) + ' 年 ' + Number(t.slice(5, 7)) + ' 月';
+    return t;
+  }
+
   function renderYears() {
     // 只列出库里确实有书目的年份，避免 160 多个空年份占满筛选栏
     var counts = {};
@@ -4454,7 +4462,7 @@
     var sub = x.cn && x.n && x.cn !== x.n ? highlightHtml(x.n, q) : '';
     var score = x.s ? Number(x.s).toFixed(1) : '';
     var total = Number(x.v) || 0;
-    var meta = [x.d, total ? total + ' 卷' : ''].filter(Boolean).join(' · ');
+    var meta = [dateText(x.d), total ? total + ' 卷' : ''].filter(Boolean).join(' · ');
     var vol = entry ? Math.max(0, Number(entry.vol) || 0) : 0;
     var prog = state.tab === 'mine' && entry && total > 0
       ? '<div class="cprog" title="已读卷数">' +
@@ -5733,7 +5741,7 @@
       $('detailNext').title = nextItem ? '下一本：' + (nextItem.cn || nextItem.n || '') : '已是最后一本';
     }
     var pairs = [
-      ['发售日', item.d || '未知'],
+      ['发售日', item.d ? dateText(item.d) : '未知'],
       ['册数', item.v ? item.v + ' 卷' : '未知']
     ];
     if (!item.rn) {
@@ -5890,7 +5898,7 @@
             '<span class="sim-title">' + escapeHtml(x.cn || x.n || '未知书目') + '</span>' +
             '<span class="sim-meta"><b class="sim-why">' + escapeHtml(o.why) + '</b> · ' +
             (x.s ? Number(x.s).toFixed(1) : '暂无') +
-            (x.d ? ' · ' + escapeHtml(x.d) : '') + '</span></button>';
+            (x.d ? ' · ' + escapeHtml(dateText(x.d)) : '') + '</span></button>';
         }).join('') + '</div>'
       : '';
   }
@@ -6478,7 +6486,7 @@
         paletteItems.push({
           kind: 'book',
           name: x.cn || x.n || '未知书目',
-          sub: [x.d, x.au].filter(Boolean).join(' · '),
+          sub: [x.d ? dateText(x.d) : '', x.au].filter(Boolean).join(' · '),
           run: function () { openDetail(String(x.i)); }
         });
       });
