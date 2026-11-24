@@ -98,8 +98,8 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - 卷包：7639 条（单行本 + 番外篇 + RanobeDB 补卷），按需加载；展开后共 11625 条轻小说
 - 统计：系列内 9799 册，按上/中/下折合 9707 故事卷
 - 扩展书目：8487 个系列 / 31254 卷，默认隐藏，开关打开后按需加载
-- 字段：ISBN 3364 条、系列首卷 ISBN 421 条、书系 3595 条、出版社 4793 条、日文版发售日 2950 条
-- 文件：`data/light-novels-lite.js`（首屏默认可见，约 541 KB，gzip 约 194 KB）+ `data/light-novels-rest.js`（子卷 / 一般小说 / 重复版本，约 673 KB，后台加载）+ `data/light-novels.js`（完整核心，供构建脚本使用）+ `data/light-novels-extra.js`（详情字段，约 589 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.38 MB，按需加载）
+- 字段：ISBN 3367 条、系列首卷 ISBN 850 条、书系 3595 条、出版社 4793 条、日文版发售日 2950 条（任一 ISBN 覆盖 4217 条，87%）
+- 文件：`data/light-novels-lite.js`（首屏默认可见，约 541 KB，gzip 约 194 KB）+ `data/light-novels-rest.js`（子卷 / 一般小说 / 重复版本，约 673 KB，后台加载）+ `data/light-novels.js`（完整核心，供构建脚本使用）+ `data/light-novels-extra.js`（详情字段，约 596 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.9 MB，gzip 约 721 KB，按需加载）
 - 封面在数据里只存相对路径，运行时补全图片域名；图片本身按 200w / 400w 自适应
 - 清洗：优先用 Bangumi 关联接口的「单行本」关系标记子卷，关系缺失时退回标题规则
 - 增强：子卷缺失的书系/插图/作者/出版社/题材从父系列继承；漫画、画集、指南写入 `kind`
@@ -119,7 +119,7 @@ npm run validate-ranobedb # 生成 RanobeDB 卷目对照报告
 npm run check-data    # 数据校验
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（203 项）
+npm run verify        # 无头浏览器自动化验收（205 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data` 与 `test-merge`；`verify` 依赖本机浏览器，仍需本地执行。

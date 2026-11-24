@@ -137,3 +137,11 @@ git -c http.version=HTTP/1.1 push origin main
 - 构建：`build-ranobedb.mjs` 引入 `opencc-js` 繁转简；优先级 Bangumi > RanobeDB 官方标题，且须含汉字。
 - 结果：中文名 240 → 310 条（3.7%），RanobeDB 官方 70 条全部人工核对无误配；gzip 719 → 721 KB。
 - 校验：`check-data` 0、`test-merge` 20/20、`verify` 205/205。版本 1.15.4，SW `yuc-ln-shell-v36`。
+
+## 11. 接手复核与文档校准（2026-11-24）
+
+- 接手状态：HEAD `9d69ac1`，工作树干净，`main...origin/main` 同步；版本五处一致（1.15.4，SW v36）；`check-data` 问题 0、`test-merge` 20/20（本次实测）。
+- README 校准 3 处：`verify（203 项）` → 205；ISBN 3364/421 → 3367/850，并补「任一 ISBN 覆盖 4217 条（87%）」；`extra` 589 → 596 KB、`light-novels-rn.js` 2.38 → 2.9 MB（gzip 721 KB）。
+- 复核「展开后共 11625 条轻小说」：3986 条非一般小说、非重复版本 + 7639 卷包 = 11625，口径正确，未改。
+- ISBN 续跑结论：目标 221 条（220 条命中缓存、1 条新查询），新增 0；其中 57 条 RanobeDB 有结果但标题不匹配，164 条无结果。当前缺 ISBN 634 条 = 一般小说 291 + 日文标题 221 + 中英文标题 122；RanobeDB 可匹配部分已查尽，不建议放宽标题规则以免错配。
+- 本次仅改文档，未改代码、数据与版本；无需重跑 `verify`。
