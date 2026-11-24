@@ -706,11 +706,12 @@ PWA / 移动端：
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
 3. **验收**：`check-data` 0 问题、`test-merge` 20/20、`verify` 205/205。
-4. **CI**：commit → push `main`，三项自动验收（`check-data`、`test-merge`、`verify`）全绿。
+4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
 7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
 8. **许可**：MIT，署名 Deckard（见 `LICENSE`）。
+9. **部署边界**：`_config.yml` 将构建用完整核心 `data/light-novels.js` 排除出 Pages；`npm run check-deploy` 校验排除项与运行时数据文件齐全。上线后确认该路径返回 404、`light-novels-lite.js` 返回 200。
 
 ## 11. 交接提示词
 

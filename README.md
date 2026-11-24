@@ -117,6 +117,7 @@ npm run fill-volumes  # 用 RanobeDB 补现有系列缺失卷（可重复运行�
 npm run build-rn      # 生成 RanobeDB 扩展书目（≥2 卷，默认隐藏）
 npm run validate-ranobedb # 生成 RanobeDB 卷目对照报告
 npm run check-data    # 数据校验
+npm run check-deploy  # 部署边界校验（完整核心不得进入 Pages）
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
 npm run verify        # 无头浏览器自动化验收（205 项）
@@ -133,5 +134,7 @@ npm run verify        # 无头浏览器自动化验收（205 项）
 GitHub Pages：<https://xyykmkefke.github.io/light-novel-library/>
 
 仓库根目录即站点根目录，无需构建步骤。推送后开启 `main` 分支根目录 Pages 即可。
+
+`_config.yml` 只做一件事：把构建/校验用完整核心 `data/light-novels.js` 排除出 Jekyll 站点产物。它仍保留在仓库中供 `check-data`、`find-isbn` 与各构建脚本使用；页面与 Service Worker 只加载拆分后的运行时包。`npm run check-deploy` 会在 CI 中守住这条边界。
 
 细节见 [HANDOVER.md](./HANDOVER.md)。

@@ -15,6 +15,7 @@
     "validate-ranobedb": "node scripts/validate-ranobedb.mjs",
     "build-pinyin": "node scripts/build-pinyin.mjs",
     "check-data": "node scripts/check-data.mjs",
+    "check-deploy": "node scripts/check-deploy.mjs",
     "test-merge": "node scripts/test-merge.mjs",
     "verify": "node scripts/verify.mjs"
   },

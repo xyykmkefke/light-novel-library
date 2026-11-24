@@ -1,0 +1,5 @@
+# GitHub Pages（legacy 分支构建）使用 Jekyll。
+# data/light-novels.js 是构建/校验脚本的完整核心输入，页面与 Service Worker 均不引用；
+# 这里只把它排除出站点产物，文件仍保留在仓库中供 check-data / find-isbn / build-* 使用。
+exclude:
+  - data/light-novels.js

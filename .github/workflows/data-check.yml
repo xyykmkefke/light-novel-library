@@ -20,6 +20,8 @@ jobs:
         run: npm run check-data
       - name: 合并逻辑测试
         run: npm run test-merge
+      - name: 部署边界校验
+        run: npm run check-deploy
       - name: 安装 Chromium
         uses: browser-actions/setup-chrome@v1
         with:
