@@ -175,3 +175,15 @@ git -c http.version=HTTP/1.1 push origin main
 - 测试：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 205/205。`verify` 的页脚 / manifest / SW 断言改为读取 `package.json` 版本与 `yuc-ln-shell-vN` 模式，避免下次升版再次硬编码失败。
 - 版本 1.15.4 → **1.15.5**，SW `yuc-ln-shell-v36` → **v37**；commit `bd5fbae`。
 - CI 四项全绿；Pages `built`；线上 `/data/light-novels.js` 404、lite 200（554,377 字节）、首页 1.15.5、SW v37，lite 包内已含年精度日期。
+
+## 15. Pages 部署边界收口与部分日期验收（2026-11-24）
+
+- 部署边界：`_config.yml` 从「只排除完整核心」扩为完整排除清单（18 项）：`node_modules`、`scripts`、`reports`、`screenshots`、`data/build`、完整核心、5 个构建用 JSON、`.github`、`.automation`、`package*.json`、README / HANDOVER / LICENSE。
+- 运行时白名单 12 个文件：`index.html`、`manifest.webmanifest`、`sw.js`、`icon.svg`、3 个图标、5 个运行时数据包；线上确认全部 200。
+- 守卫：`scripts/check-deploy.mjs` 改为解析 `_config.yml`、校验 18 项排除、12 个运行时文件未被误排除、页面/SW 引用存在且未排除、完整核心不被引用。
+- 验收：`verify.mjs` 新增第 206 项「部分日期按精度显示」——取一条 `d` 长度为 4 或 7 的条目，打开详情断言显示「YYYY 年」/「YYYY 年 M 月」。
+- 文档：README / HANDOVER / §10.1 / 交接提示词同步为 206 项与完整部署边界。
+- 无运行时改动，版本与 SW 不变（1.15.5 / `yuc-ln-shell-v37`）。
+- 本地：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` **206/206**。
+- CI：commit `75e072f` 四项全绿；Pages `built`。
+- 线上复核：运行时 12 个文件全部 200；`/data/light-novels.js`、`/scripts/verify.mjs`、`/reports/…`、`/screenshots/desktop.png`、`/README.md`、`/HANDOVER.md`、`/package.json`、`/_config.yml` 等排除项均 404（少数首次探测遇到 CDN 503，重试后 404）。
