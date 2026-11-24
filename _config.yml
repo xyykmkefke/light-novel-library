@@ -1,5 +1,23 @@
 # GitHub Pages（legacy 分支构建）使用 Jekyll。
-# data/light-novels.js 是构建/校验脚本的完整核心输入，页面与 Service Worker 均不引用；
-# 这里只把它排除出站点产物，文件仍保留在仓库中供 check-data / find-isbn / build-* 使用。
+# 只发布运行时文件；构建脚本、报告、截图、文档与构建输入一律不进入站点。
+# 运行时白名单：index.html、manifest.webmanifest、sw.js、icon.svg、icons/、
+# data/light-novels-{lite,rest,extra,volumes,rn}.js
 exclude:
+  - node_modules
+  - scripts
+  - reports
+  - screenshots
+  - data/build
   - data/light-novels.js
+  - data/bgm-detail-fills.json
+  - data/manual-relations.json
+  - data/ranobedb-cn.json
+  - data/ranobedb-cn-blocklist.json
+  - data/ranobedb-volume-fixes.json
+  - .github
+  - .automation
+  - package.json
+  - package-lock.json
+  - README.md
+  - HANDOVER.md
+  - LICENSE

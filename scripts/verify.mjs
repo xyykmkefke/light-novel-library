@@ -1387,6 +1387,24 @@ async function main() {
       check('无日期条目可打开详情', true, '数据中无此类条目');
     }
 
+    const partialDate = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => v.d && String(v.d).length < 10 && !v.c && !v.gn && !v.ver);
+      return x ? { id: String(x.i), d: String(x.d), name: x.cn || x.n } : null;
+    })()`);
+    if (partialDate) {
+      await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(partialDate.id)}; })()`);
+      await sleep(300);
+      const expected = partialDate.d.length === 4
+        ? `${partialDate.d} 年`
+        : `${partialDate.d.slice(0, 4)} 年 ${Number(partialDate.d.slice(5, 7))} 月`;
+      const detailText = await cdp.evaluate(`(() => document.getElementById('detailMeta').textContent)()`);
+      check('部分日期按精度显示', detailText.includes(expected), `${partialDate.d} → ${expected}（${partialDate.name}）`);
+      await cdp.evaluate(`(() => { location.hash = ''; })()`);
+      await sleep(200);
+    } else {
+      check('部分日期按精度显示', true, '数据中无部分日期条目');
+    }
+
     const noVol = await cdp.evaluate(`(() => {
       const x = (window.LN_DATA || []).find((v) => !v.v && !v.c && !v.gn && !v.ver);
       return x ? { id: String(x.i) } : null;

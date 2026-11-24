@@ -2,7 +2,7 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7639 卷懒加载卷包，合计 12490 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3367 个单册 ISBN、850 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.15.5 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 205 项）
+状态：**v1.15.5 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 206 项）
 
 v1.15.5：数据补全——从 Bangumi 详情补回 125 条缺失发售日（按年 / 月精度显示，不臆造具体日），并让系列条目从子卷共识继承书系、插图、作者、出版社与首卷日；缺日期 235→96，作者 106→94，出版社 58→54。
 
@@ -124,7 +124,7 @@ npm run check-data    # 数据校验
 npm run check-deploy  # 部署边界校验（完整核心不得进入 Pages）
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（205 项）
+npm run verify        # 无头浏览器自动化验收（206 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data`、`test-merge` 与 `verify`（Ubuntu 自带 Chrome，失败时上传截图）。
@@ -139,6 +139,6 @@ GitHub Pages：<https://xyykmkefke.github.io/light-novel-library/>
 
 仓库根目录即站点根目录，无需构建步骤。推送后开启 `main` 分支根目录 Pages 即可。
 
-`_config.yml` 只做一件事：把构建/校验用完整核心 `data/light-novels.js` 排除出 Jekyll 站点产物。它仍保留在仓库中供 `check-data`、`find-isbn` 与各构建脚本使用；页面与 Service Worker 只加载拆分后的运行时包。`npm run check-deploy` 会在 CI 中守住这条边界。
+`_config.yml` 负责部署边界：只发布运行时文件（`index.html`、`manifest.webmanifest`、`sw.js`、`icon.svg`、`icons/` 与 5 个运行时数据包），脚本、报告、截图、文档、`package*.json` 与构建输入（完整核心、`data/*.json`）全部排除出 Jekyll 站点产物。构建输入仍保留在仓库中供 `check-data`、`find-isbn` 与各构建脚本使用；`npm run check-deploy` 会在 CI 中校验排除清单、运行时文件是否被误排除，以及页面/SW 引用是否齐全。
 
 细节见 [HANDOVER.md](./HANDOVER.md)。
