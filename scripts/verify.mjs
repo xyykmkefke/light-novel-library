@@ -149,6 +149,7 @@ async function main() {
         '--disable-gpu',
         '--hide-scrollbars',
         '--no-first-run',
+        ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
         `--remote-debugging-port=${CDP_PORT}`,
         `--user-data-dir=${profile}`,
         '--window-size=1440,1100',
