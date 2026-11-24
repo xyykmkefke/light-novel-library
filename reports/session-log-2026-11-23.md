@@ -145,3 +145,11 @@ git -c http.version=HTTP/1.1 push origin main
 - 复核「展开后共 11625 条轻小说」：3986 条非一般小说、非重复版本 + 7639 卷包 = 11625，口径正确，未改。
 - ISBN 续跑结论：目标 221 条（220 条命中缓存、1 条新查询），新增 0；其中 57 条 RanobeDB 有结果但标题不匹配，164 条无结果。当前缺 ISBN 634 条 = 一般小说 291 + 日文标题 221 + 中英文标题 122；RanobeDB 可匹配部分已查尽，不建议放宽标题规则以免错配。
 - 本次仅改文档，未改代码、数据与版本；无需重跑 `verify`。
+
+## 12. 三站基线对齐（2026-11-24）
+
+- 新增 MIT `LICENSE`（署名 Deckard）。
+- CI 的 `data-check` workflow 接入 `verify`（205 项）：Ubuntu 安装 stable Chromium，`verify.mjs` 支持 `CHROME_PATH` 与 Linux 无沙箱参数；失败时上传 `screenshots/`。
+- HANDOVER 新增 §10.1 发布检查清单，README 的 CI 说明同步。
+- 版本不变（1.15.4，SW `yuc-ln-shell-v36`），无运行时改动。
+- 本地 `check-data` 0、`test-merge` 20/20、`verify` 205/205；CI 三项全绿。
