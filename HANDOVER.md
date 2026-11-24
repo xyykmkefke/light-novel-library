@@ -701,6 +701,17 @@ PWA / 移动端：
 7. 抓取是公开接口，务必限速 800ms、带 UA、失败退避，避免被风控。
 8. 版本策略：补丁位修 bug / 样式，次版本加功能块，主版本才大改。
 
+## 10.1 发布检查清单（三站统一基线）
+
+1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
+2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
+3. **验收**：`check-data` 0 问题、`test-merge` 20/20、`verify` 205/205。
+4. **CI**：commit → push `main`，三项自动验收（`check-data`、`test-merge`、`verify`）全绿。
+5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
+6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
+7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
+8. **许可**：MIT，署名 Deckard（见 `LICENSE`）。
+
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.4 已完成，后续按第 10 节风险与决策、第 9.36 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（205 项），push/PR 由 CI 自动跑前两项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.4 已完成，后续按第 10 节风险与决策、第 9.36 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `verify`（205 项），push/PR 由 CI 自动跑三项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

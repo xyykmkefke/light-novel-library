@@ -8,6 +8,7 @@ on:
 jobs:
   data-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,5 +16,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check-data
-      - run: npm run test-merge
+      - name: 数据校验
+        run: npm run check-data
+      - name: 合并逻辑测试
+        run: npm run test-merge
+      - name: 浏览器端自动化验收
+        run: node scripts/verify.mjs
+      - name: 上传失败截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-screenshots
+          path: screenshots
+          if-no-files-found: ignore

@@ -122,7 +122,7 @@ npm run test-merge    # 同步合并逻辑单元测试
 npm run verify        # 无头浏览器自动化验收（205 项）
 ```
 
-`npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data` 与 `test-merge`；`verify` 依赖本机浏览器，仍需本地执行。
+`npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data`、`test-merge` 与 `verify`（Ubuntu 自带 Chrome，失败时上传截图）。
 
 ## 本地存储
 
