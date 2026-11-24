@@ -163,3 +163,15 @@ git -c http.version=HTTP/1.1 push origin main
 - 本地：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过。
 - CI：commit `9658bf4` 四项全绿；Pages 构建 `built`。
 - 线上复核：`/data/light-novels.js` 返回 **404**，`/data/light-novels-lite.js` 返回 **200**（554,085 字节），首页 meta/页脚仍为 1.15.4，`sw.js` 仍为 v36。
+
+## 14. v1.15.5 缺失日期与系列字段补全（2026-11-24）
+
+- 只读审计：核心 4851 条中缺日期 235、作者 106、出版社 58、插图 1158、书系 1256、封面 2；其中可本地推导的约 110 个字段，其余多为上游确实缺失。
+- 详情补全：新增 `scripts/enrich-bgm-detail.mjs`（`npm run enrich-detail`），900ms 间隔查询 Bangumi 详情，342 条目标全部缓存到 `data/build/bgm-subject/`；候选写入 `data/bgm-detail-fills.json` 并随仓库提交。
+- 命中：日期 **125/235**（47 条年精度、66 条月精度、12 条完整日期）；作者 0/106、出版社 0/58、封面 0/2——详情页同样为空，确认上游缺失，不再空跑。13 条明代 / 清代 / 多版本日期保持缺失。
+- 本地继承：`clean-series.mjs` 新增「子卷→系列」共识继承（书系 8 / 插图 18 / 作者 12 / 出版社 4 / 首卷日 14 / 封面 0）与「重复版本」作者 / 插图继承（0 / 3）；只填空字段，不覆盖已有值。
+- 结果：缺日期 235→96、作者 106→94、出版社 58→54、插图 1158→1137、书系 1256→1248；封面仍 2 条。
+- 日期精度：`d` 允许 `YYYY` / `YYYY-MM` / `YYYY-MM-DD`；`check-data` 改为日历回验，页面新增 `dateText()` 显示「YYYY 年」「YYYY 年 M 月」，不臆造具体日。
+- 测试：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 205/205。`verify` 的页脚 / manifest / SW 断言改为读取 `package.json` 版本与 `yuc-ln-shell-vN` 模式，避免下次升版再次硬编码失败。
+- 版本 1.15.4 → **1.15.5**，SW `yuc-ln-shell-v36` → **v37**；commit `bd5fbae`。
+- CI 四项全绿；Pages `built`；线上 `/data/light-novels.js` 404、lite 200（554,377 字节）、首页 1.15.5、SW v37，lite 包内已含年精度日期。
