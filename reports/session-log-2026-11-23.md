@@ -221,3 +221,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 209/209。
 - 版本 1.16.0，SW `yuc-ln-shell-v40`；commit `4ceef0d`。
 - CI 四项全绿；Pages `built`；线上版本 1.16.0、SW v40，首页已含卷清单逻辑。
+
+## 19. v1.17.0 卷清单封面与卡片入口（2026-11-25）
+
+- 卷清单每行新增 36×48 封面缩略图，统一取 `r/100`（约 4.6 KB/张），懒加载；无图时显示书名首字占位。
+- 系列卡片新增「子卷」按钮（`data-act="vols"`），点击直接打开详情并展开卷清单；按钮只在有子卷的系列上出现。
+- 数据新增 `chn`（子卷数）：lite / rest 携带，完整核心同时保留 `ch`；`check-data` 校验 `chn` 与 `ch` 一致。
+- 顺带修复 rest / 卷包条目封面路径未补图片域名的问题，卡片和卷清单缩略图现在都能正常显示。
+- 验收：`verify` 新增 3 项（卡片入口、入口直接展开、卷清单封面），共 212 项。
+- 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 212/212。
+- 版本 1.17.0，SW `yuc-ln-shell-v41`；commit `70a79c8`。
+- CI 四项全绿；Pages `built`；线上版本 1.17.0、SW v41，首页已含「子卷」入口。
