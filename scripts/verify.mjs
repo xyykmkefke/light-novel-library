@@ -1301,6 +1301,35 @@ async function main() {
     }
     await click('#themeBtn');
 
+    // ---- 云同步状态面板 ----
+    await cdp.evaluate(`(() => {
+      localStorage.removeItem('yuc_ln_gist_v1');
+      localStorage.setItem('yuc_ln_synclog_v1', JSON.stringify([{
+        t: Date.now(), ok: true, first: false, changed: 2, added: 0,
+        remoteNewer: 2, localNewer: 0, sameTime: 0, volMerged: 0, tomb: 0,
+      }]));
+      localStorage.setItem('yuc_ln_dirty_v1', '3');
+    })()`);
+    await click('#syncBtn');
+    await sleep(250);
+    const syncPanel = await cdp.evaluate(`(() => ({
+      open: !document.getElementById('syncModal').hidden,
+      pill: document.getElementById('syncPill').textContent,
+      dirty: document.getElementById('syncDirty').textContent,
+      merge: document.getElementById('syncLastMerge').textContent,
+      log: document.getElementById('syncLog').textContent,
+    }))()`);
+    check('云同步面板显示状态与最近合并',
+      syncPanel.open && syncPanel.pill === '未配置' && syncPanel.dirty === '3' &&
+      /远端较新 2/.test(syncPanel.merge) && /远端较新 2/.test(syncPanel.log),
+      JSON.stringify(syncPanel));
+    await cdp.evaluate(`(() => {
+      document.getElementById('syncMask').click();
+      localStorage.removeItem('yuc_ln_synclog_v1');
+      localStorage.removeItem('yuc_ln_dirty_v1');
+    })()`);
+    await sleep(150);
+
     // ---- 空结果恢复 ----
     await click('.tab[data-tab="all"]');
     await setSearch('zzzz不存在的书名zzzz');

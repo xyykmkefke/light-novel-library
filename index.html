@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.17.0">
+<meta name="version" content="1.18.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2016,6 +2016,39 @@
   html[data-theme="light"] .sync-status.err { color: #b42318; }
   .sync-tip { margin: 14px 0 0; font-size: 11.5px; line-height: 1.65; color: var(--muted-2); }
 
+  /* 同步状态与最近合并记录 */
+  .sync-summary {
+    margin: 10px 0 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+  }
+  .sync-summary-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sync-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .sync-pill.ok { border-color: rgba(87, 173, 123, 0.45); color: #8fd3aa; }
+  .sync-pill.err { border-color: rgba(255, 143, 143, 0.45); color: #ffb0b0; }
+  .sync-pill.busy { border-color: var(--accent); color: var(--accent); }
+  .sync-summary-text { color: var(--muted); font-size: 12px; }
+  .sync-metrics { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; color: var(--muted); font-size: 12px; }
+  .sync-metrics b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sync-last-merge { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .sync-log-wrap { margin-top: 8px; }
+  .sync-log-wrap summary { cursor: pointer; color: var(--muted-2); font-size: 12px; }
+  .sync-log { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; max-height: 132px; overflow: auto; }
+  .sync-log li { display: flex; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .sync-log time { color: var(--muted-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .sync-log .empty { color: var(--muted-2); }
+
   /* ===== v1.6：信息密度、触控、可访问性与新交互 ===== */
   :root {
     --st-want: #6aa3ff;
@@ -3015,7 +3048,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.17.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.18.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3118,6 +3151,21 @@
   <div class="help-panel sync-panel" role="dialog" aria-modal="true" aria-label="云同步设置">
     <h2>云同步（GitHub Gist）</h2>
     <p class="sync-desc">用一个只包含 <code>gist</code> 权限的 Token，把阅读记录存进你的私有 Gist，多台设备打开时自动合并。</p>
+    <div class="sync-summary" id="syncSummary" aria-live="polite">
+      <div class="sync-summary-top">
+        <span class="sync-pill" id="syncPill">未配置</span>
+        <span class="sync-summary-text" id="syncSummaryText">填写 Token 后开始同步</span>
+      </div>
+      <div class="sync-metrics">
+        <span>上次同步 <b id="syncLast">—</b></span>
+        <span>待同步 <b id="syncDirty">0</b></span>
+      </div>
+      <div class="sync-last-merge" id="syncLastMerge">最近合并：暂无记录</div>
+      <details class="sync-log-wrap" id="syncLogWrap">
+        <summary>最近同步记录</summary>
+        <ol class="sync-log" id="syncLog"><li class="empty">暂无同步记录</li></ol>
+      </details>
+    </div>
     <label class="sync-label" for="gistToken">访问令牌</label>
     <input class="sync-input" id="gistToken" type="password" placeholder="github_pat_... 或 ghp_..." autocomplete="off" spellcheck="false">
     <label class="sync-label" for="gistId">Gist ID（留空则自动创建）</label>
@@ -3428,6 +3476,7 @@
 
   loadSettings();
   var GIST_KEY = 'yuc_ln_gist_v1';
+  var SYNCLOG_KEY = 'yuc_ln_synclog_v1';
   var GIST_FILE = 'yuc-light-novel-list.json';
   var DEL_MAX_AGE = 180 * 24 * 60 * 60 * 1000;
   var HIST_MAX = 8;
@@ -3745,6 +3794,8 @@
       localStorage.removeItem(DIRTY_KEY);
     } catch (e) { /* 忽略存储失败 */ }
     renderBackupHint();
+    renderSyncState();
+    renderSyncSummary();
   }
 
   // ---- 改动计数：累计到阈值后主动提醒备份 ----
@@ -3767,6 +3818,8 @@
     } catch (e) {
       return;
     }
+    renderSyncState();
+    renderSyncSummary();
     if (n < DIRTY_WARN) return;
     // 同一天只提醒一次，避免每次操作都弹提示
     var today = new Date().toDateString();
@@ -4914,8 +4967,11 @@
       el.hidden = true;
       return;
     }
+    var text = syncHint.text || '云同步已开启';
+    var dirty = dirtyCount();
+    if (dirty && !/待同步|同步中/.test(text)) text += ' · 待同步 ' + dirty;
     el.hidden = false;
-    el.textContent = syncHint.text || '云同步已开启';
+    el.textContent = text;
     el.className = 'syncstate' + (syncHint.tone === 'ok' ? ' ok' : syncHint.tone === 'err' ? ' err' : ' busy');
   }
 
@@ -8180,12 +8236,98 @@
       el.className = 'sync-status' + (tone ? ' ' + tone : '');
     }
     renderSyncState();
+    renderSyncSummary();
   }
 
   function fmtTime(ts) {
     var d = new Date(ts);
     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
       String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  // 同步日志：只存计数与错误，不存书名 / 书评，最多保留 20 条
+  function loadSyncLog() {
+    if (!canStore) return [];
+    try {
+      var arr = JSON.parse(localStorage.getItem(SYNCLOG_KEY) || '[]');
+      return Array.isArray(arr) ? arr.filter(function (e) { return e && typeof e === 'object'; }) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSyncLog(entry) {
+    if (!canStore) return;
+    var list = loadSyncLog();
+    list.unshift(entry);
+    try {
+      localStorage.setItem(SYNCLOG_KEY, JSON.stringify(list.slice(0, 20)));
+    } catch (e) { /* 忽略存储失败 */ }
+  }
+
+  function syncRunSummary(e) {
+    if (!e || !e.ok) return '失败：' + (e && e.error ? e.error : '未知错误');
+    if (e.first) return '首次同步，已上传 ' + (e.localCount || 0) + ' 条';
+    var parts = [];
+    if (e.added) parts.push('新增 ' + e.added + ' 条');
+    if (e.remoteNewer) parts.push('远端较新 ' + e.remoteNewer);
+    if (e.localNewer) parts.push('本地较新 ' + e.localNewer);
+    if (e.sameTime) parts.push('同时更新 ' + e.sameTime + '（保留本地）');
+    if (e.volMerged) parts.push('进度合并 ' + e.volMerged);
+    if (e.tomb) parts.push('删除 ' + e.tomb);
+    return parts.length ? parts.join(' · ') : '无变化';
+  }
+
+  function renderSyncLog() {
+    var el = $('syncLog');
+    if (!el) return;
+    var list = loadSyncLog();
+    if (!list.length) {
+      el.innerHTML = '<li class="empty">暂无同步记录</li>';
+      return;
+    }
+    el.innerHTML = list.slice(0, 6).map(function (e) {
+      var text = e.ok ? syncRunSummary(e) : '失败：' + (e.error || '未知错误');
+      return '<li><time>' + escapeHtml(fmtTime(e.t)) + '</time><span>' + escapeHtml(text) + '</span></li>';
+    }).join('');
+  }
+
+  function renderSyncSummary() {
+    var pill = $('syncPill');
+    if (!pill) return;
+    var cfg = loadSyncCfg();
+    var log = loadSyncLog();
+    var last = log[0];
+    var state = '未配置';
+    var tone = '';
+    if (syncBusy) {
+      state = '同步中';
+      tone = 'busy';
+    } else if (!cfg.token) {
+      state = '未配置';
+    } else if (!navigator.onLine) {
+      state = '离线';
+      tone = 'err';
+    } else if (last && !last.ok) {
+      state = '同步失败';
+      tone = 'err';
+    } else if (cfg.lastSync || (last && last.ok)) {
+      state = '已连接';
+      tone = 'ok';
+    } else {
+      state = '已配置';
+    }
+    pill.textContent = state;
+    pill.className = 'sync-pill' + (tone ? ' ' + tone : '');
+    $('syncSummaryText').textContent = !cfg.token
+      ? '填写 Token 后开始同步'
+      : cfg.gistId ? 'Gist 已连接' : '首次同步将自动创建 Gist';
+    $('syncLast').textContent = cfg.lastSync ? fmtTime(cfg.lastSync) : '—';
+    $('syncDirty').textContent = String(dirtyCount());
+    $('syncLastMerge').textContent = last
+      ? (last.ok ? '最近合并：' + syncRunSummary(last) : '最近同步：失败（' + (last.error || '未知错误') + '）')
+      : '最近合并：暂无记录';
+    renderSyncLog();
   }
 
   function clearSyncRetry() {
@@ -8366,9 +8508,11 @@
   // #merge-core-start
   // 双向合并：条目按最后更新时间取状态，进度取较大值；删除用墓碑同步
   // map / deleted 就地更新，totalOf 返回该条目总卷数（0 表示未知）
-  function mergeRemoteState(map, deleted, remote, totalOf) {
+  function mergeRemoteState(map, deleted, remote, totalOf, stats) {
     if (!remote) return 0;
     var changed = 0;
+    var S = stats || null;
+    var bump = function (key) { if (S) S[key] = (S[key] || 0) + 1; };
     var remoteDeleted = remote.deleted && typeof remote.deleted === 'object' ? remote.deleted : {};
     var items = Array.isArray(remote.items) ? remote.items : [];
     items.forEach(function (it) {
@@ -8394,11 +8538,25 @@
         map[id] = r;
         delete deleted[id];
         changed += 1;
+        bump('added');
         return;
       }
       var lU = Number(l.u) || Number(l.t) || 0;
+      var sameContent = l.s === r.s &&
+        (Number(l.vol) || 0) === r.vol &&
+        (Number(l.r) || 0) === r.r &&
+        String(l.rv || '') === r.rv &&
+        String(l.nt || '') === r.nt;
+      if (r.u > lU) {
+        if (!sameContent) bump('remoteNewer');
+      } else if (lU > r.u) {
+        if (!sameContent) bump('localNewer');
+      } else if (!sameContent) {
+        bump('sameTime');
+      }
       var newer = r.u > lU ? r : l;
       var vol = Math.max(Number(l.vol) || 0, r.vol);
+      if (vol > (Number(l.vol) || 0)) bump('volMerged');
       var total = Number(totalOf(id)) || 0;
       var status = newer.s;
       if (total > 0 && vol >= total) status = 'done';
@@ -8430,17 +8588,17 @@
       var l = map[id];
       // 本地在删除之后又更新过，则以本地为准
       if (l && (Number(l.u) || Number(l.t) || 0) > maxTs) return;
-      if (l) { delete map[id]; changed += 1; }
+      if (l) { delete map[id]; changed += 1; bump('tomb'); }
       deleted[id] = maxTs;
     });
     return changed;
   }
   // #merge-core-end
 
-  function mergeRemote(remote) {
+  function mergeRemote(remote, stats) {
     var changed = mergeRemoteState(myMap, myDeleted, remote, function (id) {
       return (byId.get(id) || {}).v;
-    });
+    }, stats);
     persistDeleted();
     return changed;
   }
@@ -8465,24 +8623,42 @@
     syncBusy = true;
     setSyncStatus('同步中…', '');
     return gistPull(cfg).then(function (remote) {
-      var changed = mergeRemote(remote);
+      var stats = {};
+      var changed = mergeRemote(remote, stats);
       if (changed) {
         saveMine({ fromSync: true });
         render();
         ensureRestForMine().then(render);
         ensureRnForMine().then(render);
       }
-      return gistPush(cfg, buildPayload());
-    }).then(function () {
+      return gistPush(cfg, buildPayload()).then(function () {
+        return { remote: remote, changed: changed, stats: stats };
+      });
+    }).then(function (result) {
       clearSyncRetry();
       cfg.lastSync = Date.now();
       saveSyncCfg(cfg);
+      var stats = result.stats || {};
+      saveSyncLog({
+        t: cfg.lastSync,
+        ok: true,
+        first: !result.remote,
+        changed: result.changed,
+        localCount: Object.keys(myMap).length,
+        added: stats.added || 0,
+        remoteNewer: stats.remoteNewer || 0,
+        localNewer: stats.localNewer || 0,
+        sameTime: stats.sameTime || 0,
+        volMerged: stats.volMerged || 0,
+        tomb: stats.tomb || 0
+      });
       markBackup();
       setSyncStatus('已同步 ' + fmtTime(cfg.lastSync), 'ok');
       if (!silent) toast('云同步完成');
       return true;
     }).catch(function (err) {
       var msg = err && err.message ? err.message : '同步失败';
+      saveSyncLog({ t: Date.now(), ok: false, error: msg });
       setSyncStatus(msg, 'err');
       if (!silent) toast('同步失败：' + msg);
       scheduleSyncRetry(err);

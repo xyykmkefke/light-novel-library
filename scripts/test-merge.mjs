@@ -222,5 +222,27 @@ test('未知状态回退为读完', () => {
   assert(map['1'].s === 'done', `状态=${map['1'].s}`);
 });
 
+test('合并统计记录远端较新、本地较新、进度与墓碑', () => {
+  const map = {
+    1: { s: 'want', t: 100, vol: 1, u: 100, f: 0, r: 0, rv: '', nt: '', rvU: 0 },
+    2: { s: 'drop', t: 100, vol: 1, u: 400, f: 0, r: 0, rv: '', nt: '', rvU: 0 },
+    3: { s: 'want', t: 100, vol: 1, u: 100, f: 0, r: 0, rv: '', nt: '', rvU: 0 },
+  };
+  const deleted = {};
+  const stats = {};
+  mergeRemoteState(map, deleted, {
+    items: [
+      { id: 1, status: 'doing', addedAt: 100, vol: 1, updatedAt: 300 },
+      { id: 2, status: 'doing', addedAt: 100, vol: 3, updatedAt: 300 },
+    ],
+    deleted: { 3: 500 },
+  }, totalOf, stats);
+  assert(stats.remoteNewer === 1, `remoteNewer=${stats.remoteNewer}`);
+  assert(stats.localNewer === 1, `localNewer=${stats.localNewer}`);
+  assert(stats.volMerged === 1, `volMerged=${stats.volMerged}`);
+  assert(stats.tomb === 1, `tomb=${stats.tomb}`);
+  assert(!map['3'], '墓碑未删除本地条目');
+});
+
 console.log(`\n${passed}/${passed + failed} 通过`);
 process.exit(failed ? 1 : 0);

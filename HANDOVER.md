@@ -1,12 +1,12 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.17.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 212/212）
+- 当前状态：**v1.18.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 213/213）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.17.0（已达成，功能：卷清单封面缩略图与系列卡片「子卷」入口）
+- 目标版本：v1.18.0（已达成，功能：同步状态面板、合并统计与最近同步记录）
 
 ## 1. 目标与边界
 
@@ -165,7 +165,8 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v41` |
+| 同步日志 | `yuc_ln_synclog_v1` |
+| SW 缓存 | `yuc-ln-shell-v42` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -751,6 +752,16 @@ PWA / 移动端：
 - 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 212/212。
 - 版本 1.17.0，SW `yuc-ln-shell-v41`。
 
+## 9.42 v1.18.0 同步状态面板与合并统计（2026-11-25）
+
+- 同步弹窗新增状态摘要：连接状态、上次同步时间、待同步改动数、最近合并结果、最近 6 条同步记录（本地保留 20 条）。
+- `mergeRemoteState` 增加可选统计对象，记录新增 / 远端较新 / 本地较新 / 同时更新 / 进度合并 / 墓碑删除；原有调用与返回值不变。
+- 日志键 `yuc_ln_synclog_v1`，只存时间、结果与计数，不存书名或书评；同步成功 / 失败都会写入。
+- 常驻同步状态追加「待同步 N」；`bumpDirty` / `markBackup` 时实时刷新面板。
+- 验收：`test-merge` 新增 1 项合并统计，共 21 项；`verify` 新增 1 项面板断言，共 213 项。
+- 结果：`check-data` 0、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
+- 版本 1.18.0，SW `yuc-ln-shell-v42`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -766,7 +777,7 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 20/20、`check-deploy` 通过、`verify` 212/212。
+3. **验收**：`check-data` 0 问题、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
 4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -776,4 +787,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.17.0 已完成，后续按第 10 节风险与决策、第 9.41 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（212 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.18.0 已完成，后续按第 10 节风险与决策、第 9.42 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（213 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

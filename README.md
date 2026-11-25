@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7639 卷懒加载卷包，合计 12490 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3367 个单册 ISBN、850 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.17.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 212 项）
+状态：**v1.18.0 已完成**（数据、页面、书评、统计、云同步、PWA、自动化验收 213 项）
+
+v1.18.0：同步状态面板——显示连接状态、上次同步、待同步改动、最近合并结果与最近 20 次同步记录；合并统计区分远端较新 / 本地较新 / 同时更新 / 进度合并 / 删除。
 
 v1.17.0：卷清单可视化——每卷增加封面缩略图；系列卡片直接提供「子卷」入口，点击即打开详情并展开卷清单。
 
@@ -96,7 +98,7 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 - **排序**：贝叶斯加权评分、热度、发售日、名称、卷数、我的评分
 - **详情**：作者、插图、出版社、书系、册数、发售日、题材、评分、相似推荐（同作者 / 同书系 / 同题材 / 评分接近并标注理由）、Bangumi 链接；卷进度一键记录，作者、题材、出版社、书系标签可一键筛选
 - **数据**：JSON / CSV / Markdown 导出，JSON 导入合并，清空可撤销
-- **云同步**：GitHub Gist 双向合并，删除墓碑，失败退避重试（Token 仅存本机）
+- **云同步**：GitHub Gist 双向合并，删除墓碑，失败退避重试（Token 仅存本机）；同步面板显示连接状态、上次同步、待同步改动、最近合并结果与最近同步记录
 - **PWA**：iOS 添加到主屏幕、安装引导、离线缓存、封面缓存上限与清理、离线占用统计、明暗主题
 - **无障碍**：跳过头部、焦点陷阱、Esc 归焦、状态播报、J/K 键盘导航、44px 触控目标
 
@@ -132,14 +134,14 @@ npm run check-data    # 数据校验
 npm run check-deploy  # 部署边界校验（完整核心不得进入 Pages）
 npm run build-pinyin  # 离线重算拼音首字母
 npm run test-merge    # 同步合并逻辑单元测试
-npm run verify        # 无头浏览器自动化验收（212 项）
+npm run verify        # 无头浏览器自动化验收（213 项）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data`、`test-merge` 与 `verify`（Ubuntu 自带 Chrome，失败时上传截图）。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`；Service Worker 缓存名 `yuc-ln-shell-v41`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`、`yuc_ln_synclog_v1`；Service Worker 缓存名 `yuc-ln-shell-v42`。
 
 ## 部署
 
