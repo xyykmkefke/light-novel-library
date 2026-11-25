@@ -816,7 +816,7 @@ async function main() {
     try { exportedJson = JSON.parse(exportedText); } catch {}
     const exportedItem = exportedJson && Array.isArray(exportedJson.items)
       ? exportedJson.items.find((it) => String(it.id) === String(pick.id)) : null;
-    check('导出 JSON 版本升级为 2', exportedJson?.version === 2, String(exportedJson?.version));
+    check('导出 JSON 版本升级为 3', exportedJson?.version === 3, String(exportedJson?.version));
     check('导出 JSON 含评分与短评',
       exportedItem?.rating === 9 && exportedItem?.review === '测试短评',
       JSON.stringify({ r: exportedItem?.rating, rv: exportedItem?.review }));
@@ -1645,6 +1645,84 @@ async function main() {
       if ((await cdp.evaluate("document.querySelectorAll('.card').length").catch(() => 0)) > 0) break;
       await sleep(150);
     }
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(200);
+
+    // ---- 本地纠错与别名 ----
+    const editPick = await cdp.evaluate(`(() => {
+      const s = (window.LN_DATA || []).find((x) => !x.rn && !x.ver && !x.c && !x.gn && x.n);
+      return s ? { id: String(s.i), au: s.au || '', n: s.n } : null;
+    })()`);
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
+    await sleep(450);
+    await click('#detailEdit');
+    await sleep(200);
+    const metaPanel = await cdp.evaluate(`(() => {
+      const box = document.getElementById('detailMetaEdit');
+      return { hidden: box.hidden, fields: box.querySelectorAll('input[data-meta-field]').length };
+    })()`);
+    check('详情提供本地纠错面板', metaPanel.hidden === false && metaPanel.fields === 8,
+      JSON.stringify(metaPanel));
+    const metaSaved = await cdp.evaluate(`(() => {
+      const set = (k, v) => { document.querySelector('[data-meta-field="' + k + '"]').value = v; };
+      set('au', '本地作者甲');
+      set('al', '测试别名, 另一个别名');
+      document.querySelector('#detailMetaEdit [data-meta-act="save"]').click();
+      const rec = JSON.parse(localStorage.getItem('yuc_ln_meta_v1') || '{}')[${JSON.stringify(editPick.id)}] || null;
+      return {
+        rec: rec,
+        metaText: document.getElementById('detailMeta').textContent,
+        badge: !!document.querySelector('#detailMeta .chip.local'),
+        editHidden: document.getElementById('detailMetaEdit').hidden,
+      };
+    })()`);
+    check('保存纠错覆盖详情并写入本机',
+      !!metaSaved.rec && metaSaved.rec.au === '本地作者甲' &&
+      Array.isArray(metaSaved.rec.al) && metaSaved.rec.al.length === 2 &&
+      metaSaved.metaText.includes('本地作者甲') && metaSaved.badge && metaSaved.editHidden,
+      JSON.stringify({ rec: metaSaved.rec, badge: metaSaved.badge, hidden: metaSaved.editHidden }));
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+    await sleep(250);
+    await setSearch('测试别名');
+    const aliasSearch = await cdp.evaluate(`(() => ({
+      cards: [...document.querySelectorAll('.card')].map((c) => c.dataset.id),
+    }))()`);
+    check('本地别名参与搜索', aliasSearch.cards.includes(editPick.id),
+      JSON.stringify(aliasSearch.cards).slice(0, 120));
+    await setSearch('');
+    await cdp.send('Page.reload', { ignoreCache: true });
+    for (let i = 0; i < 80; i += 1) {
+      if ((await cdp.evaluate("document.querySelectorAll('.card').length").catch(() => 0)) > 0) break;
+      await sleep(150);
+    }
+    const metaReload = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => String(v.i) === ${JSON.stringify(editPick.id)});
+      return { au: x ? x.au || '' : '', al: x && x.al ? x.al : [], mo: !!(x && x.mo) };
+    })()`);
+    check('纠错与别名刷新后仍生效',
+      metaReload.au === '本地作者甲' && metaReload.al.includes('测试别名') && metaReload.mo === true,
+      JSON.stringify(metaReload));
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
+    await sleep(450);
+    await click('#detailEdit');
+    await sleep(200);
+    await click('#detailMetaEdit [data-meta-act="reset"]');
+    await sleep(300);
+    const metaReset = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => String(v.i) === ${JSON.stringify(editPick.id)});
+      return {
+        rec: JSON.parse(localStorage.getItem('yuc_ln_meta_v1') || '{}')[${JSON.stringify(editPick.id)}] || null,
+        au: x ? x.au || '' : null,
+        badge: !!document.querySelector('#detailMeta .chip.local'),
+        metaText: document.getElementById('detailMeta').textContent,
+      };
+    })()`);
+    check('恢复上游清除覆盖与别名',
+      metaReset.rec === null && metaReset.au === editPick.au && !metaReset.badge &&
+      !metaReset.metaText.includes('测试别名'),
+      JSON.stringify(metaReset));
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+    await sleep(200);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(200);
 

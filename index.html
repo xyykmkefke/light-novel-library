@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.18.0">
+<meta name="version" content="1.19.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -899,6 +899,58 @@
   .detail-meta .chipbtn:focus-visible {
     outline: 2px solid var(--pink);
     outline-offset: 2px;
+  }
+
+  /* 本地纠错面板：只改本机显示，随导出 / Gist 同步 */
+  .meta-edit {
+    margin-bottom: 14px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-2);
+  }
+
+  .meta-edit[hidden] { display: none; }
+
+  .meta-edit-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 12.5px;
+  }
+
+  .meta-edit-head span { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+
+  .meta-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+
+  .meta-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+
+  .meta-field input {
+    width: 100%;
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+  }
+
+  .meta-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .meta-edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
+  .detail-meta .chip.local { border-color: rgba(255, 107, 157, 0.45); color: var(--pink); }
+
+  @media (max-width: 560px) {
+    .meta-edit-grid { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 560px) {
@@ -3048,7 +3100,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.18.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.19.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3063,6 +3115,7 @@
         <button class="btn" id="detailNext" type="button">下一本 ›</button>
       </div>
       <div class="detail-meta" id="detailMeta"></div>
+      <div class="meta-edit" id="detailMetaEdit" hidden></div>
       <div class="status-opts" id="statusOpts" hidden></div>
       <div class="detail-progress" id="detailProgress" role="group" aria-label="阅读进度" hidden></div>
       <div class="vol-list" id="detailVolumes" hidden></div>
@@ -3071,6 +3124,7 @@
       <div class="modal-actions">
         <button class="btn primary" id="detailToggle">加入我的阅读</button>
         <button class="btn" id="detailAddChildren" type="button" hidden></button>
+        <button class="btn" id="detailEdit" type="button">本地纠错</button>
         <button class="btn" id="detailShare" type="button">复制链接</button>
         <a class="btn" id="detailLink" target="_blank" rel="noreferrer">Bangumi</a>
         <button class="btn" id="modalClose">关闭</button>
@@ -3208,8 +3262,150 @@
   var DATA = [];
   var byId = new Map();
 
+  // ---- 本地纠错与别名：只存本机，随 JSON 备份与 Gist 同步走，不改上游数据 ----
+  var META_KEY = 'yuc_ln_meta_v1';
+
+  // #meta-core-start
+  var META_FIELDS = ['cn', 'n', 'au', 'il', 'pub', 'line', 'd'];
+  // 记录结构：{ cn, n, au, il, pub, line, d, al: [别名], clr: [被清空的字段], u: 更新时间 }
+  function validMetaDate(s) {
+    var m = String(s || '').match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
+    if (!m) return false;
+    var y = Number(m[1]);
+    var mo = m[2] ? Number(m[2]) : 0;
+    var d = m[3] ? Number(m[3]) : 0;
+    if (y < 1700 || y > 2100) return false;
+    if (mo && (mo < 1 || mo > 12)) return false;
+    if (d) {
+      if (!mo || d < 1 || d > 31) return false;
+      var dt = new Date(Date.UTC(y, mo - 1, d));
+      if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return false;
+    }
+    return true;
+  }
+
+  // 把「2019年5月3日」「2019-5」等写法归一成 YYYY / YYYY-MM / YYYY-MM-DD
+  function padMetaDate(s) {
+    var t = String(s == null ? '' : s).trim()
+      .replace(/[年月]/g, '-').replace(/日/g, '').replace(/-\s*$/, '');
+    var m = t.match(/^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
+    if (!m) return '';
+    var out = m[1];
+    if (m[2]) out += '-' + (m[2].length < 2 ? '0' + m[2] : m[2]);
+    if (m[3]) out += '-' + (m[3].length < 2 ? '0' + m[3] : m[3]);
+    return out;
+  }
+
+  // 清洗一条本地纠错记录；没有任何有效内容时返回 null（等同没有覆盖）
+  function sanitizeMeta(v) {
+    if (!v || typeof v !== 'object') return null;
+    var out = { al: [], clr: [], u: Math.max(0, Math.round(Number(v.u) || 0)) };
+    var any = false;
+    META_FIELDS.forEach(function (k) {
+      var s = String(v[k] == null ? '' : v[k]).trim().slice(0, 120);
+      if (!s) return;
+      if (k === 'd') {
+        s = padMetaDate(s);
+        if (!s || !validMetaDate(s)) return;
+      }
+      out[k] = s;
+      any = true;
+    });
+    (Array.isArray(v.al) ? v.al : []).forEach(function (a) {
+      var s = String(a == null ? '' : a).trim().slice(0, 40);
+      if (!s || out.al.indexOf(s) >= 0 || out.al.length >= 8) return;
+      out.al.push(s);
+      any = true;
+    });
+    // 清空标记：用户主动抹掉上游错误值（与「没填」不同）
+    (Array.isArray(v.clr) ? v.clr : []).forEach(function (k) {
+      if (META_FIELDS.indexOf(k) < 0 || out[k] || out.clr.indexOf(k) >= 0) return;
+      out.clr.push(k);
+      any = true;
+    });
+    return any ? out : null;
+  }
+
+  // 合并远端纠错：同一条目按更新时间取新，避免旧设备把纠错冲掉
+  function mergeMetaState(map, remoteMeta, stats) {
+    if (!remoteMeta || typeof remoteMeta !== 'object') return 0;
+    var changed = 0;
+    Object.keys(remoteMeta).forEach(function (id) {
+      if (!/^\d+$/.test(id)) return;
+      var r = sanitizeMeta(remoteMeta[id]);
+      if (!r) return;
+      var l = map[id];
+      if (l && (Number(l.u) || 0) >= r.u) return;
+      map[id] = r;
+      changed += 1;
+      if (stats) stats.meta = (stats.meta || 0) + 1;
+    });
+    return changed;
+  }
+  // #meta-core-end
+
+  var metaMap = loadMetaStore();
+
+  function loadMetaStore() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(META_KEY) || 'null');
+      if (!parsed || typeof parsed !== 'object') return {};
+      var out = {};
+      Object.keys(parsed).forEach(function (id) {
+        if (!/^\d+$/.test(id)) return;
+        var rec = sanitizeMeta(parsed[id]);
+        if (rec) out[id] = rec;
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function persistMeta() {
+    if (!canStore) return;
+    try {
+      if (!Object.keys(metaMap).length) localStorage.removeItem(META_KEY);
+      else localStorage.setItem(META_KEY, JSON.stringify(metaMap));
+    } catch (e) { /* 隐私模式下忽略 */ }
+  }
+
+  // 覆盖写回内存条目；__mo_applied 记住被覆盖字段的上游原值，供「恢复上游」还原
+  function applyMetaOverride(item) {
+    if (!item) return item;
+    if (item.__mo_applied) {
+      Object.keys(item.__mo_applied).forEach(function (k) {
+        var prev = item.__mo_applied[k];
+        if (prev == null) delete item[k];
+        else item[k] = prev;
+      });
+      delete item.__mo_applied;
+    }
+    delete item.mo;
+    if (item.al) delete item.al;
+    var rec = metaMap[String(item.i)];
+    if (!rec) return item;
+    var applied = {};
+    META_FIELDS.forEach(function (k) {
+      if (!rec[k] && rec.clr.indexOf(k) < 0) return;
+      applied[k] = item[k] != null ? item[k] : null;
+      if (rec[k]) item[k] = rec[k];
+      else delete item[k];
+    });
+    item.__mo_applied = applied;
+    item.al = rec.al.slice();
+    item.mo = 1;
+    return item;
+  }
+
+  function applyAllMeta() {
+    DATA.forEach(applyMetaOverride);
+    if (modalId) renderDetail(modalId);
+  }
+
   function adoptData() {
     DATA = (window.LN_DATA || []).filter(function (x) { return x && /^\d+$/.test(String(x.i)); });
+    DATA.forEach(applyMetaOverride);
     byId = new Map(DATA.map(function (x) { return [String(x.i), x]; }));
   }
 
@@ -3231,7 +3427,17 @@
         DATA.forEach(function (x) {
           var fields = extra[String(x.i)];
           if (!fields) return;
+          // 详情包后到：先把上游值记进纠错快照，再压上本地覆盖，「恢复上游」才回得去
+          if (x.__mo_applied) {
+            Object.keys(fields).forEach(function (key) {
+              if (Object.prototype.hasOwnProperty.call(x.__mo_applied, key) &&
+                x.__mo_applied[key] == null) {
+                x.__mo_applied[key] = fields[key];
+              }
+            });
+          }
           Object.keys(fields).forEach(function (key) { x[key] = fields[key]; });
+          if (metaMap[String(x.i)]) applyMetaOverride(x);
         });
         extraLoaded = true;
         window.__LN_EXTRA_READY = true;
@@ -3270,6 +3476,7 @@
           var id = String(v && v.i);
           if (!id || byId.has(id)) return;
           if (v.img && !/^https?:/.test(v.img)) v.img = 'https://bgmimg.anibt.net/r/400/' + v.img;
+          applyMetaOverride(v);
           DATA.push(v);
           byId.set(id, v);
           added += 1;
@@ -3318,6 +3525,7 @@
         list.forEach(function (v) {
           var id = String(v && v.i);
           if (!id || byId.has(id)) return;
+          applyMetaOverride(v);
           DATA.push(v);
           byId.set(id, v);
           added += 1;
@@ -3367,6 +3575,7 @@
           if (!id || byId.has(id)) return;
           if (v.img && !/^https?:/.test(v.img)) v.img = 'https://bgmimg.anibt.net/r/400/' + v.img;
           if (Array.isArray(chMap[id])) v.ch = chMap[id];
+          applyMetaOverride(v);
           DATA.push(v);
           byId.set(id, v);
           added += 1;
@@ -4393,7 +4602,8 @@
     var n = String(x.n || '').toLowerCase();
     var en = String(x.en || '').toLowerCase();
     var py = String(x.py || '');
-    var fields = [cn, n, en];
+    // 本地别名与中日文名同档参与相关度：完全一致 > 前缀 > 包含
+    var fields = [cn, n, en].concat((x.al || []).map(function (a) { return String(a).toLowerCase(); }));
     var best = 3;
     fields.forEach(function (f) {
       if (!f) return;
@@ -4420,15 +4630,20 @@
     return best;
   }
 
-  // 单条记录是否命中关键词：中文名 / 原名 / 拼音首字母 / 作者
+  // 单条记录是否命中关键词：中文名 / 原名 / 拼音首字母 / 作者 / 本地别名
   function matchesQuery(x, token) {
     var cn = String(x.cn || '').toLowerCase();
     var n = String(x.n || '').toLowerCase();
     var en = String(x.en || '').toLowerCase();
     var py = String(x.py || '');
     var au = String(x.au || '').toLowerCase();
-    return cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 || en.indexOf(token) >= 0 ||
-      au.indexOf(token) >= 0 || (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0);
+    if (cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 || en.indexOf(token) >= 0 ||
+      au.indexOf(token) >= 0 || (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0)) return true;
+    var al = x.al || [];
+    for (var i = 0; i < al.length; i += 1) {
+      if (String(al[i]).toLowerCase().indexOf(token) >= 0) return true;
+    }
+    return false;
   }
 
   // 高级搜索字段：作者:、出版社:、书系:、评:、年:、分:、题材:（也接受全角冒号）
@@ -6002,6 +6217,7 @@
     if (item.isbn) pairs.push(['ISBN', item.isbn]);
     if (item.fisbn) pairs.push(['首卷 ISBN', item.fisbn]);
     if (item.jd) pairs.push(['日文版', item.jd]);
+    if (item.al && item.al.length) pairs.push(['别名', item.al.join(' / ')]);
     if (item.gn) pairs.push(['收录', '一般小说（Bangumi「小说」标签）']);
     if (item.kind && KIND_LABEL[item.kind]) pairs.push(['类型', KIND_LABEL[item.kind]]);
     // 收藏后补充加入时间与读完时间
@@ -6060,7 +6276,8 @@
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
       return '<span class="chip"' + (p[0] === '进度' ? ' data-chip="progress"' : '') + '>' + label + '</span>';
-    }).join('') + jumpHtml + authorHtml + genreHtml + pubHtml + lineHtml;
+    }).join('') + jumpHtml + authorHtml + genreHtml + pubHtml + lineHtml +
+      (item.mo ? '<span class="chip local" title="该条目的字段有本地纠错，只存本机"><i>本地</i>已纠错</span>' : '');
     var opts = $('statusOpts');
     opts.hidden = !collected;
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
@@ -6156,7 +6373,150 @@
             (x.d ? ' · ' + escapeHtml(dateText(x.d)) : '') + '</span></button>';
         }).join('') + '</div>'
       : '';
+
+    renderMetaEdit(item);
   }
+
+  // ---- 详情页本地纠错：改书名 / 作者 / 出版社 / 日期，或补充别名 ----
+  var metaEditing = false;
+
+  function metaFieldHtml(label, key, value, placeholder) {
+    return '<label class="meta-field"><span>' + label + '</span>' +
+      '<input type="text" data-meta-field="' + key + '" value="' + escapeHtml(value || '') + '"' +
+      (placeholder ? ' placeholder="' + escapeHtml(placeholder) + '"' : '') +
+      ' autocomplete="off" spellcheck="false"></label>';
+  }
+
+  function renderMetaEdit(item) {
+    var box = $('detailMetaEdit');
+    if (!metaEditing || !item) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML =
+      '<div class="meta-edit-head"><b>本地纠错</b>' +
+        '<span>只存本机，随 JSON 导出与云同步一起走；清空某一项即可隐藏上游错误值。</span></div>' +
+      '<div class="meta-edit-grid">' +
+        metaFieldHtml('中文名', 'cn', item.cn) +
+        metaFieldHtml('原名', 'n', item.n) +
+        metaFieldHtml('作者', 'au', item.au) +
+        metaFieldHtml('插图', 'il', item.il) +
+        metaFieldHtml('出版社', 'pub', item.pub) +
+        metaFieldHtml('书系', 'line', item.line) +
+        metaFieldHtml('发售日', 'd', item.d, 'YYYY / YYYY-MM / YYYY-MM-DD') +
+        metaFieldHtml('别名', 'al', (item.al || []).join('，'), '逗号分隔，参与搜索') +
+      '</div>' +
+      '<div class="meta-edit-actions">' +
+        '<button class="btn primary" type="button" data-meta-act="save">保存</button>' +
+        '<button class="btn" type="button" data-meta-act="cancel">取消</button>' +
+        (metaMap[String(item.i)]
+          ? '<button class="btn danger" type="button" data-meta-act="reset">恢复上游</button>'
+          : '') +
+      '</div>';
+  }
+
+  function saveMetaEdit(id) {
+    var item = byId.get(id);
+    var box = $('detailMetaEdit');
+    if (!item || !box || box.hidden) return;
+    var inputs = box.querySelectorAll('[data-meta-field]');
+    var values = {};
+    for (var i = 0; i < inputs.length; i += 1) {
+      values[inputs[i].getAttribute('data-meta-field')] = inputs[i].value.trim();
+    }
+    var rec = sanitizeMeta(metaMap[id]) || { al: [], clr: [], u: 0 };
+    var next = { al: [], clr: [], u: Date.now() };
+    var changed = false;
+    for (var f = 0; f < META_FIELDS.length; f += 1) {
+      var k = META_FIELDS[f];
+      if (!(k in values)) continue;
+      var cur = item[k] == null ? '' : String(item[k]);
+      var val = values[k];
+      if (k === 'd' && val) {
+        var norm = padMetaDate(val);
+        if (!norm || !validMetaDate(norm)) {
+          toast('发售日请填 YYYY / YYYY-MM / YYYY-MM-DD');
+          var dateInput = box.querySelector('[data-meta-field="d"]');
+          if (dateInput) dateInput.focus();
+          return;
+        }
+        val = norm;
+      }
+      if (val === cur) {
+        // 没改动：保留原有覆盖或「清空」标记，避免保存时把别的修正抹掉
+        if (rec[k]) next[k] = rec[k];
+        else if (rec.clr.indexOf(k) >= 0) next.clr.push(k);
+        continue;
+      }
+      changed = true;
+      if (val) next[k] = val;
+      else next.clr.push(k);
+    }
+    var aliases = [];
+    String(values.al || '').split(/[,，、;；\s]+/).forEach(function (a) {
+      var s = a.trim().slice(0, 40);
+      if (s && aliases.indexOf(s) < 0) aliases.push(s);
+    });
+    aliases = aliases.slice(0, 8);
+    if (aliases.join('|') !== (rec.al || []).join('|')) changed = true;
+    next.al = aliases;
+    if (!changed) {
+      metaEditing = false;
+      renderDetail(id);
+      toast('没有改动');
+      return;
+    }
+    var cleaned = sanitizeMeta(next);
+    if (cleaned) metaMap[id] = cleaned;
+    else delete metaMap[id];
+    persistMeta();
+    applyMetaOverride(item);
+    metaEditing = false;
+    renderDetail(id);
+    render();
+    bumpDirty();
+    scheduleSync();
+    toast(cleaned ? '已保存本地纠错' : '已恢复为上游数据');
+  }
+
+  function resetMeta(id) {
+    if (!metaMap[id]) return;
+    delete metaMap[id];
+    persistMeta();
+    var item = byId.get(id);
+    if (item) applyMetaOverride(item);
+    metaEditing = false;
+    renderDetail(id);
+    render();
+    bumpDirty();
+    scheduleSync();
+    toast('已恢复为上游数据');
+  }
+
+  $('detailEdit').addEventListener('click', function () {
+    if (!modalId) return;
+    metaEditing = !metaEditing;
+    var item = byId.get(modalId);
+    if (item) renderMetaEdit(item);
+    if (metaEditing) {
+      var first = $('detailMetaEdit').querySelector('input');
+      if (first) first.focus();
+    }
+  });
+
+  $('detailMetaEdit').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-meta-act]');
+    if (!btn || !modalId) return;
+    var act = btn.getAttribute('data-meta-act');
+    if (act === 'save') saveMetaEdit(modalId);
+    else if (act === 'reset') resetMeta(modalId);
+    else if (act === 'cancel') {
+      metaEditing = false;
+      renderDetail(modalId);
+    }
+  });
 
   function openDetail(id) {
     if (!byId.has(id)) {
@@ -6166,7 +6526,10 @@
     }
     // 切换到另一本书时回到顶部，避免沿用上一本的滚动位置
     var switched = modalId !== id;
-    if (switched) volOpen[String(id)] = false;
+    if (switched) {
+      volOpen[String(id)] = false;
+      metaEditing = false;
+    }
     if (modalEl.hidden) lastModalFocus = document.activeElement;
     modalId = id;
     pendingDetail = null;
@@ -6189,6 +6552,7 @@
     lastModalFocus = null;
     modalEl.hidden = true;
     modalId = null;
+    metaEditing = false;
     setPageInert(false);
     writeHash();
     // Esc / 关闭后把焦点还给触发卡片，键盘用户不丢失位置
@@ -8026,13 +8390,16 @@
     });
     var payload = {
       app: 'yuc-light-novel-list',
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
-      items: ids
+      items: ids,
+      // 本地纠错与别名单独一节：旧版本导入时会忽略，不影响收藏记录
+      meta: metaMap
     };
     download('我的轻小说-' + stamp() + '.json', JSON.stringify(payload, null, 2), 'application/json');
     markBackup();
-    toast('已导出 ' + ids.length + ' 本');
+    var metaCount = Object.keys(metaMap).length;
+    toast('已导出 ' + ids.length + ' 本' + (metaCount ? ' + ' + metaCount + ' 条本地纠错' : ''));
   });
 
   $('exportCsv').addEventListener('click', function () {
@@ -8156,10 +8523,19 @@
           }
           merged += 1;
         });
+        // 本地纠错单独一节：按条目更新时间合并，旧备份没有该节时不影响收藏
+        var metaAdded = (!Array.isArray(parsed) && parsed && parsed.meta)
+          ? mergeMetaState(metaMap, parsed.meta)
+          : 0;
+        if (metaAdded) {
+          persistMeta();
+          applyAllMeta();
+        }
         saveMine();
         render();
         if (needRn) loadRn().then(render);
         toast('导入完成：新增 ' + added + ' 本，合并 ' + merged + ' 本' +
+          (metaAdded ? '，纠错 ' + metaAdded + ' 条' : '') +
           (skipped ? '，跳过 ' + skipped + ' 条无效记录' : ''));
       } catch (err) {
         toast('导入失败：文件格式不正确');
@@ -8274,6 +8650,7 @@
     if (e.localNewer) parts.push('本地较新 ' + e.localNewer);
     if (e.sameTime) parts.push('同时更新 ' + e.sameTime + '（保留本地）');
     if (e.volMerged) parts.push('进度合并 ' + e.volMerged);
+    if (e.meta) parts.push('纠错 ' + e.meta + ' 条');
     if (e.tomb) parts.push('删除 ' + e.tomb);
     return parts.length ? parts.join(' · ') : '无变化';
   }
@@ -8484,7 +8861,7 @@
   function buildPayload() {
     return {
       app: 'yuc-light-novel-list',
-      version: 2,
+      version: 3,
       updatedAt: new Date().toISOString(),
       items: Object.keys(myMap).map(function (id) {
         var e = myMap[id];
@@ -8501,7 +8878,8 @@
           reviewUpdatedAt: e.rvU || 0
         };
       }),
-      deleted: myDeleted
+      deleted: myDeleted,
+      meta: metaMap
     };
   }
 
@@ -8599,6 +8977,13 @@
     var changed = mergeRemoteState(myMap, myDeleted, remote, function (id) {
       return (byId.get(id) || {}).v;
     }, stats);
+    // 本地纠错按条目更新时间取新，与收藏记录一样参与双向合并
+    var metaChanged = mergeMetaState(metaMap, remote && remote.meta, stats);
+    if (metaChanged) {
+      persistMeta();
+      applyAllMeta();
+      changed += metaChanged;
+    }
     persistDeleted();
     return changed;
   }
@@ -8650,6 +9035,7 @@
         localNewer: stats.localNewer || 0,
         sameTime: stats.sameTime || 0,
         volMerged: stats.volMerged || 0,
+        meta: stats.meta || 0,
         tomb: stats.tomb || 0
       });
       markBackup();

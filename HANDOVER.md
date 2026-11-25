@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.18.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 213/213）
+- 当前状态：**v1.19.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、自动化验收 218/218）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -166,7 +166,8 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
 | 同步日志 | `yuc_ln_synclog_v1` |
-| SW 缓存 | `yuc-ln-shell-v42` |
+| 本地纠错 / 别名 | `yuc_ln_meta_v1` |
+| SW 缓存 | `yuc-ln-shell-v43` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -189,17 +190,30 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 - 状态文案：想读 / 在读 / 读完 / 弃读
 - 状态改为 `done` 时自动 `f = Date.now()` 且 `vol = v`；离开 `done` 保留 `vol`，`f` 置 0
 - 合并规则：同一条目按 `u` 取新；`vol` 取两者较大值；书评按 `rvU` 单独取新；删除用墓碑（保留 180 天）
-- 导出 / Gist payload（version 2）：
+- 本地纠错记录（`yuc_ln_meta_v1`）：
+
+```js
+{
+  cn: '', n: '', au: '', il: '', pub: '', line: '', d: '', // 只存被修正的字段
+  al: [],   // 别名，≤8 个，参与搜索
+  clr: [],  // 被用户清空的字段（与「没填」区分）
+  u: 0      // 更新时间，跨设备按它取新
+}
+```
+
+- 导出 / Gist payload（version 3；version 2 客户端会忽略 `meta` 一节，收藏记录仍可互通）：
 
 ```json
 {
   "app": "yuc-light-novel-list",
-  "version": 2,
+  "version": 3,
   "exportedAt": "2026-11-22T00:00:00.000Z",
   "items": [
     { "id": 499, "status": "done", "vol": 8, "addedAt": 0, "updatedAt": 0, "finishedAt": 0,
       "rating": 9, "review": "短评", "note": "笔记", "reviewUpdatedAt": 0 }
-  ]
+  ],
+  "deleted": {},
+  "meta": { "499": { "au": "本地作者", "al": ["别名"], "clr": [], "u": 0 } }
 }
 ```
 
@@ -762,6 +776,17 @@ PWA / 移动端：
 - 结果：`check-data` 0、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
 - 版本 1.18.0，SW `yuc-ln-shell-v42`。
 
+## 9.43 v1.19.0 本地纠错与别名（2026-11-25）
+
+- 详情页新增「本地纠错」面板：中文名 / 原名 / 作者 / 插图 / 出版社 / 书系 / 发售日 / 别名；日期接受 `YYYY`、`YYYY-MM`、`YYYY-MM-DD` 与「2019年5月3日」写法并归一。
+- 覆盖只存本机 `yuc_ln_meta_v1`：`{ 字段, al: [别名], clr: [清空字段], u }`；`sanitizeMeta` 校验日期、去重别名（≤8）、保留清空标记。
+- 覆盖在 `adoptData` 与每个数据包（rest / volumes / extra / rn）写入时套用；详情包后到时先把上游值记进 `__mo_applied` 再压上覆盖，「恢复上游」可还原。
+- 别名与书名 / 原名 / 作者同档参与搜索与相关度排序；详情显示「别名」与「本地」已纠错标记。
+- JSON 导出与 Gist payload 升到 version 3，新增 `meta` 一节，按 `u` 双向合并；version 2 客户端会忽略该节，收藏记录仍互通。同步日志新增「纠错 N 条」。
+- 验收：`test-merge` 新增 3 项（纠错合并、较新优先、字段清洗），共 24 项；`verify` 新增 5 项（纠错面板、保存覆盖、别名搜索、刷新保留、恢复上游），共 218 项。
+- 结果：`check-data` 0、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
+- 版本 1.19.0，SW `yuc-ln-shell-v43`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -777,7 +802,7 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
+3. **验收**：`check-data` 0 问题、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
 4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -787,4 +812,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.18.0 已完成，后续按第 10 节风险与决策、第 9.42 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（213 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.19.0 已完成，后续按第 10 节风险与决策、第 9.43 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（218 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

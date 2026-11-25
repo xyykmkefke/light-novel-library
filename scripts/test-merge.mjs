@@ -1,4 +1,4 @@
-// 同步合并逻辑单元测试：直接从 index.html 抽取 mergeRemoteState，保证测的是线上代码
+// 同步合并逻辑单元测试：直接从 index.html 抽取 mergeRemoteState 与本地纠错合并，保证测的是线上代码
 // 用法：node scripts/test-merge.mjs
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -17,6 +17,17 @@ const mergeRemoteState = new Function(
   'STATUS',
   `${source}\nreturn mergeRemoteState;`,
 )(STATUS);
+
+const metaStart = html.indexOf('// #meta-core-start');
+const metaEnd = html.indexOf('// #meta-core-end');
+if (metaStart < 0 || metaEnd < 0) {
+  console.error('未在 index.html 找到本地纠错逻辑标记');
+  process.exit(1);
+}
+const metaSource = html.slice(metaStart, metaEnd);
+const { mergeMetaState, sanitizeMeta } = new Function(
+  `${metaSource}\nreturn { mergeMetaState, sanitizeMeta };`,
+)();
 
 let passed = 0;
 let failed = 0;
@@ -242,6 +253,44 @@ test('合并统计记录远端较新、本地较新、进度与墓碑', () => {
   assert(stats.volMerged === 1, `volMerged=${stats.volMerged}`);
   assert(stats.tomb === 1, `tomb=${stats.tomb}`);
   assert(!map['3'], '墓碑未删除本地条目');
+});
+
+test('本地纠错按更新时间合并', () => {
+  const map = { 1: { au: '本地作者', al: ['旧别名'], clr: [], u: 100 } };
+  const stats = {};
+  const n = mergeMetaState(map, {
+    1: { au: '远端作者', al: [], clr: [], u: 300 },
+    2: { pub: '远端出版社', al: ['别名B'], clr: [], u: 50 },
+    3: { u: 900 },
+  }, stats);
+  assert(n === 2, `changed=${n}`);
+  assert(map['1'].au === '远端作者', '较新的远端纠错未覆盖');
+  assert(map['2'].pub === '远端出版社' && map['2'].al[0] === '别名B', '新条目纠错未加入');
+  assert(!map['3'], '空纠错记录不应加入');
+  assert(stats.meta === 2, `stats.meta=${stats.meta}`);
+});
+
+test('本地纠错较新时拒绝远端覆盖', () => {
+  const map = { 1: { cn: '我的书名', al: [], clr: [], u: 500 } };
+  const n = mergeMetaState(map, { 1: { cn: '远端书名', al: [], clr: [], u: 400 } });
+  assert(n === 0, `changed=${n}`);
+  assert(map['1'].cn === '我的书名', `cn=${map['1'].cn}`);
+});
+
+test('纠错记录清洗日期、别名与清空标记', () => {
+  const rec = sanitizeMeta({
+    d: '2019年5月3日', cn: '  书名  ', au: '', il: '',
+    al: ['别名', '别名', '', '乙', '丙'],
+    clr: ['au', 'nope'], u: 12.7,
+  });
+  assert(rec.d === '2019-05-03', `d=${rec.d}`);
+  assert(rec.cn === '书名', `cn=${rec.cn}`);
+  assert(rec.al.length === 3, `al=${JSON.stringify(rec.al)}`);
+  assert(rec.clr.length === 1 && rec.clr[0] === 'au', `clr=${JSON.stringify(rec.clr)}`);
+  assert(rec.u === 13, `u=${rec.u}`);
+  assert(sanitizeMeta({ d: '2019-13-01', al: [] }) === null, '非法日期应整条丢弃');
+  assert(sanitizeMeta({ clr: ['au'] }).clr[0] === 'au', '清空标记应保留');
+  assert(sanitizeMeta({}) === null, '空记录应为 null');
 });
 
 console.log(`\n${passed}/${passed + failed} 通过`);
