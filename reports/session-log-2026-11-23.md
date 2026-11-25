@@ -286,3 +286,12 @@ git -c http.version=HTTP/1.1 push origin main
 - 调研未采用：NDL Search（无 key、可 ISBN 反查，但新刊盲区 + 需本机代理，抽样 1/8 有 seriesTitle）、Google Books（匿名 429、要求 key）、RanobeDB release（无 imprint，补不了书系）。
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（19 项排除）、`verify` 222/222。
 - 版本 1.22.0，SW `yuc-ln-shell-v46`；commit `1a48339`。
+
+## 25. v1.23.0 卷包日期与中文名试点（2026-11-26）
+
+- C 卷包日期：新增 `enrich-volume-dates.mjs`，逐卷查 `/v0/subjects/{id}`；3 并发 + 700ms 间隔，缓存复用 `bgm-subject/`，`checked` 记录续跑。查询 7693 条，补发售日 7644、封面 2；卷包缺日期 7798→54，缺封面 51→49。
+- F 中文名试点：新增 `fill-bgm-cn.mjs`，RanobeDB 繁中标题（opencc 转简）命中 0，Bangumi 同名条目回查 300 条命中 20；累计候选 23 条，缺中文名 2101→2078。
+- E NDL：新增 `enrich-ndl.mjs`（OpenSearch、代理、429 退避）但**网络不可达**——直连与 IPv4 均超时，`iss.ndl.go.jp` 303 跳转到被墙域名，本机 7897 代理未运行；脚本就绪，代理恢复即可跑。
+- `clean-series` 增加 `cn-fills` / `volume-fills` 应用；部署排除 19→21。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 222/222。
+- 版本 1.23.0，SW `yuc-ln-shell-v47`；commit `29080fb`。
