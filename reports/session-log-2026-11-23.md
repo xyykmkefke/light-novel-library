@@ -200,3 +200,13 @@ git -c http.version=HTTP/1.1 push origin main
 - 版本 1.15.6，SW `yuc-ln-shell-v38`；commit `a7e889e`。
 - CI 四项全绿；Pages `built`；线上版本 1.15.6、SW v38，lite / ch / rest / volumes / rn 均 200，完整核心 404。
 - 口径说明：lite 关键路径减少约 34 KB；因 ch 预缓存供离线使用，首次安装总传输约等于旧的 lite（157.7 + 35.6 KB），收益在首屏解析/执行不被 ch 阻塞。
+
+## 17. v1.15.7 封面 100w 档（2026-11-25）
+
+- 实测封面：`r/100` 4,622 B / `r/200` 15,022 B / `r/400` 48,749 B；`r/300` 返回 400，不可用。
+- `coverSrcset()` 改为 `100w / 200w / 400w` 三档；列表 `sizes=64px`、看板 `56px` 在 1x 屏取 100w，2x 屏取 200w；网格与详情行为不变。
+- 继续阅读、想读队列的小缩略图从 `r/200` 改为 `r/100`。
+- 验收：列表 / 看板断言同时校验 `sizes` 与 srcset 含 `100w`，总项数仍 206。
+- 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 206/206。
+- 版本 1.15.7，SW `yuc-ln-shell-v39`；commit `0287929`。
+- CI 四项全绿；Pages `built`；线上版本 1.15.7、SW v39，首页已含 100w srcset。
