@@ -57,6 +57,32 @@ export function normalizeTitle(value) {
     .replace(/[\s\u3000'"“”‘’·・:：,，.。!！?？、\-—~～()（）\[\]【】《》〈〉<>]/g, '');
 }
 
+// 只在「小说」标签出现的条目默认标记为一般小说；若它与轻小说系列有关联，仍按轻小说处理。
+// 这段逻辑原先只在在线抓取时执行，离线 clean-series 重算会把它丢掉（多出 87 条被误隐藏）。
+function adjustGeneralFlags(records, relations) {
+  const lnIds = new Set(records.filter((x) => !x.gn).map((x) => String(x.i)));
+  const related = new Set();
+  for (const [parentId, rels] of relations.entries()) {
+    if (!lnIds.has(String(parentId))) continue;
+    for (const rel of Array.isArray(rels) ? rels : []) {
+      if (String(rel?.relation || '').trim() !== '单行本') continue;
+      if (rel?.type != null && Number(rel.type) !== 1) continue;
+      related.add(String(rel.id));
+    }
+  }
+  let adjusted = 0;
+  for (const item of records) {
+    if (!item.gn) continue;
+    const rels = relations.get(String(item.i)) || [];
+    const hasLnChild = rels.some((rel) => lnIds.has(String(rel?.id)));
+    if (related.has(String(item.i)) || hasLnChild) {
+      delete item.gn;
+      adjusted += 1;
+    }
+  }
+  return adjusted;
+}
+
 function seriesWithVolumeRelations(relations) {
   const ids = new Set();
   for (const [seriesId, rels] of relations.entries()) {
@@ -332,6 +358,9 @@ export async function buildData(records, relations = new Map(), {
       relations.set(key, list);
     });
   } catch { /* 没有人工关系文件时跳过 */ }
+  // 与轻小说系列有关联的条目仍按轻小说处理：离线重算与在线抓取口径保持一致
+  const adjustedGeneral = adjustGeneralFlags(records, relations);
+  if (adjustedGeneral) console.log(`系列关联修正：${adjustedGeneral} 条一般小说随系列保留为轻小说`);
 
   // Bangumi 详情补全候选：只填空字段，不覆盖已有值
   let detailFills = {};

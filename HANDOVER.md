@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.20.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
+- 当前状态：**v1.21.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -69,14 +69,14 @@ GET https://ranobedb.org/api/v0/releases?q={title}        # 单册 ISBN
 - 扩展书目只收 `title_orig` 为日文、`c_num_books >= 2` 且与本地标题不重复的系列；封面来自 `https://images.ranobedb.org/`。
 - 补卷只接受系列标题精确同名，避免把外传 / 不同版本挂到主系列。
 
-数据构成（实测 4851 条）：
+数据构成（实测 5076 条，2026-11-25 刷新）：
 
-- `series: true` 1306 条：系列主条目
-- `series: false` 3545 条：单册，或某个系列的卷
-- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2160 条；默认可见轻小说 1925 条
+- `series: true` 1394 条：系列主条目
+- `series: false` 3682 条：单册，或某个系列的卷
+- 经 `/v0/subjects/{id}/subjects` 清洗后，`c = true` 子卷 2223 条；默认可见轻小说 2026 条
 - 同名系列保留卷数最多、收藏最高的为主条目，其余 79 条标记 `ver` 并默认隐藏
-- 仅「小说」标签、没有「轻小说」标签的 789 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说
-- 关联中还有、库中没有的 7639 卷（单行本 + 番外篇 + RanobeDB 补卷）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
+- 仅「小说」标签、没有「轻小说」标签的 788 条标记 `gn: true`，默认隐藏；与轻小说系列有关联的条目会保留为轻小说（离线 `clean-series` 也执行同样修正，见 `adjustGeneralFlags`）
+- 关联中还有、库中没有的 7817 卷（单行本 + 番外篇 + RanobeDB 补卷）写入 `data/light-novels-volumes.js`，按需加载；核心 `ch` 直接引用这些 ID
 - RanobeDB 扩展书目：≥2 卷、日文原名、与 Bangumi 标题去重后 8487 个系列 / 31254 卷，写入 `data/light-novels-rn.js`，默认隐藏、按需加载；ODbL 授权，详情链接到 RanobeDB
 - 需要「隐藏系列子卷」清洗，否则搜索一个系列会出现多条重复
 
@@ -91,7 +91,7 @@ GET https://ranobedb.org/api/v0/releases?q={title}        # 单册 ISBN
 
 ```js
 // 由 scripts/fetch-books.mjs 生成，请勿手动修改
-window.LN_META = { generatedAt: '...', count: 4815, general: 723, minDate: '...', maxDate: '...' };
+window.LN_META = { generatedAt: '...', count: 5076, general: 788, minDate: '...', maxDate: '...' };
 window.LN_DATA = [ /* ... */ ];
 ```
 
@@ -167,7 +167,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 打卡日期 | `yuc_ln_days_v1` |
 | 同步日志 | `yuc_ln_synclog_v1` |
 | 本地纠错 / 别名 | `yuc_ln_meta_v1` |
-| SW 缓存 | `yuc-ln-shell-v44` |
+| SW 缓存 | `yuc-ln-shell-v45` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -641,7 +641,7 @@ PWA / 移动端：
 
 ## 9.28 v1.12.0 openBD 日文书志补全（2026-11-23）
 
-- ISBN：`fetch-books.mjs` 从 infobox 提取 ISBN-10/13，`clean-series.mjs` 统一转 13 位并做校验，非法值直接丢弃；当前核心 4851 条中 3353 条有有效 ISBN。
+- ISBN：`fetch-books.mjs` 从 infobox 提取 ISBN-10/13，`clean-series.mjs` 统一转 13 位并做校验，非法值直接丢弃；当前核心 5076 条中 3490 条有有效 ISBN，另有 906 条系列首卷 ISBN。
 - openBD：`scripts/enrich-openbd.mjs` 按 100 个 ISBN 一批查询 `api.openbd.jp`，结果按 ISBN 缓存在 `data/build/openbd/`；查询 3355 条、命中 3034 条。
 - 字段：补书系 979 条、出版社 3 条；`jd` 写入日文版发售日（YYYY-MM / YYYY-MM-DD），共 2950 条。当前书系覆盖 3595 条、出版社 4793 条。
 - UI：详情新增 ISBN 与「日文版」两项；`isbn`、`jd` 仍放在详情包，首屏不下载。
@@ -803,6 +803,17 @@ PWA / 移动端：
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
 - 版本 1.20.0，SW `yuc-ln-shell-v44`。
 
+## 9.45 v1.21.0 数据刷新与 ISBN 补全（2026-11-25）
+
+- `fetch-books.mjs --refresh-pages` 重抓全部分页：核心 4851→5076（+231 新增，6 条上游已改标「漫画」而移除），轻小说 4201 / 小说 3427 去重后一般小说 788；系列 1306→1394，子卷 2160→2223，默认可见 1925→2026。
+- 卷包 7639→7817；子卷索引 1071→1128 个系列 / 9799→10040 条引用。
+- RanobeDB `find-isbn` 查询 285 条缺 ISBN 的日文条目：补 57 个系列首卷 ISBN（850→906），单册无新增；任一 ISBN 覆盖 4217→4396 条（86.6%）。
+- `enrich-detail` 复查 143 条缺字段条目，上游仍为空（候选 0）；同时修复增量运行会用空结果覆盖既有 `bgm-detail-fills.json` 的问题，现在先载入旧候选再合并。
+- 修复 `clean-series` 离线重算丢失「与轻小说系列关联的一般小说」修正的问题：新抽出 `adjustGeneralFlags`，重算后 87 条不再被误判为 `gn` 隐藏（此前仅在在线抓取时执行）。
+- 新增验收：`check-data` 0；`test-merge` 28/28；`check-deploy` 通过；`verify` 222/222（数据条数断言全部动态跟随 `LN_META`）。
+- 结果：核心 5076、卷包 7817、合计 12893；缺日期 113 / 作者 101 / 出版社 60 / 插图 1205 / 书系 1396 / 封面 2。
+- 版本 1.21.0，SW `yuc-ln-shell-v45`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -828,4 +839,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.20.0 已完成，后续按第 10 节风险与决策、第 9.44 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.21.0 已完成，后续按第 10 节风险与决策、第 9.45 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

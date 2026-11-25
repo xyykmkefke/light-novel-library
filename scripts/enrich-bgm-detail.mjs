@@ -119,6 +119,17 @@ const targets = data
   .slice(0, LIMIT);
 
 const fills = {};
+// 增量运行：先载入已固化的候选，避免只跑新增条目时把旧补全覆盖掉
+try {
+  const prev = JSON.parse(await readFile(OUT_FILE, 'utf8'));
+  if (prev && prev.fills && typeof prev.fills === 'object') {
+    Object.keys(prev.fills).forEach((id) => {
+      if (/^\d+$/.test(id) && prev.fills[id] && typeof prev.fills[id] === 'object') {
+        fills[id] = prev.fills[id];
+      }
+    });
+  }
+} catch { /* 首次运行没有候选文件 */ }
 const stats = Object.fromEntries(FIELDS.map((f) => [f, { needed: 0, filled: 0 }]));
 const datePrecision = { y: 0, m: 0, d: 0 };
 const unparsed = [];

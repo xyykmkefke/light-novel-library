@@ -1,8 +1,10 @@
 # 轻小说库 · 阅读记录
 
-本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 4851 条核心数据，另从系列关联补入 7639 卷懒加载卷包，合计 12490 条；其中 789 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3367 个单册 ISBN、850 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
+本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 5076 条核心数据，另从系列关联补入 7817 卷懒加载卷包，合计 12893 条；其中 788 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3490 个单册 ISBN、906 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.20.0 已完成**（数据、页面、书评、统计、云同步、PWA、本地纠错、格式与藏书、自动化验收 222 项）
+状态：**v1.21.0 已完成**（数据、页面、书评、统计、云同步、PWA、本地纠错、格式与藏书、自动化验收 222 项）
+
+v1.21.0：数据刷新——重抓 Bangumi 全部分页，核心 4851→5076 条（+231 新书 / 6 条上游已改为漫画而移除），卷包 7639→7817；RanobeDB 补 57 个系列首卷 ISBN，ISBN 覆盖 4396 条（86.6%）；修复离线 `clean-series` 会把 87 条与轻小说系列关联的一般小说误判为隐藏的问题，`enrich-detail` 增量运行不再覆盖已有补全候选。
 
 v1.20.0：格式与藏书——详情页可标记纸质 / 电子 / Web / 有声与「藏书」，我的阅读可按格式筛选、只看藏书，统计页新增藏书与格式分布；随记录一起导出、导入与云同步。
 
@@ -111,12 +113,12 @@ v1.0.1：清理残留代码；纯日文标题补罗马字首字母；评分排�
 
 - 来源：Bangumi（bgm.tv），`type=1` 书籍，`tag=轻小说` 与 `tag=小说`，通过镜像 `bgmapi.anibt.net` 抓取
 - 扩展来源：RanobeDB（<https://ranobedb.org>，ODbL），日文原名、≥2 卷、与 Bangumi 标题去重；扩展书目无中文名与 Bangumi 评分，保留封面、卷数、起始发售日与 RanobeDB 链接
-- 规模：核心 4851 条（轻小说 4062 / 一般小说 789）；系列 1306 / 单册 3545 / 子卷 2160；默认可见 1925 条；重复版本 79 条默认隐藏
-- 卷包：7639 条（单行本 + 番外篇 + RanobeDB 补卷），按需加载；展开后共 11625 条轻小说
-- 统计：系列内 9799 册，按上/中/下折合 9707 故事卷
+- 规模：核心 5076 条（轻小说 4288 / 一般小说 788）；系列 1394 / 单册 3682 / 子卷 2223；默认可见 2026 条；重复版本 79 条默认隐藏
+- 卷包：7817 条（单行本 + 番外篇 + RanobeDB 补卷），按需加载；展开后共 12893 条轻小说
+- 统计：系列内 10040 册，按上/中/下折合 9947 故事卷
 - 扩展书目：8487 个系列 / 31254 卷，默认隐藏，开关打开后按需加载
-- 字段：作者 4757 条、插图 3714 条、书系 3603 条、出版社 4797 条、发售日 4755 条（含年 / 月精度）、ISBN 3367 条、系列首卷 ISBN 850 条、日文版发售日 2950 条（任一 ISBN 覆盖 4217 条，87%）
-- 文件：`data/light-novels-lite.js`（首屏默认可见，约 466 KB，gzip 约 156 KB）+ `data/light-novels-rest.js`（子卷 / 一般小说 / 重复版本，约 667 KB，gzip 约 170 KB，后台加载）+ `data/light-novels-ch.js`（系列子卷索引，约 94 KB，gzip 约 34 KB，打开系列详情时按需加载）+ `data/light-novels.js`（完整核心，供构建脚本使用）+ `data/light-novels-extra.js`（详情字段，约 596 KB）+ `data/light-novels-volumes.js`（卷包，约 1.35 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.9 MB，gzip 约 721 KB，按需加载）
+- 字段：作者 4975 条、插图 3871 条、书系 3680 条、出版社 5016 条、发售日 4963 条（含年 / 月精度）、ISBN 3490 条、系列首卷 ISBN 906 条、日文版发售日 2950 条（任一 ISBN 覆盖 4396 条，86.6%）
+- 文件：`data/light-novels-lite.js`（首屏默认可见，约 489 KB，gzip 约 160 KB）+ `data/light-novels-rest.js`（子卷 / 一般小说 / 重复版本，约 694 KB，gzip 约 174 KB，后台加载）+ `data/light-novels-ch.js`（系列子卷索引，约 96 KB，gzip 约 34 KB，打开系列详情时按需加载）+ `data/light-novels.js`（完整核心，供构建脚本使用）+ `data/light-novels-extra.js`（详情字段，约 617 KB）+ `data/light-novels-volumes.js`（卷包，约 1.36 MB）+ `data/light-novels-rn.js`（扩展书目，约 2.9 MB，gzip 约 721 KB，按需加载）
 - 封面在数据里只存相对路径，运行时补全图片域名；图片本身按 100w / 200w / 400w 自适应，列表与看板优先取 100w
 - 清洗：优先用 Bangumi 关联接口的「单行本」关系标记子卷，关系缺失时退回标题规则
 - 增强：子卷缺失的书系/插图/作者/出版社/题材从父系列继承；漫画、画集、指南写入 `kind`
@@ -146,7 +148,7 @@ npm run verify        # 无头浏览器自动化验收（222 项）
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`、`yuc_ln_synclog_v1`、`yuc_ln_meta_v1`；Service Worker 缓存名 `yuc-ln-shell-v44`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`、`yuc_ln_synclog_v1`、`yuc_ln_meta_v1`；Service Worker 缓存名 `yuc-ln-shell-v45`。
 
 ## 部署
 
