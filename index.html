@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.19.0">
+<meta name="version" content="1.20.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -743,6 +743,44 @@
   }
 
   .status-opts[hidden] { display: none; }
+
+  /* 格式与藏书：跟随阅读记录保存，可筛选 */
+  .format-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    font-size: 12px;
+  }
+
+  .format-row[hidden] { display: none; }
+
+  .format-row .fmt-label { color: var(--muted); margin-right: 2px; }
+
+  .format-row button {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .format-row button:hover { border-color: var(--line-strong); }
+
+  .format-row button.active {
+    background: rgba(255, 107, 157, 0.16);
+    border-color: rgba(255, 107, 157, 0.55);
+    color: #ffa8c6;
+    font-weight: 600;
+  }
+
+  .format-row .fmt-own { margin-left: 6px; }
 
   /* 卡片长按浮出的快捷状态菜单 */
   .cardmenu {
@@ -3039,6 +3077,15 @@
       <option value="name">名称</option>
       <option value="date">发售日</option>
     </select>
+    <select id="fmtFilter" aria-label="阅读格式" title="按阅读 / 持有格式筛选我的阅读">
+      <option value="all">全部格式</option>
+      <option value="paper">纸质</option>
+      <option value="ebook">电子</option>
+      <option value="web">Web</option>
+      <option value="audio">有声</option>
+      <option value="none">未标记</option>
+    </select>
+    <button class="btn" id="ownedBtn" type="button" aria-pressed="false" title="只看已标记为藏书的条目">只看藏书</button>
     <button class="btn" id="bulkBtn" type="button">批量</button>
     <button class="btn" id="mineMoreBtn" type="button" aria-expanded="false">更多</button>
     <div class="popmenu mine-menu" id="mineMore" hidden>
@@ -3100,7 +3147,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.19.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.20.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3117,6 +3164,7 @@
       <div class="detail-meta" id="detailMeta"></div>
       <div class="meta-edit" id="detailMetaEdit" hidden></div>
       <div class="status-opts" id="statusOpts" hidden></div>
+      <div class="format-row" id="detailFormat" hidden></div>
       <div class="detail-progress" id="detailProgress" role="group" aria-label="阅读进度" hidden></div>
       <div class="vol-list" id="detailVolumes" hidden></div>
       <div class="review" id="detailReview"></div>
@@ -3691,6 +3739,9 @@
   var HIST_MAX = 8;
   var STATUS = { want: '想读', doing: '在读', done: '读完', drop: '弃读' };
   var STATUS_ORDER = ['want', 'doing', 'done', 'drop'];
+  // 阅读 / 持有格式：纸质、电子、Web、有声；空字符串表示未标记
+  var FORMATS = { paper: '纸质', ebook: '电子', web: 'Web', audio: '有声' };
+  var FORMAT_ORDER = ['paper', 'ebook', 'web', 'audio'];
   var KIND_LABEL = { manga: '漫画', artbook: '画集', guide: '指南' };
 
   // 题材分类：与 scripts/genres.mjs 的 id/label 保持一致，构建期把 tag 归一后写入 tg 字段
@@ -3739,6 +3790,8 @@
     group: false,
     groupBy: 'year',
     mineSort: 'recent',
+    fmt: 'all',
+    ownedOnly: false,
     theme: 'dark',
     q: '',
     bulk: false
@@ -3810,10 +3863,15 @@
         r: Math.max(0, Math.min(10, Math.round(Number(v.r) || 0))),
         rv: String(v.rv || '').slice(0, 140),
         nt: String(v.nt || '').slice(0, 1000),
-        rvU: Math.max(0, Math.round(Number(v.rvU) || 0))
+        rvU: Math.max(0, Math.round(Number(v.rvU) || 0)),
+        fm: FORMATS[v.fm] ? v.fm : '',
+        ow: v.ow ? 1 : 0
       };
     }
-    return { s: 'done', t: Number(v) || Date.now(), vol: 0, u: Number(v) || Date.now(), f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+    return {
+      s: 'done', t: Number(v) || Date.now(), vol: 0, u: Number(v) || Date.now(), f: 0,
+      r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0
+    };
   }
 
   function loadMine() {
@@ -4090,6 +4148,12 @@
     }
     if (map.v === 'grid' || map.v === 'list' || map.v === 'board') state.view = map.v;
     if (['recent', 'updated', 'rating', 'progress', 'name', 'date'].indexOf(map.ms) >= 0) state.mineSort = map.ms;
+    if (map.fmt === 'all' || map.fmt === 'none' || Object.prototype.hasOwnProperty.call(FORMATS, map.fmt)) {
+      state.fmt = map.fmt;
+    }
+    if (map.owd === '1' || map.owd === '0' || typeof map.owd === 'boolean') {
+      state.ownedOnly = map.owd === '1' || map.owd === true;
+    }
     if (map.gb === 'year' || map.gb === 'genre' || map.gb === 'status') {
       state.group = true;
       state.groupBy = map.gb;
@@ -4138,6 +4202,8 @@
         hm: state.hideMine,
         v: state.view,
         ms: state.mineSort,
+        fmt: state.fmt,
+        owd: state.ownedOnly ? '1' : '0',
         gb: state.group ? state.groupBy : '',
         t: state.theme
       }));
@@ -4296,6 +4362,8 @@
       'hm=' + (state.hideMine ? '1' : '0'),
       'v=' + encodeURIComponent(state.view),
       'ms=' + encodeURIComponent(state.mineSort),
+      'fmt=' + encodeURIComponent(state.fmt),
+      'owd=' + (state.ownedOnly ? '1' : '0'),
       't=' + encodeURIComponent(state.theme)
     ];
     if (state.q.trim()) parts.push('q=' + encodeURIComponent(state.q.trim()));
@@ -4358,6 +4426,13 @@
     if ($('lineFilter').options.length > 1) $('lineFilter').value = state.line || 'all';
     $('sort').value = state.sort;
     $('mineSort').value = state.mineSort;
+    var fmtSelect = $('fmtFilter');
+    if (fmtSelect) fmtSelect.value = state.fmt;
+    var ownedBtn = $('ownedBtn');
+    if (ownedBtn) {
+      ownedBtn.setAttribute('aria-pressed', state.ownedOnly ? 'true' : 'false');
+      ownedBtn.classList.toggle('primary', state.ownedOnly);
+    }
     var childBtn = $('hideChildrenBtn');
     if (childBtn) {
       childBtn.setAttribute('aria-pressed', state.hideChildren ? 'true' : 'false');
@@ -4801,6 +4876,21 @@
       list = list.filter(function (x) { return (Number(x.s) || 0) >= 8; });
     }
 
+    // 格式与藏书：只在「我的阅读」生效，未收藏的条目自然被排除
+    if (state.tab === 'mine' && state.fmt !== 'all') {
+      list = list.filter(function (x) {
+        var entry = myMap[String(x.i)];
+        if (!entry) return false;
+        return state.fmt === 'none' ? !entry.fm : entry.fm === state.fmt;
+      });
+    }
+    if (state.tab === 'mine' && state.ownedOnly) {
+      list = list.filter(function (x) {
+        var entry = myMap[String(x.i)];
+        return !!(entry && entry.ow);
+      });
+    }
+
     // 阅读状态过滤：我的阅读常驻；全库搜索时也可按状态缩小范围
     if (state.status !== 'all' && (state.tab === 'mine' || q)) {
       list = list.filter(function (x) {
@@ -5053,6 +5143,10 @@
     if (state.showVersions) chips.push({ k: 'showVersions', label: '范围', v: '显示重复版本' });
     if (state.showRn) chips.push({ k: 'showRn', label: '范围', v: '显示扩展书目' });
     if (state.onlyMine) chips.push({ k: 'onlyMine', label: '范围', v: '只看已收藏' });
+    if (state.fmt !== 'all') {
+      chips.push({ k: 'fmt', label: '格式', v: state.fmt === 'none' ? '未标记' : (FORMATS[state.fmt] || state.fmt) });
+    }
+    if (state.ownedOnly) chips.push({ k: 'ownedOnly', label: '范围', v: '只看藏书' });
     if (state.highScore) chips.push({ k: 'highScore', label: '评分', v: '≥8.0' });
     if (state.hideMine) chips.push({ k: 'hideMine', label: '范围', v: '隐藏已收藏' });
     if (!chips.length) {
@@ -5095,6 +5189,10 @@
       state.showRn = false;
     } else if (key === 'onlyMine') {
       state.onlyMine = false;
+    } else if (key === 'fmt') {
+      state.fmt = 'all';
+    } else if (key === 'ownedOnly') {
+      state.ownedOnly = false;
     } else if (key === 'highScore') {
       state.highScore = false;
     } else if (key === 'hideMine') {
@@ -5131,7 +5229,8 @@
     }
     var snapshot = {};
     ids.forEach(function (id) {
-      if (myMap[id]) snapshot[id] = { s: myMap[id].s, t: myMap[id].t, vol: myMap[id].vol, u: myMap[id].u, f: myMap[id].f };
+      if (myMap[id]) snapshot[id] = { s: myMap[id].s, t: myMap[id].t, vol: myMap[id].vol, u: myMap[id].u, f: myMap[id].f,
+        fm: myMap[id].fm || '', ow: myMap[id].ow ? 1 : 0, mu: myMap[id].mu || 0 };
     });
     if (kind === 'remove') {
       ids.forEach(function (id) {
@@ -5141,7 +5240,7 @@
     } else {
       var nowTs = Date.now();
       ids.forEach(function (id) {
-        if (!myMap[id]) myMap[id] = { s: 'want', t: nowTs, vol: 0, u: nowTs, f: 0 };
+        if (!myMap[id]) myMap[id] = { s: 'want', t: nowTs, vol: 0, u: nowTs, f: 0, fm: '', ow: 0, mu: 0 };
         myMap[id].s = kind;
         myMap[id].u = nowTs;
         if (kind === 'done') {
@@ -5214,7 +5313,8 @@
       genre: state.genre, sort: state.sort,
       status: state.status, onlyMine: state.onlyMine, highScore: state.highScore,
       hideMine: state.hideMine, view: state.view, group: state.group,
-      groupBy: state.groupBy, mineSort: state.mineSort
+      groupBy: state.groupBy, mineSort: state.mineSort,
+      fmt: state.fmt, ownedOnly: state.ownedOnly
     };
   }
   function applyView(v) {
@@ -5227,6 +5327,7 @@
       rn: !!v.showRn,
       gr: v.genre || 'all', o: v.sort, st: v.status, om: !!v.onlyMine, hs: !!v.highScore,
       hm: !!v.hideMine, v: v.view, ms: v.mineSort,
+      fmt: v.fmt || 'all', owd: !!v.ownedOnly,
       gb: v.group ? v.groupBy : '', q: v.q || ''
     });
     state.group = !!v.group;
@@ -5746,6 +5847,18 @@
     var yearPairs = yearKeys.map(function (y) { return [y + ' 年', byYear[y]]; });
     var maxMonth = Math.max.apply(null, byMonth.concat([1]));
     var dist = ratingDist(entries);
+    // 藏书与格式统计：格式为空表示尚未标记
+    var fmtCounts = {};
+    FORMAT_ORDER.forEach(function (k) { fmtCounts[k] = 0; });
+    var ownedCount = 0;
+    var fmtMarked = 0;
+    entries.forEach(function (o) {
+      if (o.e.fm && fmtCounts[o.e.fm] != null) {
+        fmtCounts[o.e.fm] += 1;
+        fmtMarked += 1;
+      }
+      if (o.e.ow) ownedCount += 1;
+    });
     var distMax = Math.max.apply(null, dist.counts.concat([1]));
     var distBars = dist.counts.map(function (n, i) {
       var score = i + 1;
@@ -5824,6 +5937,16 @@
           '<div class="stat-num"><b>' + (Number(META.storyVolumes) || 0) + '</b><span>故事卷</span></div>' +
           '<div class="stat-num"><b>' + (Number(META.versions) || 0) + '</b><span>重复版本</span></div>' +
           (RN_META.count ? '<div class="stat-num"><b>' + (Number(RN_META.count) || 0) + '</b><span>扩展书目</span></div>' : '') +
+        '</div></div>' +
+        '<div class="stat-card"><h3>藏书与格式</h3><div class="stat-nums">' +
+          '<div class="stat-num"><b>' + ownedCount + '</b><span>藏书</span></div>' +
+          FORMAT_ORDER.map(function (k) {
+            return '<div class="stat-num"><b>' + fmtCounts[k] + '</b><span>' + FORMATS[k] + '</span></div>';
+          }).join('') +
+        '</div><div class="goal-meta">' +
+          (fmtMarked
+            ? '已标记 ' + fmtMarked + ' 本 · 未标记 ' + (entries.length - fmtMarked) + ' 本'
+            : '在详情页标记纸质 / 电子 / Web / 有声与藏书') +
         '</div></div>' +
         '<div class="stat-card"><h3>' + year + ' 年目标</h3>' +
           '<div class="goal-line"><span class="review-hint">今年读完</span>' +
@@ -5968,6 +6091,7 @@
       (state.highScore ? 1 : 0) + (state.hideMine ? 1 : 0) +
       (!state.hideChildren ? 1 : 0) + (state.includeNovel ? 1 : 0) +
       (state.showVersions ? 1 : 0) + (state.showRn ? 1 : 0) +
+      (state.fmt !== 'all' ? 1 : 0) + (state.ownedOnly ? 1 : 0) +
       (state.q.trim() ? 1 : 0);
     var activeFilters = filterCount - (state.status !== 'all' ? 1 : 0) -
       (state.q.trim() ? 1 : 0) + (state.sort !== 'score' ? 1 : 0);
@@ -6283,6 +6407,24 @@
     opts.innerHTML = collected ? STATUS_ORDER.map(function (s) {
       return '<button data-status="' + s + '"' + (myMap[id].s === s ? ' class="active"' : '') + '>' + STATUS[s] + '</button>';
     }).join('') : '';
+    // 格式与藏书：和阅读记录一起保存，参与「我的阅读」筛选
+    var fmtBox = $('detailFormat');
+    if (!collected) {
+      fmtBox.hidden = true;
+      fmtBox.innerHTML = '';
+    } else {
+      var mineEntry = myMap[id];
+      fmtBox.hidden = false;
+      fmtBox.innerHTML = '<span class="fmt-label">格式</span>' +
+        FORMAT_ORDER.map(function (k) {
+          return '<button type="button" data-fmt="' + k + '"' + (mineEntry.fm === k ? ' class="active"' : '') +
+            ' aria-pressed="' + (mineEntry.fm === k) + '">' + FORMATS[k] + '</button>';
+        }).join('') +
+        '<button type="button" data-fmt=""' + (!mineEntry.fm ? ' class="active"' : '') +
+          ' aria-pressed="' + (!mineEntry.fm) + '">未标记</button>' +
+        '<button type="button" class="fmt-own' + (mineEntry.ow ? ' active' : '') + '" data-owned="1"' +
+          ' aria-pressed="' + (!!mineEntry.ow) + '" title="标记为已收藏 / 已持有本作">藏书</button>';
+    }
     var progBox = $('detailProgress');
     if (collected && Number(item.v) > 0) {
       progBox.hidden = false;
@@ -6584,7 +6726,7 @@
   function ensureMine(id) {
     var key = String(id);
     if (!myMap[key]) {
-      myMap[key] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+      myMap[key] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0, mu: 0 };
       clearDeleted(key);
     }
     return myMap[key];
@@ -6772,7 +6914,7 @@
         }
       });
     } else {
-      myMap[id] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0 };
+      myMap[id] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0, fm: '', ow: 0, mu: 0 };
       clearDeleted(id);
       markDay();
       saveMine();
@@ -6928,6 +7070,8 @@
     state.includeNovel = false;
     state.showVersions = false;
     state.showRn = false;
+    state.fmt = 'all';
+    state.ownedOnly = false;
     state.q = '';
     searchEl.value = '';
     syncControls();
@@ -7429,6 +7573,22 @@
     render();
   });
 
+  $('fmtFilter').addEventListener('change', function () {
+    state.fmt = this.value;
+    syncControls();
+    writeHash();
+    savePrefs();
+    render();
+  });
+
+  $('ownedBtn').addEventListener('click', function () {
+    state.ownedOnly = !state.ownedOnly;
+    syncControls();
+    writeHash();
+    savePrefs();
+    render();
+  });
+
   var searchTimer = null;
   searchEl.addEventListener('input', function () {
     sugMuted = false;
@@ -7798,6 +7958,27 @@
     setStatus(id, btn.dataset.status);
   });
 
+  // 格式 / 藏书：改完就地刷新详情与列表，并计入待同步改动
+  $('detailFormat').addEventListener('click', function (e) {
+    if (!modalId) return;
+    var fmtBtn = e.target.closest('[data-fmt]');
+    var ownBtn = e.target.closest('[data-owned]');
+    if (!fmtBtn && !ownBtn) return;
+    var id = modalId;
+    var entry = ensureMine(id);
+    var stamp = Date.now();
+    if (fmtBtn) {
+      var fmt = fmtBtn.getAttribute('data-fmt');
+      entry.fm = FORMATS[fmt] ? fmt : '';
+    }
+    if (ownBtn) entry.ow = entry.ow ? 0 : 1;
+    entry.mu = stamp;
+    entry.u = stamp;
+    saveMine();
+    renderDetail(id);
+    render();
+  });
+
   // 复制文本：优先 Clipboard API，不可用时退回隐藏 textarea + execCommand
   function copyText(text, done) {
     var fallback = function () {
@@ -7837,7 +8018,7 @@
       markDeleted(id);
       toast('已移除：' + (item.cn || item.n));
     } else {
-      myMap[id] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0 };
+      myMap[id] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0, fm: '', ow: 0, mu: 0 };
       clearDeleted(id);
       markDay();
       toast('已加入我的阅读：' + (item.cn || item.n));
@@ -7858,7 +8039,7 @@
       item.ch.forEach(function (cid, i) {
         var key = String(cid);
         if (myMap[key]) return;
-        myMap[key] = { s: 'want', t: now + i, vol: 0, u: now + i, f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+        myMap[key] = { s: 'want', t: now + i, vol: 0, u: now + i, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0, mu: 0 };
         clearDeleted(key);
         added += 1;
       });
@@ -8385,12 +8566,15 @@
         rating: entry.r || 0,
         review: entry.rv || '',
         note: entry.nt || '',
-        reviewUpdatedAt: entry.rvU || 0
+        reviewUpdatedAt: entry.rvU || 0,
+        format: entry.fm || '',
+        owned: entry.ow ? 1 : 0,
+        formatUpdatedAt: entry.mu || 0
       };
     });
     var payload = {
       app: 'yuc-light-novel-list',
-      version: 3,
+      version: 4,
       exportedAt: new Date().toISOString(),
       items: ids,
       // 本地纠错与别名单独一节：旧版本导入时会忽略，不影响收藏记录
@@ -8404,7 +8588,7 @@
 
   $('exportCsv').addEventListener('click', function () {
     if (!extraLoaded) { loadExtra().then(function () { $('exportCsv').click(); }); return; }
-    var rows = [['条目ID', '中文名', '原名', '作者', '出版社', '书系', '题材', '发售日', '册数', '状态', '已读卷', '我的评分', '短评', '笔记', '读完日期', '加入时间']];
+    var rows = [['条目ID', '中文名', '原名', '作者', '出版社', '书系', '题材', '发售日', '册数', '状态', '已读卷', '格式', '藏书', '我的评分', '短评', '笔记', '读完日期', '加入时间']];
     sortedMine().forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
@@ -8413,7 +8597,8 @@
         .filter(Boolean).join('/');
       rows.push([
         id, x.cn || '', x.n || '', x.au || '', x.pub || '', x.line || '', genres, x.d || '', x.v || '',
-        STATUS[e.s] || '读完', e.vol || 0, e.r || '', e.rv || '', e.nt || '', e.f ? fmtDate(e.f) : '',
+        STATUS[e.s] || '读完', e.vol || 0, FORMATS[e.fm] || '', e.ow ? '是' : '',
+        e.r || '', e.rv || '', e.nt || '', e.f ? fmtDate(e.f) : '',
         new Date(e.t || Date.now()).toLocaleString('zh-CN'),
       ]);
     });
@@ -8433,8 +8618,8 @@
       '',
       '共 ' + ids.length + ' 本 · 导出于 ' + new Date().toLocaleString('zh-CN'),
       '',
-      '| 书名 | 状态 | 进度 | 我的评分 | 发售日 | 题材 |',
-      '| --- | --- | --- | --- | --- | --- |',
+      '| 书名 | 状态 | 进度 | 格式 | 藏书 | 我的评分 | 发售日 | 题材 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
     ids.forEach(function (id) {
       var x = byId.get(id);
@@ -8445,6 +8630,7 @@
       var genres = (x.tg || []).map(function (gid) { return GENRE_LABEL[gid]; })
         .filter(Boolean).join(' / ') || '—';
       lines.push('| ' + name + ' | ' + (STATUS[e.s] || '读完') + ' | ' + prog + ' | ' +
+        (FORMATS[e.fm] || '—') + ' | ' + (e.ow ? '是' : '—') + ' | ' +
         (e.r ? e.r + ' / 10' : '—') + ' | ' +
         (x.d || '—') + ' | ' + genres.replace(/\|/g, '\\|') + ' |');
     });
@@ -8507,7 +8693,10 @@
               r: Math.max(0, Math.min(10, Math.round(Number(isObj && entry.rating) || 0))),
               rv: String((isObj && entry.review) || '').slice(0, 140),
               nt: String((isObj && entry.note) || '').slice(0, 1000),
-              rvU: Math.max(0, Math.round(Number(isObj && entry.reviewUpdatedAt) || 0))
+              rvU: Math.max(0, Math.round(Number(isObj && entry.reviewUpdatedAt) || 0)),
+              fm: isObj && FORMATS[entry.format] ? entry.format : '',
+              ow: isObj && entry.owned ? 1 : 0,
+              mu: Math.max(0, Math.round(Number(isObj && entry.formatUpdatedAt) || 0))
             };
             clearDeleted(id);
             added += 1;
@@ -8520,6 +8709,13 @@
             if (inRating && !cur.r) cur.r = inRating;
             if (entry.review && !cur.rv) cur.rv = String(entry.review).slice(0, 140);
             if (entry.note && !cur.nt) cur.nt = String(entry.note).slice(0, 1000);
+            // 格式与藏书按标记时间取新：旧备份不带 formatUpdatedAt 时保留本地标记
+            var inMu = Math.max(0, Math.round(Number(entry.formatUpdatedAt) || 0));
+            if (inMu > (Number(cur.mu) || 0)) {
+              cur.fm = FORMATS[entry.format] ? entry.format : '';
+              cur.ow = entry.owned ? 1 : 0;
+              cur.mu = inMu;
+            }
           }
           merged += 1;
         });
@@ -8553,7 +8749,8 @@
     var ids = Object.keys(myMap);
     ids.forEach(function (id) {
       snapshot[id] = { s: myMap[id].s, t: myMap[id].t, vol: myMap[id].vol, u: myMap[id].u, f: myMap[id].f,
-        r: myMap[id].r || 0, rv: myMap[id].rv || '', nt: myMap[id].nt || '', rvU: myMap[id].rvU || 0 };
+        r: myMap[id].r || 0, rv: myMap[id].rv || '', nt: myMap[id].nt || '', rvU: myMap[id].rvU || 0,
+        fm: myMap[id].fm || '', ow: myMap[id].ow ? 1 : 0, mu: myMap[id].mu || 0 };
     });
     var ts = Date.now();
     ids.forEach(function (id) { myDeleted[id] = ts; });
@@ -8861,7 +9058,7 @@
   function buildPayload() {
     return {
       app: 'yuc-light-novel-list',
-      version: 3,
+      version: 4,
       updatedAt: new Date().toISOString(),
       items: Object.keys(myMap).map(function (id) {
         var e = myMap[id];
@@ -8875,7 +9072,10 @@
           rating: e.r || 0,
           review: e.rv || '',
           note: e.nt || '',
-          reviewUpdatedAt: e.rvU || 0
+          reviewUpdatedAt: e.rvU || 0,
+          format: e.fm || '',
+          owned: e.ow ? 1 : 0,
+          formatUpdatedAt: e.mu || 0
         };
       }),
       deleted: myDeleted,
@@ -8886,6 +9086,22 @@
   // #merge-core-start
   // 双向合并：条目按最后更新时间取状态，进度取较大值；删除用墓碑同步
   // map / deleted 就地更新，totalOf 返回该条目总卷数（0 表示未知）
+  var FORMAT_KEYS = ['paper', 'ebook', 'web', 'audio'];
+  // 逐字段比较，避免对象键顺序或旧记录缺字段导致误判「有变化」
+  function sameRecord(a, b) {
+    return a.s === b.s &&
+      (Number(a.t) || 0) === (Number(b.t) || 0) &&
+      (Number(a.vol) || 0) === (Number(b.vol) || 0) &&
+      (Number(a.u) || 0) === (Number(b.u) || 0) &&
+      (Number(a.f) || 0) === (Number(b.f) || 0) &&
+      (Number(a.r) || 0) === (Number(b.r) || 0) &&
+      String(a.rv || '') === String(b.rv || '') &&
+      String(a.nt || '') === String(b.nt || '') &&
+      (Number(a.rvU) || 0) === (Number(b.rvU) || 0) &&
+      String(a.fm || '') === String(b.fm || '') &&
+      (Number(a.ow) ? 1 : 0) === (Number(b.ow) ? 1 : 0) &&
+      (Number(a.mu) || 0) === (Number(b.mu) || 0);
+  }
   function mergeRemoteState(map, deleted, remote, totalOf, stats) {
     if (!remote) return 0;
     var changed = 0;
@@ -8907,7 +9123,11 @@
         r: Math.max(0, Math.min(10, Math.round(Number(it.rating) || 0))),
         rv: String(it.review || '').slice(0, 140),
         nt: String(it.note || '').slice(0, 1000),
-        rvU: Math.max(0, Math.round(Number(it.reviewUpdatedAt) || 0))
+        rvU: Math.max(0, Math.round(Number(it.reviewUpdatedAt) || 0)),
+        // 格式 / 藏书：按 formatUpdatedAt 单独取新，旧客户端不带该字段时不会冲掉本地标记
+        fm: FORMAT_KEYS.indexOf(it.format) >= 0 ? it.format : '',
+        ow: it.owned ? 1 : 0,
+        mu: Math.max(0, Math.round(Number(it.formatUpdatedAt) || 0))
       };
       var tomb = Number(remoteDeleted[id]) || Number(deleted[id]) || 0;
       if (tomb && tomb >= r.u) return;
@@ -8924,7 +9144,9 @@
         (Number(l.vol) || 0) === r.vol &&
         (Number(l.r) || 0) === r.r &&
         String(l.rv || '') === r.rv &&
-        String(l.nt || '') === r.nt;
+        String(l.nt || '') === r.nt &&
+        String(l.fm || '') === r.fm &&
+        (Number(l.ow) ? 1 : 0) === r.ow;
       if (r.u > lU) {
         if (!sameContent) bump('remoteNewer');
       } else if (lU > r.u) {
@@ -8944,6 +9166,10 @@
       var lRvU = Number(l.rvU) || 0;
       var rRvU = Number(r.rvU) || 0;
       var reviewSrc = rRvU > lRvU ? r : (lRvU > rRvU ? l : newer);
+      // 格式 / 藏书整体按 mu 取新：两侧都没有标记时间时跟随较新的记录
+      var lMu = Math.max(0, Math.round(Number(l.mu) || 0));
+      var rMu = Math.max(0, Math.round(Number(r.mu) || 0));
+      var fmtSrc = rMu > lMu ? r : (lMu > rMu ? l : newer);
       var next = {
         s: status,
         t: isFinite(joined) ? joined : Date.now(),
@@ -8953,9 +9179,12 @@
         r: Number(reviewSrc.r) || 0,
         rv: reviewSrc.rv || '',
         nt: reviewSrc.nt || '',
-        rvU: Math.max(lRvU, rRvU)
+        rvU: Math.max(lRvU, rRvU),
+        fm: FORMAT_KEYS.indexOf(fmtSrc.fm) >= 0 ? fmtSrc.fm : '',
+        ow: fmtSrc.ow ? 1 : 0,
+        mu: Math.max(lMu, rMu)
       };
-      if (JSON.stringify(next) !== JSON.stringify(l)) changed += 1;
+      if (!sameRecord(next, l)) changed += 1;
       map[id] = next;
     });
     Object.keys(remoteDeleted).forEach(function (id) {

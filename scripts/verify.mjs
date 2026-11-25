@@ -816,7 +816,7 @@ async function main() {
     try { exportedJson = JSON.parse(exportedText); } catch {}
     const exportedItem = exportedJson && Array.isArray(exportedJson.items)
       ? exportedJson.items.find((it) => String(it.id) === String(pick.id)) : null;
-    check('导出 JSON 版本升级为 3', exportedJson?.version === 3, String(exportedJson?.version));
+    check('导出 JSON 版本升级为 4', exportedJson?.version === 4, String(exportedJson?.version));
     check('导出 JSON 含评分与短评',
       exportedItem?.rating === 9 && exportedItem?.review === '测试短评',
       JSON.stringify({ r: exportedItem?.rating, rv: exportedItem?.review }));
@@ -1655,6 +1655,11 @@ async function main() {
     })()`);
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
     await sleep(450);
+    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回
+    for (let i = 0; i < 80; i += 1) {
+      if (await cdp.evaluate('window.__LN_EXTRA_READY === true')) break;
+      await sleep(150);
+    }
     await click('#detailEdit');
     await sleep(200);
     const metaPanel = await cdp.evaluate(`(() => {
@@ -1704,6 +1709,11 @@ async function main() {
       JSON.stringify(metaReload));
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
     await sleep(450);
+    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回
+    for (let i = 0; i < 80; i += 1) {
+      if (await cdp.evaluate('window.__LN_EXTRA_READY === true')) break;
+      await sleep(150);
+    }
     await click('#detailEdit');
     await sleep(200);
     await click('#detailMetaEdit [data-meta-act="reset"]');
@@ -1725,6 +1735,92 @@ async function main() {
     await sleep(200);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(200);
+
+    // ---- 阅读格式与藏书 ----
+    const fmtPick = await cdp.evaluate(`(() => {
+      const s = (window.LN_DATA || []).find((x) => !x.rn && !x.ver && !x.c && !x.gn);
+      return s ? { id: String(s.i) } : null;
+    })()`);
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(fmtPick.id)}; })()`);
+    await sleep(450);
+    await cdp.evaluate(`(() => {
+      const b = document.getElementById('detailToggle');
+      if (b && b.textContent.indexOf('加入') >= 0) b.click();
+    })()`);
+    await sleep(300);
+    await click('#detailFormat [data-fmt="ebook"]');
+    await click('#detailFormat [data-owned]');
+    const fmtSaved = await cdp.evaluate(`(() => {
+      const e = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(fmtPick.id)}] || null;
+      const box = document.getElementById('detailFormat');
+      return {
+        fm: e && e.fm, ow: e && e.ow, mu: e && e.mu,
+        hidden: box.hidden,
+        activeFmt: !!box.querySelector('[data-fmt="ebook"].active'),
+        own: !!box.querySelector('[data-owned].active'),
+      };
+    })()`);
+    check('详情可标记格式与藏书',
+      !!fmtSaved && fmtSaved.fm === 'ebook' && fmtSaved.ow === 1 && fmtSaved.mu > 0 &&
+      fmtSaved.hidden === false && fmtSaved.activeFmt && fmtSaved.own,
+      JSON.stringify(fmtSaved));
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+    await sleep(250);
+    await cdp.evaluate(`(() => { location.hash = 'tab=mine'; })()`);
+    await sleep(400);
+    await cdp.evaluate(`(() => {
+      const s = document.getElementById('fmtFilter');
+      s.value = 'ebook';
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await sleep(400);
+    const fmtFiltered = await cdp.evaluate(`(() => {
+      const map = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      const expected = Object.keys(map).filter((id) => map[id].fm === 'ebook');
+      const cards = [...document.querySelectorAll('.card')].map((c) => c.dataset.id);
+      return { cards: cards, expected: expected };
+    })()`);
+    check('我的阅读可按格式筛选',
+      fmtFiltered.expected.length > 0 && fmtFiltered.cards.length === fmtFiltered.expected.length &&
+      fmtFiltered.cards.every((id) => fmtFiltered.expected.includes(id)),
+      JSON.stringify({ cards: fmtFiltered.cards.length, expected: fmtFiltered.expected.length }));
+    await click('#ownedBtn');
+    await sleep(300);
+    const ownedFiltered = await cdp.evaluate(`(() => {
+      const map = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      const expected = Object.keys(map).filter((id) => map[id].fm === 'ebook' && map[id].ow);
+      const cards = [...document.querySelectorAll('.card')].map((c) => c.dataset.id);
+      return {
+        cards: cards, expected: expected,
+        pressed: document.getElementById('ownedBtn').getAttribute('aria-pressed'),
+      };
+    })()`);
+    check('只看藏书收窄到已标记条目',
+      ownedFiltered.pressed === 'true' && ownedFiltered.cards.length === ownedFiltered.expected.length &&
+      ownedFiltered.cards.every((id) => ownedFiltered.expected.includes(id)),
+      JSON.stringify(ownedFiltered));
+    // 还原筛选，避免影响后续统计与移动端用例
+    await cdp.evaluate(`(() => {
+      const s = document.getElementById('fmtFilter');
+      s.value = 'all';
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('ownedBtn').click();
+    })()`);
+    await sleep(300);
+    await cdp.evaluate(`(() => { location.hash = 'tab=stats'; })()`);
+    await sleep(500);
+    const fmtStats = await cdp.evaluate(`(() => {
+      const panel = document.getElementById('statsPanel');
+      return {
+        text: panel ? panel.textContent : '',
+        cards: document.querySelectorAll('#statsPanel .stat-card').length,
+      };
+    })()`);
+    check('统计页显示藏书与格式',
+      fmtStats.text.includes('藏书与格式') && fmtStats.text.includes('电子') && fmtStats.cards >= 10,
+      `cards=${fmtStats.cards}`);
+    await cdp.evaluate(`(() => { location.hash = 'tab=all'; })()`);
+    await sleep(300);
 
     // ---- 移动端 375×812 ----
     await cdp.send('Emulation.setDeviceMetricsOverride', {

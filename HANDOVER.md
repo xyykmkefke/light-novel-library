@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.19.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、自动化验收 218/218）
+- 当前状态：**v1.20.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -167,7 +167,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 打卡日期 | `yuc_ln_days_v1` |
 | 同步日志 | `yuc_ln_synclog_v1` |
 | 本地纠错 / 别名 | `yuc_ln_meta_v1` |
-| SW 缓存 | `yuc-ln-shell-v43` |
+| SW 缓存 | `yuc-ln-shell-v44` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -183,7 +183,10 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
   r: 0,          // 我的评分 0–10，0 表示未评分
   rv: '',        // 短评，≤140 字
   nt: '',        // 笔记，≤1000 字
-  rvU: 0         // 书评更新时间戳，独立于状态合并
+  rvU: 0,        // 书评更新时间戳，独立于状态合并
+  fm: '',        // 阅读 / 持有格式：paper | ebook | web | audio，空表示未标记
+  ow: 0,         // 藏书标记 0/1
+  mu: 0          // 格式 / 藏书更新时间戳，跨设备按它整体取新
 }
 ```
 
@@ -201,16 +204,17 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 }
 ```
 
-- 导出 / Gist payload（version 3；version 2 客户端会忽略 `meta` 一节，收藏记录仍可互通）：
+- 导出 / Gist payload（version 4；旧版客户端会忽略 `meta` 与格式字段，收藏记录仍可互通）：
 
 ```json
 {
   "app": "yuc-light-novel-list",
-  "version": 3,
+  "version": 4,
   "exportedAt": "2026-11-22T00:00:00.000Z",
   "items": [
     { "id": 499, "status": "done", "vol": 8, "addedAt": 0, "updatedAt": 0, "finishedAt": 0,
-      "rating": 9, "review": "短评", "note": "笔记", "reviewUpdatedAt": 0 }
+      "rating": 9, "review": "短评", "note": "笔记", "reviewUpdatedAt": 0,
+      "format": "ebook", "owned": 1, "formatUpdatedAt": 0 }
   ],
   "deleted": {},
   "meta": { "499": { "au": "本地作者", "al": ["别名"], "clr": [], "u": 0 } }
@@ -787,6 +791,18 @@ PWA / 移动端：
 - 结果：`check-data` 0、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
 - 版本 1.19.0，SW `yuc-ln-shell-v43`。
 
+## 9.44 v1.20.0 格式与藏书（2026-11-25）
+
+- 阅读记录新增 `fm`（paper / ebook / web / audio，空为未标记）、`ow`（藏书 0/1）与 `mu`（格式 / 藏书更新时间）。
+- 详情页收藏后出现「格式」行：纸质 / 电子 / Web / 有声 / 未标记 + 「藏书」切换；修改即写记录、刷新列表与详情。
+- 「我的阅读」新增格式下拉与「只看藏书」，支持 chips 单独移除、hash 与偏好记忆、保存视图；`clearFilters` 一并重置。
+- 合并：格式与藏书整体按 `mu` 取新——旧客户端不带 `formatUpdatedAt` 时不会冲掉本地标记；本地未标记时接受远端标记。
+- payload 升 version 4，新增 `format` / `owned` / `formatUpdatedAt`；CSV 与 Markdown 导出补「格式」「藏书」两列。
+- 统计页新增「藏书与格式」卡片：藏书数 + 四类格式计数与未标记提示。
+- 验收：`test-merge` 新增 4 项（远端写入、本地较新、旧客户端、显式取消），共 28 项；`verify` 新增 4 项（标记、格式筛选、只看藏书、统计卡片），共 222 项。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
+- 版本 1.20.0，SW `yuc-ln-shell-v44`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -802,7 +818,7 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
 4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -812,4 +828,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.19.0 已完成，后续按第 10 节风险与决策、第 9.43 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（218 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.20.0 已完成，后续按第 10 节风险与决策、第 9.44 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

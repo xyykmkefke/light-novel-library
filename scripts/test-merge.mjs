@@ -293,5 +293,46 @@ test('纠错记录清洗日期、别名与清空标记', () => {
   assert(sanitizeMeta({}) === null, '空记录应为 null');
 });
 
+test('远端格式与藏书写入本地', () => {
+  const map = { 1: { s: 'want', t: 100, vol: 0, u: 100, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0, mu: 0 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'want', addedAt: 100, vol: 0, updatedAt: 100,
+      format: 'ebook', owned: 1, formatUpdatedAt: 40 }],
+  }, totalOf);
+  assert(map['1'].fm === 'ebook', `fm=${map['1'].fm}`);
+  assert(map['1'].ow === 1, `ow=${map['1'].ow}`);
+  assert(map['1'].mu === 40, `mu=${map['1'].mu}`);
+});
+
+test('本地较新的格式标记不被旧远端覆盖', () => {
+  const map = { 2: { s: 'doing', t: 100, vol: 1, u: 400, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: 'paper', ow: 1, mu: 400 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 2, status: 'done', addedAt: 100, vol: 5, updatedAt: 300,
+      format: 'audio', owned: 0, formatUpdatedAt: 300 }],
+  }, totalOf);
+  assert(map['2'].s === 'doing', `s=${map['2'].s}`);
+  assert(map['2'].fm === 'paper' && map['2'].ow === 1, `fm=${map['2'].fm} ow=${map['2'].ow}`);
+});
+
+test('旧客户端不带格式字段时不清空本地标记', () => {
+  const map = { 1: { s: 'want', t: 100, vol: 1, u: 100, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: 'web', ow: 1, mu: 700 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'done', addedAt: 100, vol: 10, updatedAt: 900 }],
+  }, totalOf);
+  assert(map['1'].s === 'done', `s=${map['1'].s}`);
+  assert(map['1'].fm === 'web' && map['1'].ow === 1, `fm=${map['1'].fm} ow=${map['1'].ow}`);
+});
+
+test('远端显式取消藏书与格式会同步', () => {
+  const map = { 1: { s: 'want', t: 100, vol: 0, u: 100, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: 'web', ow: 1, mu: 100 } };
+  mergeRemoteState(map, {}, {
+    items: [{ id: 1, status: 'want', addedAt: 100, vol: 0, updatedAt: 100,
+      format: '', owned: 0, formatUpdatedAt: 600 }],
+  }, totalOf);
+  assert(map['1'].fm === '', `fm=${map['1'].fm}`);
+  assert(map['1'].ow === 0, `ow=${map['1'].ow}`);
+  assert(map['1'].mu === 600, `mu=${map['1'].mu}`);
+});
+
 console.log(`\n${passed}/${passed + failed} 通过`);
 process.exit(failed ? 1 : 0);
