@@ -1,12 +1,12 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.15.6 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 206/206）
+- 当前状态：**v1.15.7 完成**（数据、页面、书评、统计、Gist 同步、PWA、自动化验收 206/206）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
 - 模板线上：<https://xyykmkefke.github.io/bangumi-anime-library/>
-- 目标版本：v1.15.6（已达成，功能：子卷索引 ch 拆包，首屏 gzip 191.7→153.5 KB）
+- 目标版本：v1.15.7（已达成，功能：封面 100w/200w/400w 三档，列表与看板优先 100w）
 
 ## 1. 目标与边界
 
@@ -165,7 +165,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 年度目标 | `yuc_ln_goal_v1` |
 | 书评草稿 | `yuc_ln_draft_v1` |
 | 打卡日期 | `yuc_ln_days_v1` |
-| SW 缓存 | `yuc-ln-shell-v38` |
+| SW 缓存 | `yuc-ln-shell-v39` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -722,6 +722,15 @@ PWA / 移动端：
 - 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 206/206。
 - 版本 1.15.6，SW `yuc-ln-shell-v38`。
 
+## 9.39 v1.15.7 封面 100w 档（2026-11-25）
+
+- 实测封面：`r/100` 4.6 KB / `r/200` 15.0 KB / `r/400` 48.7 KB；`r/300` 不存在（返回 400）。
+- `coverSrcset()` 改为三档 `100w / 200w / 400w`；列表（`sizes=64px`）与看板（`56px`）在 1x 屏取 100w，2x 屏取 200w，网格与详情行为不变。
+- 继续阅读、想读队列的小缩略图从 `r/200` 改 `r/100`。
+- 验收：列表 / 看板断言同时校验 `sizes` 与 srcset 含 `100w`，总项数仍 206。
+- 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 206/206。
+- 版本 1.15.7，SW `yuc-ln-shell-v39`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -747,4 +756,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.6 已完成，后续按第 10 节风险与决策、第 9.38 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（206 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.15.7 已完成，后续按第 10 节风险与决策、第 9.39 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（206 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

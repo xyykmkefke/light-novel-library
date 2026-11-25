@@ -869,8 +869,10 @@ async function main() {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
     await sleep(250);
-    const listSizes = await cdp.evaluate(`(() => [...document.querySelectorAll('.grid.list .cover img')].map((i) => i.getAttribute('sizes')))()`);
-    check('列表视图封面使用紧凑 sizes', listSizes.length > 0 && listSizes.every((s) => s === '64px'), listSizes.slice(0, 3).join('|'));
+    const listCovers = await cdp.evaluate(`(() => [...document.querySelectorAll('.grid.list .cover img')].map((i) => ({ sizes: i.getAttribute('sizes'), srcset: i.getAttribute('srcset') || '' })))()`);
+    check('列表视图封面使用紧凑 sizes 与 100w 档',
+      listCovers.length > 0 && listCovers.every((c) => c.sizes === '64px' && c.srcset.includes('100w')),
+      listCovers.slice(0, 3).map((c) => c.sizes).join('|'));
     await cdp.evaluate(`(() => {
       const el = document.getElementById('viewSelect');
       el.value = 'board';
@@ -878,8 +880,10 @@ async function main() {
     })()`);
     await sleep(250);
     check('看板视图显示四列', (await count('.board-col')) === 4);
-    const boardSizes = await cdp.evaluate(`(() => [...document.querySelectorAll('.board-list .cover img')].map((i) => i.getAttribute('sizes')))()`);
-    check('看板视图封面使用紧凑 sizes', boardSizes.length > 0 && boardSizes.every((s) => s === '56px'), boardSizes.slice(0, 3).join('|'));
+    const boardCovers = await cdp.evaluate(`(() => [...document.querySelectorAll('.board-list .cover img')].map((i) => ({ sizes: i.getAttribute('sizes'), srcset: i.getAttribute('srcset') || '' })))()`);
+    check('看板视图封面使用紧凑 sizes 与 100w 档',
+      boardCovers.length > 0 && boardCovers.every((c) => c.sizes === '56px' && c.srcset.includes('100w')),
+      boardCovers.slice(0, 3).map((c) => c.sizes).join('|'));
     await cdp.evaluate(`(() => {
       const el = document.getElementById('viewSelect');
       el.value = 'grid';

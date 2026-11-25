@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.6">
+<meta name="version" content="1.15.7">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2880,7 +2880,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.6</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.7</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4479,10 +4479,12 @@
     }
   }
 
-  // 封面双档 srcset：普通屏取 200 宽小图，高分屏取 400 宽，减少首屏流量
+  // 封面三档 srcset：列表/看板 1x 取 100w，普通网格 200w，高分屏 400w
   function coverSrcset(url) {
     if (!url || url.indexOf('/r/400/') < 0) return '';
-    return escapeHtml(url.replace('/r/400/', '/r/200/')) + ' 200w, ' + escapeHtml(url) + ' 400w';
+    var small = escapeHtml(url.replace('/r/400/', '/r/100/'));
+    var mid = escapeHtml(url.replace('/r/400/', '/r/200/'));
+    return small + ' 100w, ' + mid + ' 200w, ' + escapeHtml(url) + ' 400w';
   }
 
   function cardHtml(x) {
@@ -5161,7 +5163,7 @@
       var title = x.cn || x.n || '未知书目';
       var initial = String(title).replace(/^[\s「『《【(（"'“]+/, '').charAt(0) || '?';
       var pct = total ? Math.round((vol / total) * 100) : 0;
-      var thumb = x.img ? String(x.img).replace('/r/400/', '/r/200/') : '';
+      var thumb = x.img ? String(x.img).replace('/r/400/', '/r/100/') : '';
       return '<article class="cont-card">' +
         '<button class="cont-open" type="button" data-cont="open" data-id="' + id +
           '" aria-label="继续阅读《' + escapeHtml(title) + '》，已读第 ' + vol + ' / ' + total + ' 卷">' +
@@ -5350,7 +5352,7 @@
           var id = escapeHtml(String(x.i));
           var title = x.cn || x.n || '未知书目';
           var initial = String(title).replace(/^[\s「『《【(（"'“]+/, '').charAt(0) || '?';
-          var thumb = x.img ? String(x.img).replace('/r/400/', '/r/200/') : '';
+          var thumb = x.img ? String(x.img).replace('/r/400/', '/r/100/') : '';
           return '<div class="upnext-item">' +
             '<button class="upnext-open" type="button" data-upnext="open" data-id="' + id +
               '" title="查看《' + escapeHtml(title) + '》详情">' +
