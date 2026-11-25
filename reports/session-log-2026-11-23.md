@@ -254,3 +254,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 验收：`test-merge` 新增 3 项（纠错合并、较新优先、字段清洗），共 24 项；`verify` 新增 5 项（纠错面板、保存覆盖、别名搜索、刷新保留、恢复上游），共 218 项。
 - 结果：`check-data` 0、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
 - 版本 1.19.0，SW `yuc-ln-shell-v43`；commit `f745259`。
+
+## 22. v1.20.0 格式与藏书（2026-11-25）
+
+- 阅读记录新增 `fm`（纸质 / 电子 / Web / 有声，空为未标记）、`ow`（藏书）与 `mu`（格式 / 藏书更新时间）。
+- 详情页收藏后出现「格式」行，点选立即写入；「我的阅读」新增格式下拉与「只看藏书」，支持 chips 移除、hash / 偏好记忆与保存视图，清除筛选一并重置。
+- 合并按 `mu` 整体取新：旧客户端不带 `formatUpdatedAt` 不会冲掉本地标记；远端显式取消可同步。`sameRecord` 改为逐字段比较，避免旧记录缺字段被误判为变化。
+- payload 升 version 4，新增 `format` / `owned` / `formatUpdatedAt`；CSV / Markdown 导出补「格式」「藏书」。
+- 统计页新增「藏书与格式」卡片（藏书数 + 四类格式计数 + 未标记）。
+- 验收：`test-merge` 新增 4 项，共 28 项；`verify` 新增 4 项，共 222 项。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
+- 版本 1.20.0，SW `yuc-ln-shell-v44`；commit `3ef895b`。
