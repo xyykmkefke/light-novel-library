@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.23.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
+- 当前状态：**v1.23.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 226/226）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -833,6 +833,32 @@ PWA / 移动端：
 - 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 222/222。
 - 版本 1.23.0，SW `yuc-ln-shell-v47`。
 
+## 9.48 v1.23.1 修复加载期搜索假报「没有找到」（2026-11-26）
+
+**缺陷**：首屏 lite 2026 本、rest 3050 本后台补。补齐前搜索未命中的书直接进 `renderEmptyRecovery()`，输出确定性否定「没有找到」；`loadRest()` 的 `onerror` 只做 `restLoading=null; resolve()`，失败与成功无法区分。
+
+**复核结论（与提交的 BUG 报告有三处出入，已实测确认）**：
+
+1. **不是「就绪后不重绘」**。`ln-rest-ready` 监听器注册在脚本顶层（3649 行附近），早于底部启动逻辑（9466 行附近的 `render()` 与 `loadRest`），事件不会丢；`onload` 里 `render()` 也确实生效。实测 rest 到位后结果自动从 0 变 1。
+2. **报告选的复现用例 `銃×石`（702088）不成立**。该条 `gn:true`（一般小说），默认口径下**全库加载完成后同样搜不到**，属正确行为。
+3. **`rest` 分片 3050 条全部默认隐藏**（788 一般小说 + 2223 子卷 + 79 重复版本，默认可见 0 条）；`lite` 2026 条恰好等于全部默认可见书目。因此「加载期 60.1% 的书搜不到」在**默认口径下不成立**。真实影响面是：打开了「含一般小说 / 显示子卷 / 显示重复版本」、或有已收藏记录落在 rest 分片的用户。
+
+**真实缺陷（确认并修复）**：`rest` 加载失败时静默降级，搜索仍报「没有找到」，页脚也一直停在「正在加载全库…」，用户无法区分「网络挂了」与「书不存在」。
+
+**改动（均在 `index.html`）**：
+
+- 新增 `restFailed` / `restAttempts` 状态；`onerror` 置 `restFailed=true`、`window.__lnRestFailed=true` 并派发 `ln-rest-failed`。
+- 空结果分支在 `state.hideChildren` 之后、`DATA.length` 之前插入 `!fullReady` 分支：失败时「全库数据加载失败 · 当前只搜了首屏 N 本 · 重新加载」，加载中时「全库数据正在加载 · 已加载 N 本，完成后会自动刷新结果」。
+- `onload` 在 `resolve()` 前补 `if (state.q.trim()) render()` 兜底，不依赖事件监听时序。
+- 新增 `ln-rest-failed` 监听与 `#retryRest` 重试入口（空结果区内委托）；重试第 3 次起才带 `?v=` 时间戳——前两次仍走原地址，避免破坏 Service Worker 的缓存优先策略导致离线重试永远失败。
+- `updateDataHint()` 区分失败态，页脚不再无限显示「正在加载」。
+
+**验收**：`scripts/verify.mjs` 新增 4 项（加载中文案、就绪后自动刷新、失败态与重试入口、点重试恢复），并把测试服务加了 `fault.restDelay` / `fault.restFail` 模拟钩子；新测试置于测试序列末尾并先清 SW 缓存，否则缓存优先会让服务端故障模拟失效。结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` **226/226**（连跑两次稳定）。
+
+**复现脚本**（保留备查）：`scripts/repro-rest-503.mjs`（rest 返回 503 的失败场景）。延迟加载与默认口径反证已并入 `verify.mjs` 的 `fault.restDelay` 钩子与对应断言。
+
+- 版本 1.23.1，SW `yuc-ln-shell-v48`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -848,7 +874,7 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226。
 4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -858,4 +884,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.0 已完成，后续按第 10 节风险与决策、第 9.47 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.1 已完成，后续按第 10 节风险与决策、第 9.48 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（226 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.23.0">
+<meta name="version" content="1.23.1">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3147,7 +3147,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.1</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3608,12 +3608,20 @@
   // 剩余核心：子卷、一般小说与重复版本，首屏之后空闲时加载，不阻塞首屏
   var restLoaded = false;
   var restLoading = null;
+  // 加载失败与「未就绪」必须分开：否则失败会被当成「全库没有这本书」
+  var restFailed = false;
+  var restAttempts = 0;
   function loadRest() {
     if (restLoaded) return Promise.resolve();
     if (restLoading) return restLoading;
+    restAttempts += 1;
+    var attempt = restAttempts;
+    restFailed = false;
     restLoading = new Promise(function (resolve) {
       var script = document.createElement('script');
-      script.src = 'data/light-novels-rest.js';
+      // 首次与首次重试都走原地址，让 Service Worker 有机会用缓存兜底（离线也能恢复）；
+      // 第三次起才带时间戳，绕过可能被缓存的坏响应
+      script.src = 'data/light-novels-rest.js' + (attempt > 2 ? '?v=' + Date.now() : '');
       script.onload = function () {
         var list = window.LN_REST || [];
         var chMap = window.LN_CH || {};
@@ -3629,16 +3637,23 @@
           added += 1;
         });
         restLoaded = true;
+        restFailed = false;
         fullReady = true;
         window.LN_DATA = DATA;
         window.__LN_REST_READY = true;
         window.__LN_REST_COUNT = added;
         window.__FULL_DATA_READY = true;
         document.dispatchEvent(new CustomEvent('ln-rest-ready'));
+        // 兜底重绘：不依赖事件监听是否已注册，避免已输入的关键词停在旧结果上
+        if (state.q.trim()) render();
         resolve();
       };
       script.onerror = function () {
+        // 失败要留痕：让搜索空结果能说「加载失败」而不是「没有这本书」
+        restFailed = true;
         restLoading = null;
+        window.__lnRestFailed = true;
+        document.dispatchEvent(new CustomEvent('ln-rest-failed'));
         resolve();
       };
       document.head.appendChild(script);
@@ -3658,6 +3673,12 @@
       pendingDetail = null;
       openDetail(id);
     }
+  });
+  // 全库加载失败：立刻把「正在加载」换成可重试的提示，不让用户对着旧文案等下去
+  document.addEventListener('ln-rest-failed', function () {
+    updateDataHint();
+    if (state.tab === 'stats') renderStatsPage();
+    else render();
   });
 
   // 系列子卷索引单独成包：首屏不携带，打开系列详情或一键加入子卷时加载
@@ -6200,6 +6221,11 @@
       } else if (state.hideChildren && !q) {
         emptyEl.innerHTML = '<b>当前条件下没有书目</b>可能是系列子卷被隐藏了，关闭「隐藏系列子卷」再看看' +
           '<br><button class="btn" id="showChildrenBtn" type="button">显示系列子卷</button>';
+      } else if (!fullReady) {
+        // 后台分片还没到位：此时搜不到不等于没有，必须区分「加载中 / 加载失败」两态
+        emptyEl.innerHTML = restFailed
+          ? '<b>全库数据加载失败</b>当前只搜了首屏 ' + DATA.length + ' 本 <button class="btn" id="retryRest" type="button">重新加载</button>'
+          : '<b>全库数据正在加载</b>已加载 ' + DATA.length + ' 本，完成后会自动刷新结果';
       } else if (DATA.length) {
         renderEmptyRecovery();
       } else {
@@ -7520,6 +7546,16 @@
       state.hideChildren = false;
       syncControls();
       loadVolumes().then(render);
+      return;
+    }
+    // 全库加载失败后的重试：重新拉 rest 分片并按当前关键词重绘
+    if (e.target.closest('#retryRest')) {
+      loadRest().then(function () {
+        updateDataHint();
+        render();
+        if (fullReady) toast('全库数据已加载');
+        else toast('仍然加载失败，请检查网络后重试');
+      });
       return;
     }
     if (e.target.closest('#clearMineFilter')) {
@@ -9381,8 +9417,12 @@
       return;
     }
     if (!restLoaded) {
-      el.textContent = '正在加载全库… 已载入 ' + DATA.length + ' 本';
-      el.title = '首屏先加载默认可见书目，剩余书目后台补齐';
+      el.textContent = restFailed
+        ? '全库加载失败，仅首屏 ' + DATA.length + ' 本可用'
+        : '正在加载全库… 已载入 ' + DATA.length + ' 本';
+      el.title = restFailed
+        ? '后台分片未能加载，可在搜索无结果时点击「重新加载」重试'
+        : '首屏先加载默认可见书目，剩余书目后台补齐';
       return;
     }
     var general = DATA.filter(function (x) { return x.gn; }).length;

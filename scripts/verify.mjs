@@ -51,6 +51,9 @@ function findBrowser() {
   return found;
 }
 
+// 测试钩子：模拟 rest 分片慢网与失败，用于验证加载期文案与重试
+const fault = { restDelay: 0, restFail: 0 };
+
 function startServer() {
   const server = http.createServer(async (req, res) => {
     try {
@@ -59,6 +62,15 @@ function startServer() {
       const file = path.join(ROOT, pathname);
       const rel = path.relative(ROOT, file);
       if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('forbidden');
+      if (pathname.includes('light-novels-rest.js')) {
+        if (fault.restFail > 0) {
+          fault.restFail -= 1;
+          res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+          res.end('service unavailable');
+          return;
+        }
+        if (fault.restDelay > 0) await sleep(fault.restDelay);
+      }
       const data = await readFile(file);
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
@@ -2067,6 +2079,104 @@ async function main() {
     await cdp.send('Network.emulateNetworkConditions', {
       offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
     });
+
+    // ---- 全库未就绪：搜索不得假报「没有找到」，就绪后自动刷新 ----
+    // 取一条只在 rest 分片里、且默认隐藏（gn 一般小说）的条目做用例
+    const restOnly = await cdp.evaluate(`(() => {
+      const x = (window.LN_REST || []).find((v) => v.gn && !v.c && !v.ver);
+      return x ? { n: String(x.n) } : null;
+    })()`);
+
+    const readEmpty = () => cdp.evaluate(`(() => {
+      const e = document.getElementById('empty');
+      return { hidden: e.hidden, text: (e.textContent || '').trim(),
+               count: document.getElementById('resultCount').textContent,
+               retry: !!document.getElementById('retryRest') };
+    })()`);
+
+    if (restOnly) {
+      // 清掉 Service Worker 与缓存：否则 data 走缓存优先，服务端的延迟 / 503 根本模拟不到
+      const clearShell = async () => {
+        await cdp.evaluate(`(async () => {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+          return true;
+        })()`);
+      };
+      // 只等首屏就绪，不等全库（全库正是要观察的窗口期）
+      const reloadToLite = async () => {
+        await sendRaw('Page.reload', { ignoreCache: true });
+        for (let i = 0; i < 100; i += 1) {
+          const ok = await cdp.evaluate('window.__LN_LITE_READY === true').catch(() => false);
+          if (ok) return;
+          await sleep(100);
+        }
+      };
+
+      // 场景 1：rest 慢 4 秒，打开「含一般小说」后立刻搜索
+      await clearShell();
+      fault.restDelay = 6000;
+      await reloadToLite();
+      await cdp.evaluate(`(() => {
+        const b = document.getElementById('includeNovelBtn');
+        if (b.getAttribute('aria-pressed') !== 'true') b.click();
+      })()`);
+      await setSearch(restOnly.n);
+      const loadingState = await readEmpty();
+      check('全库未就绪时搜索提示「正在加载」而非「没有找到」',
+        loadingState.hidden === false &&
+        loadingState.text.includes('全库数据正在加载') &&
+        !loadingState.text.includes('没有找到'),
+        JSON.stringify(loadingState.text.slice(0, 40)));
+
+      // 等 rest 到位，验证无需重搜即自动出结果
+      for (let i = 0; i < 80; i += 1) {
+        if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+        await sleep(150);
+      }
+      await sleep(600);
+      const afterReady = await readEmpty();
+      check('全库就绪后按当前关键词自动刷新结果',
+        afterReady.hidden === true && String(afterReady.count) !== '0',
+        JSON.stringify({ hidden: afterReady.hidden, count: afterReady.count }));
+      fault.restDelay = 0;
+
+      // 场景 2：rest 持续返回 503（模拟网络仍不可用），应提示加载失败并可重试
+      await clearShell();
+      fault.restFail = 999;
+      await reloadToLite();
+      await setSearch(restOnly.n);
+      await sleep(400);
+      const failState = await readEmpty();
+      check('全库加载失败时区分「失败」且提供重试入口',
+        failState.hidden === false && failState.text.includes('加载失败') && failState.retry === true,
+        JSON.stringify(failState.text.slice(0, 40)));
+
+      // 网络恢复后点重试，应补齐全库并出结果
+      fault.restFail = 0;
+      await click('#retryRest');
+      for (let i = 0; i < 80; i += 1) {
+        if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+        await sleep(150);
+      }
+      await sleep(600);
+      const retried = await readEmpty();
+      check('点击重试后恢复全库检索',
+        retried.hidden === true && String(retried.count) !== '0',
+        JSON.stringify({ hidden: retried.hidden, count: retried.count }));
+      fault.restFail = 0;
+
+      // 复位：清空搜索与「含一般小说」
+      await cdp.evaluate(`(() => {
+        const b = document.getElementById('includeNovelBtn');
+        if (b.getAttribute('aria-pressed') === 'true') b.click();
+      })()`);
+      await setSearch('');
+      await sleep(200);
+    }
+
   } finally {
     try { ws?.close(); } catch {}
     try { child?.kill(); } catch {}

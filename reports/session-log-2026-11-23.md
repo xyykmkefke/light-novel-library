@@ -295,3 +295,13 @@ git -c http.version=HTTP/1.1 push origin main
 - `clean-series` 增加 `cn-fills` / `volume-fills` 应用；部署排除 19→21。
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 222/222。
 - 版本 1.23.0，SW `yuc-ln-shell-v47`；commit `29080fb`。
+
+## 26. v1.23.1 修复加载期搜索假报「没有找到」（2026-11-26）
+
+- 缺陷：首屏 lite 2026 本、rest 3050 本后台补；补齐前搜索未命中直接进 `renderEmptyRecovery()`，输出「没有找到」。`loadRest().onerror` 静默降级，失败不可辨。
+- 复核推翻报告的三处判断：①`ln-rest-ready` 监听器注册在脚本顶层，早于底部启动 `render()`，事件不丢，`onload` 的 `render()` 本来就生效；②复现用例 `銃×石`(702088) 是 `gn:true` 一般小说，默认口径下全库加载完也搜不到，属正确行为；③rest 3050 条默认可见数为 0，lite 2026 条恰等于全部默认可见，「加载期 60.1% 搜不到」在默认口径下不成立。真实影响限于打开了「含一般小说/子卷/重复版本」或有收藏落在 rest 的用户。
+- 真实缺陷：rest 失败时搜索仍报「没有找到」，页脚一直「正在加载全库…」。
+- 修复：新增 `restFailed`/`restAttempts`；空结果插入 `!fullReady` 分支区分「加载中/失败」；`onload` 补 `if (state.q.trim()) render()` 兜底；新增 `ln-rest-failed` 监听与 `#retryRest` 重试（第 3 次起才带 `?v=`，保住 SW 离线兜底）；`updateDataHint` 区分失败态。
+- verify 新增 4 项 + 测试服务 `fault.restDelay`/`fault.restFail` 钩子；新测试置于序列末尾并先清 SW 缓存。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 226/226（连跑两次）。
+- 版本 1.23.1，SW `yuc-ln-shell-v48`。
