@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.15.7">
+<meta name="version" content="1.16.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -579,6 +579,115 @@
   .detail-progress button:hover:not(:disabled) { border-color: var(--line-strong); }
   .detail-progress button:disabled { opacity: 0.45; cursor: default; }
   .detail-progress .dp-done { margin-left: auto; }
+
+  /* 系列卷清单：逐卷勾选，自动汇总系列进度 */
+  .vol-list {
+    margin-bottom: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    overflow: hidden;
+  }
+
+  .vol-list[hidden] { display: none; }
+
+  .vol-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px;
+    font-size: 13px;
+  }
+
+  .vol-head b { font-weight: 600; }
+  .vol-head .vol-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .vol-head button {
+    margin-left: auto;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+
+  .vol-head button:hover { border-color: var(--line-strong); }
+
+  .vol-bar {
+    height: 3px;
+    margin: 0 11px 9px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+  }
+
+  .vol-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.2s; }
+
+  .vol-rows { max-height: 300px; overflow: auto; }
+
+  .vol-row {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 44px;
+    padding: 7px 11px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .vol-row:hover, .vol-row:focus-visible { background: var(--accent-soft); }
+  .vol-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .vol-check {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    line-height: 20px;
+    text-align: center;
+  }
+
+  .vol-row.done .vol-check { border-color: var(--accent); background: var(--accent); }
+  .vol-row.done .vol-title { color: var(--muted); text-decoration: line-through; }
+  .vol-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .vol-date { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .vol-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border-top: 1px solid var(--line);
+  }
+
+  .vol-actions button {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .vol-actions button:hover:not(:disabled) { border-color: var(--line-strong); }
+  .vol-actions button:disabled { opacity: 0.45; cursor: default; }
+  .vol-actions .vol-tip { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .vol-empty { padding: 11px; color: var(--muted); font-size: 12px; }
 
   .status-opts {
     display: grid;
@@ -2880,7 +2989,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.15.7</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.16.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -2897,6 +3006,7 @@
       <div class="detail-meta" id="detailMeta"></div>
       <div class="status-opts" id="statusOpts" hidden></div>
       <div class="detail-progress" id="detailProgress" role="group" aria-label="阅读进度" hidden></div>
+      <div class="vol-list" id="detailVolumes" hidden></div>
       <div class="review" id="detailReview"></div>
       <div class="similar" id="detailSimilar"></div>
       <div class="modal-actions">
@@ -5895,6 +6005,16 @@
       addChildrenBtn.hidden = true;
     }
 
+    // 卷清单：ch 索引到位后显示逐卷勾选；展开时才加载完整卷目元数据
+    var volBox = $('detailVolumes');
+    if (item.sv && !item.rn) {
+      volBox.hidden = false;
+      volBox.innerHTML = volumeSectionHtml(item);
+    } else {
+      volBox.hidden = true;
+      volBox.innerHTML = '';
+    }
+
     // 我的书评：加入阅读后才可评分与记录；文本仅存本机（云同步时随记录合并）
     var reviewEl = $('detailReview');
     if (!collected) {
@@ -5950,6 +6070,7 @@
     }
     // 切换到另一本书时回到顶部，避免沿用上一本的滚动位置
     var switched = modalId !== id;
+    if (switched) volOpen[String(id)] = false;
     if (modalEl.hidden) lastModalFocus = document.activeElement;
     modalId = id;
     pendingDetail = null;
@@ -5996,6 +6117,154 @@
 
   $('detailPrev').addEventListener('click', function () { shiftDetail(-1); });
   $('detailNext').addEventListener('click', function () { shiftDetail(1); });
+
+  // 系列卷清单：ch 索引 + 卷包元数据；勾选后自动汇总系列进度
+  var volOpen = {};
+
+  function ensureMine(id) {
+    var key = String(id);
+    if (!myMap[key]) {
+      myMap[key] = { s: 'want', t: Date.now(), vol: 0, u: Date.now(), f: 0, r: 0, rv: '', nt: '', rvU: 0 };
+      clearDeleted(key);
+    }
+    return myMap[key];
+  }
+
+  function volumeNumber(item) {
+    if (!item) return null;
+    var s = String(item.cn || item.n || '').trim();
+    var m = s.match(/第\s*(\d{1,3})\s*[卷冊册集话]/) ||
+      s.match(/[(（]\s*(\d{1,3})\s*[)）]\s*$/) ||
+      s.match(/(\d{1,3})\s*[卷冊册集话]\s*$/);
+    if (m) return Number(m[1]);
+    if (/上\s*$/.test(s)) return 1;
+    if (/中\s*$/.test(s)) return 2;
+    if (/下\s*$/.test(s)) return 3;
+    return null;
+  }
+
+  function orderedChildIds(item) {
+    return (item.ch || []).map(String).sort(function (a, b) {
+      var A = byId.get(a);
+      var B = byId.get(b);
+      var na = volumeNumber(A);
+      var nb = volumeNumber(B);
+      if (na != null && nb != null && na !== nb) return na - nb;
+      if (na != null && nb == null) return -1;
+      if (na == null && nb != null) return 1;
+      var da = A && A.d ? String(A.d) : '';
+      var db = B && B.d ? String(B.d) : '';
+      if (da && db && da !== db) return da.localeCompare(db);
+      if (da && !db) return -1;
+      if (!da && db) return 1;
+      return Number(a) - Number(b);
+    });
+  }
+
+  function volumeSectionHtml(item) {
+    var id = String(item.i);
+    var ids = Array.isArray(item.ch) ? item.ch.map(String) : null;
+    if (!ids) {
+      return '<div class="vol-head"><b>卷清单</b><span class="vol-count">加载中…</span></div>';
+    }
+    var ordered = orderedChildIds(item);
+    var done = ordered.filter(function (cid) {
+      return myMap[cid] && myMap[cid].s === 'done';
+    }).length;
+    var total = ordered.length;
+    var open = !!volOpen[id];
+    var pct = total ? Math.round((done / total) * 100) : 0;
+    var html = '<div class="vol-head"><b>卷清单</b><span class="vol-count">已读 ' + done + ' / ' + total + '</span>' +
+      '<button type="button" data-vol-expand aria-expanded="' + open + '">' + (open ? '收起' : '展开') + '</button></div>' +
+      '<div class="vol-bar" aria-hidden="true"><i style="width:' + pct + '%"></i></div>';
+    if (!open) return html;
+    if (!total) return html + '<div class="vol-empty">该系列暂无子卷记录</div>';
+    html += '<div class="vol-rows">' + ordered.map(function (cid) {
+      var c = byId.get(cid);
+      var isDone = !!(myMap[cid] && myMap[cid].s === 'done');
+      var title = c ? (c.cn || c.n || ('卷 ' + cid)) : ('卷 ' + cid);
+      var date = c && c.d ? dateText(c.d) : '—';
+      return '<button type="button" class="vol-row' + (isDone ? ' done' : '') + '" data-vol-toggle="' + cid +
+        '" aria-pressed="' + isDone + '">' +
+        '<span class="vol-check" aria-hidden="true">' + (isDone ? '✓' : '') + '</span>' +
+        '<span class="vol-title">' + escapeHtml(title) + '</span>' +
+        '<span class="vol-date">' + escapeHtml(date) + '</span></button>';
+    }).join('') + '</div>';
+    var allDone = done >= total;
+    html += '<div class="vol-actions"><button type="button" data-vol-next' + (allDone ? ' disabled' : '') + '>' +
+      (allDone ? '已全部读完' : '标记下一卷已读') + '</button>' +
+      '<span class="vol-tip">' + (allDone ? '系列将自动标记读完' : '已读 ' + done + ' / ' + total) + '</span></div>';
+    return html;
+  }
+
+  function syncSeriesFromChildren(seriesId) {
+    var series = byId.get(String(seriesId));
+    if (!series || !Array.isArray(series.ch) || !series.ch.length) return null;
+    var ids = series.ch.map(String);
+    var done = ids.filter(function (cid) {
+      return myMap[cid] && myMap[cid].s === 'done';
+    }).length;
+    var metaTotal = Number(series.v) || ids.length;
+    var entry = myMap[String(seriesId)];
+    if (!entry && done === 0) return { done: done, total: ids.length };
+    if (!entry) {
+      entry = myMap[String(seriesId)] = {
+        s: 'doing', t: Date.now(), vol: 0, u: Date.now(), f: 0, r: 0, rv: '', nt: '', rvU: 0
+      };
+      clearDeleted(String(seriesId));
+    }
+    entry.vol = Math.max(0, Math.min(metaTotal, done));
+    entry.u = Date.now();
+    if (done > 0 && done === ids.length) {
+      entry.s = 'done';
+      if (!entry.f) entry.f = Date.now();
+    } else {
+      entry.f = 0;
+      if (done === 0) {
+        if (entry.s === 'done' || entry.s === 'doing') entry.s = 'want';
+      } else if (entry.s !== 'doing') {
+        entry.s = 'doing';
+      }
+    }
+    return { done: done, total: ids.length, entry: entry };
+  }
+
+  function toggleVolumeRead(childId, seriesId) {
+    var child = byId.get(String(childId));
+    var series = byId.get(String(seriesId));
+    if (!child || !series) return false;
+    var entry = ensureMine(childId);
+    var wasDone = entry.s === 'done';
+    if (wasDone) {
+      entry.s = 'want';
+      entry.f = 0;
+    } else {
+      entry.s = 'done';
+      if (!entry.f) entry.f = Date.now();
+      var total = Number(child.v) || 0;
+      if (total > 0) entry.vol = total;
+    }
+    entry.u = Date.now();
+    markDay();
+    syncSeriesFromChildren(seriesId);
+    saveMine();
+    render();
+    if (modalId) renderDetail(modalId);
+    return !wasDone;
+  }
+
+  function markNextVolume(series) {
+    var next = orderedChildIds(series).filter(function (cid) {
+      return !(myMap[cid] && myMap[cid].s === 'done');
+    })[0];
+    if (!next) return false;
+    toggleVolumeRead(next, series.i);
+    return true;
+  }
+
+  function ensureVolumeMeta() {
+    return Promise.all([loadRest(), loadVolumes(), loadCh()]);
+  }
 
   function setStatus(id, status) {
     var item = byId.get(id);
@@ -7129,6 +7398,31 @@
       renderDetail(modalId);
       toast('已把 ' + added + ' 卷加入想读');
     });
+  });
+
+  // 系列卷清单：展开时补载剩余核心与卷包，勾选后自动同步系列进度
+  $('detailVolumes').addEventListener('click', function (e) {
+    var series = modalId ? byId.get(modalId) : null;
+    if (!series) return;
+    var expand = e.target.closest('[data-vol-expand]');
+    if (expand) {
+      var key = String(series.i);
+      volOpen[key] = !volOpen[key];
+      renderDetail(key);
+      if (volOpen[key]) {
+        ensureVolumeMeta().then(function () {
+          if (modalId === key) renderDetail(key);
+        });
+      }
+      return;
+    }
+    var next = e.target.closest('[data-vol-next]');
+    if (next) {
+      markNextVolume(series);
+      return;
+    }
+    var row = e.target.closest('[data-vol-toggle]');
+    if (row) toggleVolumeRead(row.getAttribute('data-vol-toggle'), series.i);
   });
 
   // 详情内一键进度：局部刷新，避免重建书评输入区丢失未保存草稿

@@ -1519,7 +1519,7 @@ async function main() {
 
     // ---- 系列一键加入全部子卷 ----
     const seriesPick = await cdp.evaluate(`(() => {
-      const s = window.LN_DATA.find((x) => x.sv && Array.isArray(x.ch) && x.ch.length >= 3);
+      const s = window.LN_DATA.find((x) => x.sv && Array.isArray(x.ch) && x.ch.length >= 3 && (!x.v || x.v >= 3));
       return s ? { id: String(s.i), n: s.ch.length } : null;
     })()`);
     const mineBeforeSeries = await cdp.evaluate(`localStorage.getItem('yuc_ln_mine_v1') || '{}'`);
@@ -1543,6 +1543,44 @@ async function main() {
       `${seriesAdded.inMap}/${seriesAdded.total}`);
     check('全部加入后按钮置为已加入',
       seriesAdded.disabled === true && /已加入/.test(seriesAdded.text), seriesAdded.text);
+
+    // ---- 系列卷清单与自动进度 ----
+    const volBox = await cdp.evaluate(`(() => {
+      const b = document.getElementById('detailVolumes');
+      return { hidden: b.hidden, text: b.textContent };
+    })()`);
+    check('系列详情显示卷清单', volBox.hidden === false && /卷清单/.test(volBox.text), volBox.text.slice(0, 40));
+    await cdp.evaluate(`(() => { const b = document.querySelector('[data-vol-expand]'); if (b) b.click(); })()`);
+    for (let i = 0; i < 60; i += 1) {
+      if ((await cdp.evaluate("document.querySelectorAll('.vol-row').length")) > 0) break;
+      await sleep(150);
+    }
+    const volRows = await cdp.evaluate(`(() => ({
+      rows: document.querySelectorAll('.vol-row').length,
+      total: ${JSON.stringify(seriesPick.n)},
+    }))()`);
+    check('卷清单展开并加载卷目', volRows.rows === volRows.total, `${volRows.rows}/${volRows.total}`);
+    await cdp.evaluate(`(() => { const r = document.querySelector('.vol-row'); if (r) r.click(); })()`);
+    await sleep(300);
+    await cdp.evaluate(`(() => { const b = document.querySelector('[data-vol-next]'); if (b) b.click(); })()`);
+    await sleep(300);
+    const expectedVolText = '已读 2 / ' + seriesPick.n;
+    const volProgress = await cdp.evaluate(`(() => {
+      const map = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      const s = map[${JSON.stringify(seriesPick.id)}];
+      const box = document.getElementById('detailVolumes');
+      return {
+        status: s && s.s,
+        vol: s && s.vol,
+        done: document.querySelectorAll('.vol-row.done').length,
+        text: box ? box.textContent : '',
+      };
+    })()`);
+    check('勾选卷与下一卷自动更新系列进度',
+      volProgress.status === 'doing' && volProgress.vol === 2 && volProgress.done === 2 &&
+      volProgress.text.includes(expectedVolText),
+      JSON.stringify(volProgress));
+
     // 还原阅读记录，避免影响后续移动端用例
     await cdp.evaluate(`localStorage.setItem('yuc_ln_mine_v1', ${JSON.stringify(mineBeforeSeries)})`);
     await cdp.send('Page.reload', { ignoreCache: true });
