@@ -31,6 +31,10 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: node scripts/verify.mjs
+      - name: 分片失败三态回归
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node scripts/check-shard-failure.mjs
       - name: 上传失败截图
         if: failure()
         uses: actions/upload-artifact@v4

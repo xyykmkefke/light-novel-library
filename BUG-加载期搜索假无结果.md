@@ -164,4 +164,4 @@ resolve();
 
 **真实缺陷（原报告未准确归因）**：rest 加载失败时静默降级，搜索仍报「没有找到」，页脚永远停在「正在加载全库…」。复现：rest 返回 503 → 打开「含一般小说」→ 搜 rest 独有书 → 显示「没有找到」，无重试入口。
 
-**验证脚本**：`scripts/repro-rest-503.mjs`（失败场景）；延迟加载与默认口径反证已转成 `verify.mjs` 内的 `fault.restDelay` / `fault.restFail` 钩子与 4 项断言，随 CI 长期回归。
+**验证方式**：延迟加载与失败场景已转成 `verify.mjs` 内的 `fault.restDelay` / `fault.restFail` 钩子与 4 项断言，随 CI 长期回归；extra / ch 的同类失败三态见 `scripts/check-shard-failure.mjs`（8 项）。

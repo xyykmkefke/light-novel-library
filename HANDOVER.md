@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.23.1 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 226/226）
+- 当前状态：**v1.23.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 226/226 + 分片失败回归 8/8）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -855,9 +855,36 @@ PWA / 移动端：
 
 **验收**：`scripts/verify.mjs` 新增 4 项（加载中文案、就绪后自动刷新、失败态与重试入口、点重试恢复），并把测试服务加了 `fault.restDelay` / `fault.restFail` 模拟钩子；新测试置于测试序列末尾并先清 SW 缓存，否则缓存优先会让服务端故障模拟失效。结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` **226/226**（连跑两次稳定）。
 
-**复现脚本**（保留备查）：`scripts/repro-rest-503.mjs`（rest 返回 503 的失败场景）。延迟加载与默认口径反证已并入 `verify.mjs` 的 `fault.restDelay` 钩子与对应断言。
+**复现方式**：rest 的慢网与 503 已并入 `verify.mjs` 的 `fault.restDelay` / `fault.restFail` 钩子与 4 项断言；extra / ch 的失败三态见 `scripts/check-shard-failure.mjs`。一次性复现脚本用完即删，不留档。
 
 - 版本 1.23.1，SW `yuc-ln-shell-v48`。
+
+## 9.49 v1.23.2 统一分片加载失败处理（2026-11-26）
+
+**背景**：修完 rest 的静默降级后，回头发现同类缺陷在另外 4 个分片全部存在——`extra` / `volumes` / `rn` / `ch` 的 `script.onerror` 都只有 `xxLoading = null; resolve();`。
+
+**用户可见后果**（以 extra 最严重）：`extra` 承载作者 / 插图 / 出版社 / 书系，失败时详情页这些字段**整行不出现**（不是显示「—」），用户会以为这本书本来就没有作者；`ch` 失败时卷清单只显示「共 N 卷」，看起来像该系列没有分卷。
+
+**改动（均在 `index.html`）**：
+
+- 四个分片统一加「失败标记 + 尝试计数 + 事件」：`extraFailed`/`extraAttempts`、`volumesFailed`/`volumesAttempts`、`rnFailed`/`rnAttempts`、`chFailed`/`chAttempts`，`onerror` 置失败态、写 `window.__lnXxxFailed`、派发 `ln-xxx-failed`。
+- **关键防护——失败后不自动重试**：`renderDetail()` 每次都会调 `loadExtra()` 与 `loadCh()`，若不拦住会形成「失败 → 重绘 → 又请求 → 又失败」的死循环。四个 `loadXxx()` 均改为 `if (xxxFailed && !force) return Promise.resolve();`，只有用户点重试（`force=true`）才再发请求。
+- 详情页：`extraLoaded === false` 时按失败/加载中两态插入提示（`extraNote`），失败态带 `data-retry-extra` 按钮；`!item.rn` 才提示——扩展书目自带 `au`，不需要 extra。
+- 卷清单：`!ids` 分支按 `chLoaded`/`chFailed` 提示「卷清单加载失败，重试」（`data-retry-ch`）。
+- 重试第 3 次起才带 `?v=` 时间戳，前两次走原地址以保留 Service Worker 缓存优先的离线兜底（与 rest 一致）。
+- 新增通用 `.linkbtn` 样式（文字型链接按钮），替代不存在的类名。
+
+**验收**：
+
+- `verify` 226/226（连跑无回归）。
+- 新增 `scripts/check-shard-failure.mjs`（`npm run check-shards`）**8/8**：SW 未接管的断言、extra 失败提示、extra 重试入口、extra 重试后补上作者、ch 失败提示、ch 重试入口、失败后不重复请求、ch 重试后恢复。
+- **为何不并入 verify**：`extra` 与 `ch` 在 `sw.js` 的 SHELL 预缓存列表里，verify 跑到中段 SW 已接管，请求走缓存优先，服务端 503 拦不到，断言会**假通过**（实测先失败 3 项后才发现）。独立脚本改为「服务端不提供 `sw.js`」，确保走真实网络。rest 不在 SHELL 里，所以仍可在 verify 内测。
+- CI 的 `data-check.yml` 增加 `check-shards` 步骤（已带 linux 的 `--no-sandbox` 参数）。
+- `check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）。
+
+**同类缺陷清单（本次已全部收口）**：rest（v1.23.1）、extra、volumes、rn、ch（v1.23.2）。
+
+- 版本 1.23.2，SW `yuc-ln-shell-v49`。
 
 ## 10. 已知风险与决策
 
@@ -874,8 +901,8 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226。
-4. **CI**：commit → push `main`，四项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`）全绿。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226、`check-shards` 8/8。
+4. **CI**：commit → push `main`，五项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
 7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
@@ -884,4 +911,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.1 已完成，后续按第 10 节风险与决策、第 9.48 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（226 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.2 已完成，后续按第 10 节风险与决策、第 9.49 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（226 项）/ `check-shards`（8 项），push/PR 由 CI 自动跑五项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

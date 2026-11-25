@@ -305,3 +305,12 @@ git -c http.version=HTTP/1.1 push origin main
 - verify 新增 4 项 + 测试服务 `fault.restDelay`/`fault.restFail` 钩子；新测试置于序列末尾并先清 SW 缓存。
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 226/226（连跑两次）。
 - 版本 1.23.1，SW `yuc-ln-shell-v48`。
+
+## 27. v1.23.2 统一分片加载失败处理（2026-11-26）
+
+- 修完 rest 后回头排查，发现同类静默降级在 `extra` / `volumes` / `rn` / `ch` 四个分片全部存在（`onerror` 只有 `xxLoading=null; resolve()`）。
+- 用户可见后果：extra 失败时详情页作者/插图/出版社/书系**整行不出现**（不是「—」），看起来像这本书没有作者；ch 失败时卷清单只显示「共 N 卷」，像该系列没有分卷。
+- 修复：四分片统一失败标记 + 尝试计数 + 事件；**关键防护**——`renderDetail()` 每次都会调 `loadExtra()`/`loadCh()`，若不拦住会「失败→重绘→又请求→又失败」死循环，故改为 `if (xxxFailed && !force) return`，只有点重试才继续。详情页与卷清单各加失败提示 + `data-retry-*` 重试按钮；新增通用 `.linkbtn` 样式。
+- 新增 `scripts/check-shard-failure.mjs`（`npm run check-shards`）8/8。**关键踩坑**：extra 与 ch 在 `sw.js` 的 SHELL 预缓存列表里，verify 中 SW 已接管 → 缓存优先 → 服务端 503 拦不到，断言假通过（实测先 FAIL 3 项）。独立脚本改为服务端不提供 `sw.js` 强制走网络；rest 不在 SHELL，故仍可在 verify 内测。CI 增加该步骤（带 linux `--no-sandbox`）。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 226/226、`check-shards` 8/8。
+- 版本 1.23.2，SW `yuc-ln-shell-v49`。

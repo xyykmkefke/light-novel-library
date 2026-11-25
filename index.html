@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.23.1">
+<meta name="version" content="1.23.2">
 <style>
   :root {
     --bg: #0d0f14;
@@ -2278,6 +2278,23 @@
     cursor: pointer;
   }
   .chip button:hover { color: var(--text); }
+  /* 「字段加载失败 · 重试」等文字型链接按钮：不撑高所在容器，跟随字号 */
+  .linkbtn {
+    border: 0;
+    background: transparent;
+    color: var(--pink);
+    font: inherit;
+    padding: 0 2px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .linkbtn:hover { color: var(--text); }
+  .linkbtn:focus-visible {
+    outline: 2px solid var(--pink);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  .linkbtn:disabled { opacity: .55; cursor: default; }
 
   /* 首屏骨架，避免白屏和布局跳动 */
   .skel-card { pointer-events: none; }
@@ -3147,7 +3164,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.1</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.2</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3464,12 +3481,22 @@
   // 详情字段（作者/插图/出版社/书系）单独成包：默认不下载，打开详情、统计、导出或按这些字段搜索时再加载
   var extraLoaded = false;
   var extraLoading = null;
-  function loadExtra() {
+  // 失败与「未加载」必须分开：否则详情页会静默丢字段，用户以为数据本身缺失
+  var extraFailed = false;
+  var extraAttempts = 0;
+  function loadExtra(force) {
     if (extraLoaded) return Promise.resolve();
+    // 已失败时不自动重试：否则「失败 → 重绘 → 又调 loadExtra → 又失败」会成死循环，
+    // 只有用户点「重试」（force=true）才再发一次请求
+    if (extraFailed && !force) return Promise.resolve();
     if (extraLoading) return extraLoading;
+    extraAttempts += 1;
+    var attempt = extraAttempts;
+    extraFailed = false;
     extraLoading = new Promise(function (resolve) {
       var script = document.createElement('script');
-      script.src = 'data/light-novels-extra.js';
+      // 前两次走原地址以复用 Service Worker 缓存（离线可恢复），第三次起带时间戳绕过坏缓存
+      script.src = 'data/light-novels-extra.js' + (attempt > 2 ? '?v=' + Date.now() : '');
       script.onload = function () {
         var extra = window.LN_EXTRA || {};
         DATA.forEach(function (x) {
@@ -3488,12 +3515,17 @@
           if (metaMap[String(x.i)]) applyMetaOverride(x);
         });
         extraLoaded = true;
+        extraFailed = false;
         window.__LN_EXTRA_READY = true;
         document.dispatchEvent(new CustomEvent('ln-extra-ready'));
         resolve();
       };
       script.onerror = function () {
+        // 详情字段拉不到时要留痕：详情页据此提示「字段加载失败」并可重试
+        extraFailed = true;
         extraLoading = null;
+        window.__lnExtraFailed = true;
+        document.dispatchEvent(new CustomEvent('ln-extra-failed'));
         resolve();
       };
       document.head.appendChild(script);
@@ -3507,16 +3539,26 @@
     if (state.tab === 'stats') renderStatsPage();
     else if (state.line || /(作者|出版社|书系)[:：]/.test(state.q || '')) render();
   });
+  // 详情字段加载失败：立刻重绘详情，让用户看到「字段加载失败」而不是空白
+  document.addEventListener('ln-extra-failed', function () {
+    if (modalId) renderDetail(modalId);
+  });
 
   // 系列新卷单独成包：只有展开子卷、打开统计或一键加入全部子卷时才下载
   var volumesLoaded = false;
   var volumesLoading = null;
-  function loadVolumes() {
+  var volumesFailed = false;
+  var volumesAttempts = 0;
+  function loadVolumes(force) {
     if (volumesLoaded) return Promise.resolve();
+    if (volumesFailed && !force) return Promise.resolve();
     if (volumesLoading) return volumesLoading;
+    volumesAttempts += 1;
+    var attempt = volumesAttempts;
+    volumesFailed = false;
     volumesLoading = new Promise(function (resolve) {
       var script = document.createElement('script');
-      script.src = 'data/light-novels-volumes.js';
+      script.src = 'data/light-novels-volumes.js' + (attempt > 2 ? '?v=' + Date.now() : '');
       script.onload = function () {
         var list = window.LN_VOLUMES || [];
         var added = 0;
@@ -3530,14 +3572,19 @@
           added += 1;
         });
         volumesLoaded = true;
+        volumesFailed = false;
         window.LN_DATA = DATA;
         window.__LN_VOLUMES_READY = true;
         window.__LN_VOLUME_COUNT = added;
         document.dispatchEvent(new CustomEvent('ln-volumes-ready'));
+        if (state.q.trim()) render();
         resolve();
       };
       script.onerror = function () {
+        volumesFailed = true;
         volumesLoading = null;
+        window.__lnVolumesFailed = true;
+        document.dispatchEvent(new CustomEvent('ln-volumes-failed'));
         resolve();
       };
       document.head.appendChild(script);
@@ -3559,13 +3606,19 @@
   // RanobeDB 扩展书目：默认不下载，打开「显示扩展书目」后按需加载
   var rnLoaded = false;
   var rnLoading = null;
+  var rnFailed = false;
+  var rnAttempts = 0;
   var RN_META = {};
-  function loadRn() {
+  function loadRn(force) {
     if (rnLoaded) return Promise.resolve();
+    if (rnFailed && !force) return Promise.resolve();
     if (rnLoading) return rnLoading;
+    rnAttempts += 1;
+    var attempt = rnAttempts;
+    rnFailed = false;
     rnLoading = new Promise(function (resolve) {
       var script = document.createElement('script');
-      script.src = 'data/light-novels-rn.js';
+      script.src = 'data/light-novels-rn.js' + (attempt > 2 ? '?v=' + Date.now() : '');
       script.onload = function () {
         var list = window.LN_RN || [];
         RN_META = window.LN_RN_META || {};
@@ -3579,14 +3632,19 @@
           added += 1;
         });
         rnLoaded = true;
+        rnFailed = false;
         window.LN_DATA = DATA;
         window.__LN_RN_READY = true;
         window.__LN_RN_COUNT = added;
         document.dispatchEvent(new CustomEvent('ln-rn-ready'));
+        if (state.q.trim()) render();
         resolve();
       };
       script.onerror = function () {
+        rnFailed = true;
         rnLoading = null;
+        window.__lnRnFailed = true;
+        document.dispatchEvent(new CustomEvent('ln-rn-failed'));
         resolve();
       };
       document.head.appendChild(script);
@@ -3684,12 +3742,19 @@
   // 系列子卷索引单独成包：首屏不携带，打开系列详情或一键加入子卷时加载
   var chLoaded = false;
   var chLoading = null;
-  function loadCh() {
+  var chFailed = false;
+  var chAttempts = 0;
+  function loadCh(force) {
     if (chLoaded) return Promise.resolve();
+    // 失败后不自动重试，避免「重绘 → 又请求 → 又失败」的死循环；只有点重试才继续
+    if (chFailed && !force) return Promise.resolve();
     if (chLoading) return chLoading;
+    chAttempts += 1;
+    var attempt = chAttempts;
+    chFailed = false;
     chLoading = new Promise(function (resolve) {
       var script = document.createElement('script');
-      script.src = 'data/light-novels-ch.js';
+      script.src = 'data/light-novels-ch.js' + (attempt > 2 ? '?v=' + Date.now() : '');
       script.onload = function () {
         var map = window.LN_CH || {};
         DATA.forEach(function (x) {
@@ -3697,12 +3762,16 @@
           if (Array.isArray(list)) x.ch = list;
         });
         chLoaded = true;
+        chFailed = false;
         window.__LN_CH_READY = true;
         document.dispatchEvent(new CustomEvent('ln-ch-ready'));
         resolve();
       };
       script.onerror = function () {
+        chFailed = true;
         chLoading = null;
+        window.__lnChFailed = true;
+        document.dispatchEvent(new CustomEvent('ln-ch-failed'));
         resolve();
       };
       document.head.appendChild(script);
@@ -3711,6 +3780,10 @@
   }
   window.__lnLoadCh = loadCh;
   document.addEventListener('ln-ch-ready', function () {
+    if (modalId) renderDetail(modalId);
+  });
+  // 子卷索引加载失败：详情里的卷清单会缺失，重绘以显示失败提示
+  document.addEventListener('ln-ch-failed', function () {
     if (modalId) renderDetail(modalId);
   });
   var STORAGE_KEY = 'yuc_ln_mine_v1';
@@ -6412,6 +6485,15 @@
     }
     var pubHtml = jumpChip('jump-pub', '出版社', item.pub, '查看该出版社的全部作品');
     var lineHtml = jumpChip('jump-line', '书系', item.line, '查看该文库 / 书系的全部作品');
+    // 详情字段包还没到位（或已失败）：作者 / 插图 / 出版社 / 书系并不在内存里，
+    // 不能默默不显示——否则用户会以为这本书本来就没有作者
+    var extraNote = '';
+    if (!extraLoaded && !item.rn) {
+      extraNote = extraFailed
+        ? '<span class="chip local" title="作者 / 插图 / 出版社 / 书系来自单独的数据包，本次未能加载">' +
+          '字段加载失败 <button class="linkbtn" type="button" data-retry-extra="1">重试</button></span>'
+        : '<span class="chip" title="作者 / 插图 / 出版社 / 书系来自单独的数据包，正在加载">字段加载中…</span>';
+    }
     var jumpHtml = yearOf(item.d)
       ? '<button class="chipjump" type="button" data-jump-year="' + yearOf(item.d) +
         '" title="查看 ' + yearOf(item.d) + ' 年的全部书目">' + yearOf(item.d) + ' 年 ›</button>'
@@ -6426,7 +6508,7 @@
     $('detailMeta').innerHTML = pairs.map(function (p) {
       var label = '<i>' + p[0] + '</i>' + escapeHtml(p[1]);
       return '<span class="chip"' + (p[0] === '进度' ? ' data-chip="progress"' : '') + '>' + label + '</span>';
-    }).join('') + jumpHtml + authorHtml + genreHtml + pubHtml + lineHtml +
+    }).join('') + jumpHtml + authorHtml + genreHtml + pubHtml + lineHtml + extraNote +
       (item.mo ? '<span class="chip local" title="该条目的字段有本地纠错，只存本机"><i>本地</i>已纠错</span>' : '');
     var opts = $('statusOpts');
     opts.hidden = !collected;
@@ -6793,7 +6875,15 @@
     var id = String(item.i);
     var ids = Array.isArray(item.ch) ? item.ch.map(String) : null;
     if (!ids) {
-      return '<div class="vol-head"><b>卷清单</b><span class="vol-count">共 ' + (Number(item.chn) || '…') + ' 卷</span></div>';
+      // 子卷索引是单独的数据包：没到位时不能装成「这个系列没有分卷」
+      var chNote = '';
+      if (!chLoaded) {
+        chNote = chFailed
+          ? ' · <button class="linkbtn" type="button" data-retry-ch="1">卷清单加载失败，重试</button>'
+          : ' · 卷清单加载中…';
+      }
+      return '<div class="vol-head"><b>卷清单</b><span class="vol-count">共 ' +
+        (Number(item.chn) || '…') + ' 卷' + chNote + '</span></div>';
     }
     var ordered = orderedChildIds(item);
     var done = ordered.filter(function (cid) {
@@ -8095,6 +8185,16 @@
   $('detailVolumes').addEventListener('click', function (e) {
     var series = modalId ? byId.get(modalId) : null;
     if (!series) return;
+    // 子卷索引加载失败后的重试
+    var retryCh = e.target.closest('[data-retry-ch]');
+    if (retryCh) {
+      retryCh.disabled = true;
+      loadCh(true).then(function () {
+        if (modalId) renderDetail(modalId);
+        toast(chLoaded ? '卷清单已加载' : '仍然加载失败，请检查网络后重试');
+      });
+      return;
+    }
     var expand = e.target.closest('[data-vol-expand]');
     if (expand) {
       var key = String(series.i);
@@ -8386,6 +8486,16 @@
 
   // 详情内标签跳转：年份 / 题材可一键进入对应全库筛选
   $('detailMeta').addEventListener('click', function (e) {
+    // 详情字段包加载失败后的重试：重新拉取并按当前条目重绘详情
+    var retryExtra = e.target.closest('[data-retry-extra]');
+    if (retryExtra) {
+      retryExtra.disabled = true;
+      loadExtra(true).then(function () {
+        if (modalId) renderDetail(modalId);
+        toast(extraLoaded ? '详情字段已加载' : '仍然加载失败，请检查网络后重试');
+      });
+      return;
+    }
     var yearBtn = e.target.closest('[data-jump-year]');
     if (yearBtn && yearBtn.dataset.jumpYear) {
       jumpToAll({ year: yearBtn.dataset.jumpYear },

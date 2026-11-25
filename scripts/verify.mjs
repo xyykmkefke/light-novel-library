@@ -52,6 +52,8 @@ function findBrowser() {
 }
 
 // 测试钩子：模拟 rest 分片慢网与失败，用于验证加载期文案与重试
+// （extra / ch 的失败三态由 scripts/check-shard-failure.mjs 单独测：它们在 SW 预缓存里，
+//   verify 跑到这里 SW 已接管，缓存优先会绕过服务端故障）
 const fault = { restDelay: 0, restFail: 0 };
 
 function startServer() {
@@ -203,6 +205,27 @@ async function main() {
         const n = await cdp.evaluate("document.querySelectorAll('.card').length").catch(() => 0);
         if (n > 0) return;
         await sleep(150);
+      }
+    };
+
+    // 清掉 Service Worker 与缓存：data 走缓存优先，不清掉则服务端的延迟 / 503 模拟不到
+    const clearShellGlobal = async () => {
+      await cdp.evaluate(`(async () => {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        return true;
+      })()`).catch(() => {});
+    };
+
+    // 只等首屏就绪、不等后续分片（后续分片正是要观察的窗口）
+    const reloadToLiteGlobal = async () => {
+      await sendRaw('Page.reload', { ignoreCache: true });
+      for (let i = 0; i < 100; i += 1) {
+        const ok = await cdp.evaluate('window.__LN_LITE_READY === true').catch(() => false);
+        if (ok) return;
+        await sleep(100);
       }
     };
 
@@ -2095,30 +2118,10 @@ async function main() {
     })()`);
 
     if (restOnly) {
-      // 清掉 Service Worker 与缓存：否则 data 走缓存优先，服务端的延迟 / 503 根本模拟不到
-      const clearShell = async () => {
-        await cdp.evaluate(`(async () => {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map((r) => r.unregister()));
-          const keys = await caches.keys();
-          await Promise.all(keys.map((k) => caches.delete(k)));
-          return true;
-        })()`);
-      };
-      // 只等首屏就绪，不等全库（全库正是要观察的窗口期）
-      const reloadToLite = async () => {
-        await sendRaw('Page.reload', { ignoreCache: true });
-        for (let i = 0; i < 100; i += 1) {
-          const ok = await cdp.evaluate('window.__LN_LITE_READY === true').catch(() => false);
-          if (ok) return;
-          await sleep(100);
-        }
-      };
-
       // 场景 1：rest 慢 4 秒，打开「含一般小说」后立刻搜索
-      await clearShell();
+      await clearShellGlobal();
       fault.restDelay = 6000;
-      await reloadToLite();
+      await reloadToLiteGlobal();
       await cdp.evaluate(`(() => {
         const b = document.getElementById('includeNovelBtn');
         if (b.getAttribute('aria-pressed') !== 'true') b.click();
@@ -2144,9 +2147,9 @@ async function main() {
       fault.restDelay = 0;
 
       // 场景 2：rest 持续返回 503（模拟网络仍不可用），应提示加载失败并可重试
-      await clearShell();
+      await clearShellGlobal();
       fault.restFail = 999;
-      await reloadToLite();
+      await reloadToLiteGlobal();
       await setSearch(restOnly.n);
       await sleep(400);
       const failState = await readEmpty();
@@ -2176,6 +2179,7 @@ async function main() {
       await setSearch('');
       await sleep(200);
     }
+
 
   } finally {
     try { ws?.close(); } catch {}
