@@ -20,6 +20,8 @@ const DEPLOY_EXCLUDES = [
   'data/ranobedb-cn-blocklist.json',
   'data/ranobedb-volume-fixes.json',
   'data/ranobedb-counts.json',
+  'data/volume-fills.json',
+  'data/cn-fills.json',
   '.github',
   '.automation',
   'package.json',

@@ -373,6 +373,12 @@ export async function buildData(records, relations = new Map(), {
   try {
     rnCounts = JSON.parse(await readFile(path.join(ROOT, 'data', 'ranobedb-counts.json'), 'utf8')).counts || {};
   } catch { /* 没有该文件时跳过 */ }
+  // 中文名候选：RanobeDB 繁中标题 + Bangumi 同名回查（fill-bgm-cn.mjs），只填空值
+  let cnFills = {};
+  try {
+    cnFills = JSON.parse(await readFile(path.join(ROOT, 'data', 'cn-fills.json'), 'utf8')).fills || {};
+  } catch { /* 没有该文件时跳过 */ }
+  const cnApplied = { n: 0 };
   const rnApplied = { v: 0, d: 0 };
   const detailFilled = { date: 0, cover: 0, au: 0, pub: 0, line: 0, il: 0 };
   for (const item of records) {
@@ -422,6 +428,24 @@ export async function buildData(records, relations = new Map(), {
       });
     });
   } catch { /* 没有补卷文件时跳过 */ }
+  // 卷包详情补全：发售日与缺失封面（data/volume-fills.json，由 enrich-volume-dates.mjs 生成）
+  const volumeFilled = { d: 0, img: 0 };
+  try {
+    const raw = JSON.parse(await readFile(path.join(ROOT, 'data', 'volume-fills.json'), 'utf8'));
+    const fills = raw.fills || {};
+    volumes.forEach((v) => {
+      const fill = fills[String(v.i)];
+      if (!fill) return;
+      if (!v.d && fill.d) {
+        v.d = fill.d;
+        volumeFilled.d += 1;
+      }
+      if (!v.img && fill.img) {
+        v.img = fill.img;
+        volumeFilled.img += 1;
+      }
+    });
+  } catch { /* 没有卷包补全文件时跳过 */ }
   volumeParentById.forEach((pid, cid) => {
     if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
     const list = childrenByParent.get(pid);
@@ -466,6 +490,12 @@ export async function buildData(records, relations = new Map(), {
         out.d = rnCount.d;
         rnApplied.d += 1;
       }
+    }
+    // 中文名：只补空值，不改用户已有的中文标题
+    const cnFill = cnFills[String(out.i)];
+    if (!out.cn && cnFill && cnFill.cn) {
+      out.cn = cnFill.cn;
+      cnApplied.n += 1;
     }
     const fields = {};
     EXTRA_KEYS.forEach((key) => {
@@ -595,6 +625,8 @@ export async function buildData(records, relations = new Map(), {
     verInherited,
     detailFilled,
     rnApplied,
+    cnApplied,
+    volumeFilled,
     outFile,
     liteFile,
     restFile,
@@ -667,5 +699,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`重复版本继承：作者 ${stats.verInherited.au} / 插图 ${stats.verInherited.il}`);
   console.log(`详情补全：日期 ${stats.detailFilled.date} / 封面 ${stats.detailFilled.cover} / 作者 ${stats.detailFilled.au} / 出版社 ${stats.detailFilled.pub} / 书系 ${stats.detailFilled.line} / 插图 ${stats.detailFilled.il}`);
   if (stats.rnApplied) console.log(`RanobeDB 补全：册数 ${stats.rnApplied.v} / 首发日 ${stats.rnApplied.d}`);
+  if (stats.cnApplied) console.log(`中文名补全：${stats.cnApplied.n} 条`);
+  if (stats.volumeFilled) console.log(`卷包补全：发售日 ${stats.volumeFilled.d} / 封面 ${stats.volumeFilled.img}`);
   console.log(`输出 ${stats.outFile}`);
 }

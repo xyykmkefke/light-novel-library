@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.22.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
+- 当前状态：**v1.23.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -167,7 +167,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 打卡日期 | `yuc_ln_days_v1` |
 | 同步日志 | `yuc_ln_synclog_v1` |
 | 本地纠错 / 别名 | `yuc_ln_meta_v1` |
-| SW 缓存 | `yuc-ln-shell-v46` |
+| SW 缓存 | `yuc-ln-shell-v47` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -824,6 +824,15 @@ PWA / 移动端：
 - 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（19 项排除）、`verify` 222/222。
 - 版本 1.22.0，SW `yuc-ln-shell-v46`。
 
+## 9.47 v1.23.0 卷包日期与中文名试点（2026-11-26）
+
+- 新增 `scripts/enrich-volume-dates.mjs`（`npm run enrich-volumes`）：逐卷查 `/v0/subjects/{id}`，补卷包发售日与缺失封面；3 并发 + 900ms 间隔，缓存复用 `data/build/bgm-subject/`，`checked` 记录已查 ID 可续跑。结果：查询 7693 条，补发售日 7644、封面 2，缺日期 7798→54（49 条上游无数据 / 404）。
+- 新增 `scripts/fill-bgm-cn.mjs`（`npm run fill-cn`）：中文名两条来源——RanobeDB 系列详情的繁中标题（离线、opencc 转简体，命中 0）、Bangumi 搜索同名条目（要求日文原名完全一致且对方有 `name_cn`）。试点 300 条查询命中 20 条，累计候选 23 条，产物 `data/cn-fills.json`；缺中文名 2101→2078。
+- 新增 `scripts/enrich-ndl.mjs`（`npm run enrich-ndl`）：NDL Search OpenSearch 补 ISBN / 文库名 / 首发日，带 curl 代理与 429 退避。**当前网络不可达**：直连与 IPv4 均超时，`iss.ndl.go.jp` 303 跳转到被墙的 `ndlsearch.ndl.go.jp`，本机 7897 代理未运行；脚本已就绪，代理恢复后可直接跑。
+- `clean-series` 新增 `cn-fills` 与 `volume-fills` 应用；部署排除增至 21 项（新增 `data/volume-fills.json`、`data/cn-fills.json`）。
+- 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 222/222。
+- 版本 1.23.0，SW `yuc-ln-shell-v47`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -845,8 +854,8 @@ PWA / 移动端：
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
 7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
 8. **许可**：MIT，署名 Deckard（见 `LICENSE`）。
-9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 19 项排除、13 个运行时文件（6 个数据包）未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
+9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 21 项排除、13 个运行时文件（6 个数据包）未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.22.0 已完成，后续按第 10 节风险与决策、第 9.46 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.0 已完成，后续按第 10 节风险与决策、第 9.47 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
