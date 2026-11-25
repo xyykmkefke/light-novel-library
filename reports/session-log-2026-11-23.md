@@ -243,3 +243,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 结果：`check-data` 0、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
 - 版本 1.18.0，SW `yuc-ln-shell-v42`；远端 commit `a6ce823`（Git HTTPS 被重置，改用 Git Data API 推送并对齐 tree）。
 - CI 四项全绿；Pages `built`；线上版本 1.18.0、SW v42，首页已含同步状态面板。
+
+## 21. v1.19.0 本地纠错与别名（2026-11-25）
+
+- 详情页新增「本地纠错」：可改中文名 / 原名 / 作者 / 插图 / 出版社 / 书系 / 发售日，并补别名（≤8 个，逗号分隔）；日期接受「2019年5月3日」等写法并归一为 `YYYY` / `YYYY-MM` / `YYYY-MM-DD`。
+- 纠错存 `yuc_ln_meta_v1`：只记被修正字段、别名、清空标记与更新时间；详情出现「本地」已纠错标记，可一键「恢复上游」。
+- 覆盖在首屏与 rest / volumes / extra / rn 各数据包写入时套用；详情包后到时先把上游值记进快照再压覆盖，恢复时才回得去。
+- 别名与书名 / 原名 / 作者同档参与搜索与相关度排序。
+- JSON 导出与 Gist payload 升 version 3，新增 `meta` 一节按 `u` 双向合并；同步日志新增「纠错 N 条」。
+- 验收：`test-merge` 新增 3 项（纠错合并、较新优先、字段清洗），共 24 项；`verify` 新增 5 项（纠错面板、保存覆盖、别名搜索、刷新保留、恢复上游），共 218 项。
+- 结果：`check-data` 0、`test-merge` 24/24、`check-deploy` 通过、`verify` 218/218。
+- 版本 1.19.0，SW `yuc-ln-shell-v43`；commit `f745259`。
