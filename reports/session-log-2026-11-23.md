@@ -232,3 +232,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 结果：`check-data` 0、`test-merge` 20/20、`check-deploy` 通过、`verify` 212/212。
 - 版本 1.17.0，SW `yuc-ln-shell-v41`；commit `70a79c8`。
 - CI 四项全绿；Pages `built`；线上版本 1.17.0、SW v41，首页已含「子卷」入口。
+
+## 20. v1.18.0 同步状态面板与合并统计（2026-11-25）
+
+- 同步弹窗新增摘要：连接状态、上次同步时间、待同步改动、最近合并结果与最近 6 条同步记录（本地保留 20 条，键 `yuc_ln_synclog_v1`）。
+- `mergeRemoteState` 增加可选统计对象，记录新增 / 远端较新 / 本地较新 / 同时更新 / 进度合并 / 墓碑删除；既有调用与返回值不变。
+- 同步成功与失败都会写日志；常驻同步状态追加「待同步 N」，`bumpDirty` / `markBackup` 时实时刷新。
+- 日志只存时间、结果与计数，不存书名或书评；Gist payload 协议未变。
+- 验收：`test-merge` 新增 1 项合并统计，共 21 项；`verify` 新增 1 项面板断言，共 213 项。
+- 结果：`check-data` 0、`test-merge` 21/21、`check-deploy` 通过、`verify` 213/213。
+- 版本 1.18.0，SW `yuc-ln-shell-v42`；远端 commit `a6ce823`（Git HTTPS 被重置，改用 Git Data API 推送并对齐 tree）。
+- CI 四项全绿；Pages `built`；线上版本 1.18.0、SW v42，首页已含同步状态面板。
