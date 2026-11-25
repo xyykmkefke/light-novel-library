@@ -1517,6 +1517,29 @@ async function main() {
       (await cdp.evaluate(`(() => !document.querySelector('main').hasAttribute('inert'))()`)) === true);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
 
+    // ---- 系列卡片「子卷」入口 ----
+    const volEntry = await cdp.evaluate(`(() => {
+      const b = document.querySelector('.card [data-act="vols"]');
+      return b ? { id: b.closest('.card').dataset.id } : null;
+    })()`);
+    check('系列卡片显示查看子卷入口', !!volEntry);
+    if (volEntry) {
+      await cdp.evaluate(`(() => { const b = document.querySelector('.card [data-act="vols"]'); if (b) b.click(); })()`);
+      for (let i = 0; i < 40; i += 1) {
+        if (await cdp.evaluate("!!document.querySelector('[data-vol-expand]')")) break;
+        await sleep(150);
+      }
+      const volEntryOpen = await cdp.evaluate(`(() => ({
+        open: !document.getElementById('modal').hidden,
+        expanded: document.querySelector('[data-vol-expand]') ? document.querySelector('[data-vol-expand]').getAttribute('aria-expanded') : '',
+      }))()`);
+      check('卡片子卷入口直接展开卷清单', volEntryOpen.open && volEntryOpen.expanded === 'true', JSON.stringify(volEntryOpen));
+      await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+      await sleep(250);
+      await cdp.evaluate(`(() => { location.hash = ''; })()`);
+      await sleep(200);
+    }
+
     // ---- 系列一键加入全部子卷 ----
     const seriesPick = await cdp.evaluate(`(() => {
       const s = window.LN_DATA.find((x) => x.sv && Array.isArray(x.ch) && x.ch.length >= 3 && (!x.v || x.v >= 3));
@@ -1560,6 +1583,11 @@ async function main() {
       total: ${JSON.stringify(seriesPick.n)},
     }))()`);
     check('卷清单展开并加载卷目', volRows.rows === volRows.total, `${volRows.rows}/${volRows.total}`);
+    const volCover = await cdp.evaluate(`(() => {
+      const img = document.querySelector('.vol-row img');
+      return img ? img.getAttribute('src') : '';
+    })()`);
+    check('卷清单显示封面缩略图', /\/r\/100\//.test(volCover), volCover);
     await cdp.evaluate(`(() => { const r = document.querySelector('.vol-row'); if (r) r.click(); })()`);
     await sleep(300);
     await cdp.evaluate(`(() => { const b = document.querySelector('[data-vol-next]'); if (b) b.click(); })()`);

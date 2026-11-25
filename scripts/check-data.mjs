@@ -145,6 +145,13 @@ data.forEach((x, idx) => {
       });
     }
   }
+  if (x.chn != null) {
+    if (!x.sv || !Number.isInteger(x.chn) || x.chn <= 0) {
+      issues.children.push(`${x.i}:chn 必须是系列的正整数子卷数`);
+    } else if (Array.isArray(x.ch) && x.chn !== x.ch.length) {
+      issues.children.push(`${x.i}:chn=${x.chn} 与 ch=${x.ch.length} 不一致`);
+    }
+  }
   if (x.ver != null) {
     const primary = byIdAll.get(String(x.ver));
     if (!x.sv || !primary || !primary.sv) issues.version.push(`${x.i}:主条目 ${x.ver} 不存在或不是系列`);

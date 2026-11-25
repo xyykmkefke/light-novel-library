@@ -419,6 +419,7 @@ export async function buildData(records, relations = new Map(), {
       else delete out.isbn;
     }
     if (out.sv && childrenByParent.has(String(rest.i))) out.ch = childrenByParent.get(String(rest.i));
+    if (out.sv && Array.isArray(out.ch) && out.ch.length) out.chn = out.ch.length;
     const fields = {};
     EXTRA_KEYS.forEach((key) => {
       if (out[key]) fields[key] = out[key];
