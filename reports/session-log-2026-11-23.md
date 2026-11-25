@@ -275,3 +275,14 @@ git -c http.version=HTTP/1.1 push origin main
 - 修复 `clean-series` 离线重算丢失 gn 修正的问题：抽出 `adjustGeneralFlags`，与在线抓取口径一致，87 条关联轻小说不再被误隐藏。
 - 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222（数据条数断言动态跟随 `LN_META`）。
 - 版本 1.21.0，SW `yuc-ln-shell-v45`；commit `9ddfcda`。
+
+## 24. v1.22.0 数据补全（2026-11-25）
+
+- `enrich-openbd` 扩展：系列首卷 ISBN 也作为查询目标（此前 906 个只有 `fisbn` 的系列从未查过 openBD）。查询 651 个新 ISBN，补书系 307、日文版首发 968、出版社 3。
+- 新增 `enrich-bgm-persons.mjs`：走 Bangumi `/persons`（relation 为中文「插图 / 作者 / 出版社 / 书系」），查询 1223 条缺插图或作者的条目，空数据 330，补插图 126、作者 69、出版社 2、书系 3；缓存可续跑。
+- 新增 `fill-ranobedb-counts.mjs`：离线读 RanobeDB 目录，按日文原名精确匹配 1449 条，补 719 条缺失册数（取 max(RN 卷数, chn)）与 15 条首发日，产物 `data/ranobedb-counts.json` 由 clean-series 应用。
+- 部署排除增至 19 项（新增 `data/ranobedb-counts.json`）；check-deploy 同步。
+- 缺口：作者 101→32、插图 1205→1079、书系 1396→1086、出版社 60→55、日期 113→98、未知册数 3910→3191；日文版首发 2950→3918。
+- 调研未采用：NDL Search（无 key、可 ISBN 反查，但新刊盲区 + 需本机代理，抽样 1/8 有 seriesTitle）、Google Books（匿名 429、要求 key）、RanobeDB release（无 imprint，补不了书系）。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（19 项排除）、`verify` 222/222。
+- 版本 1.22.0，SW `yuc-ln-shell-v46`；commit `1a48339`。
