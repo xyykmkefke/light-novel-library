@@ -65,7 +65,13 @@ const extra = JSON.parse(match[1]);
 const targets = [];
 for (const [id, fields] of Object.entries(extra)) {
   const isbn = toIsbn13(fields.isbn);
-  if (isbn) targets.push({ id, isbn });
+  if (isbn) {
+    targets.push({ id, isbn, kind: 'isbn' });
+    continue;
+  }
+  // 只有系列首卷 ISBN 的条目：用首卷反查文库名 / 出版社 / 首发日
+  const fisbn = toIsbn13(fields.fisbn);
+  if (fisbn) targets.push({ id, isbn: fisbn, kind: 'fisbn' });
 }
 console.log(`待补条目：${targets.length}`);
 
@@ -74,6 +80,7 @@ let queried = 0;
 let found = 0;
 let lineFilled = 0;
 let pubFilled = 0;
+let jdFilled = 0;
 let coverCount = 0;
 
 for (let i = 0; i < targets.length; i += BATCH) {
@@ -110,7 +117,8 @@ for (let i = 0; i < targets.length; i += BATCH) {
     if (!t.data) continue;
     found += 1;
     const fields = extra[t.id];
-    fields.isbn = t.isbn;
+    if (t.kind === 'isbn') fields.isbn = t.isbn;
+    else fields.fisbn = t.isbn;
     if (!fields.line && t.data.line) {
       fields.line = t.data.line;
       lineFilled += 1;
@@ -121,7 +129,10 @@ for (let i = 0; i < targets.length; i += BATCH) {
     }
     if (t.data.d) {
       const jd = normalizeDate(t.data.d);
-      if (jd) fields.jd = jd;
+      if (jd) {
+        if (!fields.jd) jdFilled += 1;
+        fields.jd = jd;
+      }
     }
     if (t.data.img) coverCount += 1;
   }
@@ -130,5 +141,5 @@ for (let i = 0; i < targets.length; i += BATCH) {
 
 const header = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
 await writeFile(EXTRA_FILE, header + `window.LN_EXTRA = ${JSON.stringify(extra)};\n`, 'utf8');
-console.log(`openBD 完成：查询 ${queried} 条，命中 ${found} 条，补书系 ${lineFilled}、出版社 ${pubFilled}，有封面 ${coverCount}`);
+console.log(`openBD 完成：查询 ${queried} 条，命中 ${found} 条，补书系 ${lineFilled}、出版社 ${pubFilled}、日文版首发 ${jdFilled}，有封面 ${coverCount}`);
 console.log(`已写回 ${path.relative(ROOT, EXTRA_FILE)}`);

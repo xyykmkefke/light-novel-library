@@ -368,6 +368,12 @@ export async function buildData(records, relations = new Map(), {
     const raw = JSON.parse(await readFile(path.join(ROOT, 'data', 'bgm-detail-fills.json'), 'utf8'));
     detailFills = raw.fills || {};
   } catch { /* 没有详情补全文件时跳过 */ }
+  // RanobeDB 册数 / 首发日候选：离线同名匹配产物，只填空值
+  let rnCounts = {};
+  try {
+    rnCounts = JSON.parse(await readFile(path.join(ROOT, 'data', 'ranobedb-counts.json'), 'utf8')).counts || {};
+  } catch { /* 没有该文件时跳过 */ }
+  const rnApplied = { v: 0, d: 0 };
   const detailFilled = { date: 0, cover: 0, au: 0, pub: 0, line: 0, il: 0 };
   for (const item of records) {
     const fill = detailFills[String(item.i)];
@@ -449,6 +455,18 @@ export async function buildData(records, relations = new Map(), {
     }
     if (out.sv && childrenByParent.has(String(rest.i))) out.ch = childrenByParent.get(String(rest.i));
     if (out.sv && Array.isArray(out.ch) && out.ch.length) out.chn = out.ch.length;
+    // 补系列册数 / 首发日：册数取 RN 与本地子卷数的较大值，避免提前判定读完
+    const rnCount = rnCounts[String(out.i)];
+    if (rnCount) {
+      if (!Number(out.v) && Number(rnCount.v) > 0) {
+        out.v = Math.max(Number(rnCount.v), Number(out.chn) || 0);
+        rnApplied.v += 1;
+      }
+      if (!out.d && rnCount.d) {
+        out.d = rnCount.d;
+        rnApplied.d += 1;
+      }
+    }
     const fields = {};
     EXTRA_KEYS.forEach((key) => {
       if (out[key]) fields[key] = out[key];
@@ -576,6 +594,7 @@ export async function buildData(records, relations = new Map(), {
     inheritedFromChildren,
     verInherited,
     detailFilled,
+    rnApplied,
     outFile,
     liteFile,
     restFile,
@@ -647,5 +666,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`子卷→系列继承：书系 ${stats.inheritedFromChildren.line} / 插图 ${stats.inheritedFromChildren.il} / 作者 ${stats.inheritedFromChildren.au} / 出版社 ${stats.inheritedFromChildren.pub} / 日期 ${stats.inheritedFromChildren.d} / 封面 ${stats.inheritedFromChildren.img}`);
   console.log(`重复版本继承：作者 ${stats.verInherited.au} / 插图 ${stats.verInherited.il}`);
   console.log(`详情补全：日期 ${stats.detailFilled.date} / 封面 ${stats.detailFilled.cover} / 作者 ${stats.detailFilled.au} / 出版社 ${stats.detailFilled.pub} / 书系 ${stats.detailFilled.line} / 插图 ${stats.detailFilled.il}`);
+  if (stats.rnApplied) console.log(`RanobeDB 补全：册数 ${stats.rnApplied.v} / 首发日 ${stats.rnApplied.d}`);
   console.log(`输出 ${stats.outFile}`);
 }

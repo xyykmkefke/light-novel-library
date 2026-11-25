@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.21.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
+- 当前状态：**v1.22.0 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 222/222）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -167,7 +167,7 @@ UI 对应：筛选栏提供「隐藏系列子卷」开关，默认开启；关�
 | 打卡日期 | `yuc_ln_days_v1` |
 | 同步日志 | `yuc_ln_synclog_v1` |
 | 本地纠错 / 别名 | `yuc_ln_meta_v1` |
-| SW 缓存 | `yuc-ln-shell-v45` |
+| SW 缓存 | `yuc-ln-shell-v46` |
 | Gist 文件名 | `yuc-light-novel-list.json` |
 | Gist payload app | `yuc-light-novel-list` |
 
@@ -814,6 +814,16 @@ PWA / 移动端：
 - 结果：核心 5076、卷包 7817、合计 12893；缺日期 113 / 作者 101 / 出版社 60 / 插图 1205 / 书系 1396 / 封面 2。
 - 版本 1.21.0，SW `yuc-ln-shell-v45`。
 
+## 9.46 v1.22.0 数据补全（2026-11-25）
+
+- `enrich-openbd` 扩展到系列首卷 ISBN：此前只处理 `isbn`，906 个只有 `fisbn` 的系列从未查过 openBD。改为 fisbn 也作为目标后，查询 651 个新 ISBN（批量 100/次），补书系 307、日文版首发 968、出版社 3。
+- 新增 `scripts/enrich-bgm-persons.mjs`（`npm run enrich-persons`）：走 `/v0/subjects/{id}/persons`，relation 为中文「插图 / 作者 / 出版社 / 书系」，无鉴权无分页；查询 1223 条（缺插图或作者），空数据 330，补插图 126、作者 69、出版社 2、书系 3。缓存 `data/build/bgm-persons/`，每 25 条写回，可中断续跑。
+- 新增 `scripts/fill-ranobedb-counts.mjs`（`npm run fill-counts`）：离线读 `data/build/ranobedb-catalog/`，按 `title_orig` 精确同名匹配 1449 条，补 719 条缺失册数与 15 条首发日，产物 `data/ranobedb-counts.json`（已加入部署排除，19 项）。册数取 `max(RN 卷数, chn)`，避免比实际子卷少而提前触发「读完」。
+- 缺口变化：作者 101→32、插图 1205→1079、书系 1396→1086、出版社 60→55、日期 113→98、未知册数 3910→3191；日文版首发 2950→3918。
+- 调研结论（未采用）：NDL Search 无 key 可查、支持 ISBN 反查文库名与近两年新书，但标题检索对新刊有盲区且需本机代理，抽样 ISBN 反查仅 1/8 有 `seriesTitle`；Google Books 匿名配额 429 且官方要求 key；RanobeDB release 缓存无 imprint，补不了书系。
+- 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（19 项排除）、`verify` 222/222。
+- 版本 1.22.0，SW `yuc-ln-shell-v46`。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -835,8 +845,8 @@ PWA / 移动端：
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
 7. **同源隔离**：缓存名与清理范围固定在 `yuc-ln-` 前缀，不触碰番剧 / galgame。
 8. **许可**：MIT，署名 Deckard（见 `LICENSE`）。
-9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 18 项排除、13 个运行时文件（6 个数据包）未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
+9. **部署边界**：`_config.yml` 只发布运行时文件，排除脚本、报告、截图、文档、`package*.json` 与全部构建输入（完整核心、`data/*.json`）；`npm run check-deploy` 校验 19 项排除、13 个运行时文件（6 个数据包）未被误排除、页面/SW 引用齐全。上线后确认 `/scripts/verify.mjs`、`/screenshots/desktop.png`、`/data/light-novels.js` 返回 404，运行时文件返回 200。
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.21.0 已完成，后续按第 10 节风险与决策、第 9.45 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.22.0 已完成，后续按第 10 节风险与决策、第 9.46 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（222 项），push/PR 由 CI 自动跑四项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
