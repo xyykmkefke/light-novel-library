@@ -265,3 +265,13 @@ git -c http.version=HTTP/1.1 push origin main
 - 验收：`test-merge` 新增 4 项，共 28 项；`verify` 新增 4 项，共 222 项。
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222。
 - 版本 1.20.0，SW `yuc-ln-shell-v44`；commit `3ef895b`。
+
+## 23. v1.21.0 数据刷新与 ISBN 补全（2026-11-25）
+
+- `fetch-books.mjs --refresh-pages` 重抓全部分页（约 380 页，保留 rel 缓存）：核心 4851→5076（+231 新增；6 条上游已改标「漫画」按规则移除），轻小说标签 4201 / 小说 3427 去重后一般小说 788；系列 1306→1394，子卷 2160→2223，默认可见 1925→2026。
+- 卷包 7639→7817；子卷索引 1071→1128 个系列 / 9799→10040 条引用。
+- `find-isbn` 查询 285 条缺 ISBN 的日文条目：补 57 个系列首卷 ISBN（850→906），单册无新增；任一 ISBN 覆盖 4217→4396 条（86.6%）。
+- `enrich-detail` 复查 143 条缺字段条目，上游仍为空（0 候选）；修复增量运行会用空结果覆盖既有 `bgm-detail-fills.json` 的问题（先载入旧候选再合并），125 条历史补全得以保留。
+- 修复 `clean-series` 离线重算丢失 gn 修正的问题：抽出 `adjustGeneralFlags`，与在线抓取口径一致，87 条关联轻小说不再被误隐藏。
+- 验收：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 222/222（数据条数断言动态跟随 `LN_META`）。
+- 版本 1.21.0，SW `yuc-ln-shell-v45`；commit `9ddfcda`。
