@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.23.3">
+<meta name="version" content="1.24.0">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.3</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.0</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3575,6 +3575,7 @@
         });
         volumesLoaded = true;
         volumesFailed = false;
+        applyAllIdx();
         window.LN_DATA = DATA;
         window.__LN_VOLUMES_READY = true;
         window.__LN_VOLUME_COUNT = added;
@@ -3640,6 +3641,7 @@
         });
         rnLoaded = true;
         rnFailed = false;
+        applyAllIdx();
         window.LN_DATA = DATA;
         window.__LN_RN_READY = true;
         window.__LN_RN_COUNT = added;
@@ -3709,6 +3711,8 @@
         restLoaded = true;
         restFailed = false;
         fullReady = true;
+        // 后到的 3050 条也要接上已就绪的作者/全拼索引，否则「首屏搜得到、全库搜不到」
+        applyAllIdx();
         window.LN_DATA = DATA;
         window.__LN_REST_READY = true;
         window.__LN_REST_COUNT = added;
@@ -3873,6 +3877,190 @@
   ];
   var GENRE_LABEL = {};
   GENRES.forEach(function (g) { GENRE_LABEL[g.id] = g.label; });
+
+  // ---- 搜索字符归一化 ----
+  // 目标：用户用全角、繁体、大小写混写、拼音全拼或罗马字输入，都能命中同一条记录。
+  // 做法是把「用户输入」和「索引字段」都压成同一种形式再比较，而不是逐个字段写 indexOf。
+  var T2CN = null;
+  (function () {
+    // 繁→简表只有 52KB gzip（反方向 452KB），所以在前端做（繁体输入 → 简体）最划算。
+    // 脚本失败时 T2CN 保持 null，归一化自动退化为「只做全角与大小写」，不影响基本搜索。
+    var s = document.createElement('script');
+    s.src = 'vendor/opencc-t2cn.js';
+    s.async = true;
+    s.onload = function () {
+      try {
+        T2CN = window.OpenCC && window.OpenCC.Converter
+          ? window.OpenCC.Converter({ from: 'tw', to: 'cn' })
+          : null;
+      } catch (e) { T2CN = null; }
+      // 繁体转换就绪后重跑一次当前搜索，避免用户刚输入的繁体查询停在空结果上
+      if (T2CN && state.q.trim()) render();
+    };
+    document.head.appendChild(s);
+  })();
+
+  // 全角转半角 + 大小写折叠 + 繁转简。NFC 先规整组合字符（如「か」+ 浊点）。
+  function normalize(s) {
+    var v = String(s == null ? '' : s);
+    if (!v) return '';
+    if (v.normalize) v = v.normalize('NFC');
+    // 全角 ASCII（Ａ-Ｚ ａ-ｚ ０-９ 空格及标点）统一折半
+    if (/[\uFF01-\uFF5E\u3000]/.test(v)) {
+      v = v.replace(/[\uFF01-\uFF5E\u3000]/g, function (c) {
+        return c === '\u3000' ? ' ' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+      });
+    }
+    v = v.toLowerCase();
+    if (T2CN) {
+      try { v = T2CN(v); } catch (e) { /* 单字符异常不该拖垮搜索 */ }
+    }
+    return v;
+  }
+
+  // 索引侧只做一次归一化的缓存：5076 条 × 若干字段，首次搜索时算一遍即可
+  var normCache = new Map();
+  function normOf(x, key, raw) {
+    var ck = String(x.i) + '\u0000' + key;
+    var hit = normCache.get(ck);
+    if (hit !== undefined) return hit;
+    var v = normalize(raw);
+    normCache.set(ck, v);
+    return v;
+  }
+
+  // 索引包：全拼 / 罗马字 / 作者。三者都不进首屏核心，按需加载。
+  var IDX_SHARDS = {
+    pyf: { url: 'data/light-novels-pyf.js', glob: 'LN_PYF', ready: false, loading: null, failed: false, attempts: 0, field: 'pyFull' },
+    rpy: { url: 'data/light-novels-rpy.js', glob: 'LN_RPY', ready: false, loading: null, failed: false, attempts: 0, field: 'rpyFull' },
+    au: { url: 'data/light-novels-au.js', glob: 'LN_AU', ready: false, loading: null, failed: false, attempts: 0, field: null }
+  };
+
+  // 把已就绪索引包重新铺到当前 DATA 上。
+  // 索引包 58KB、rest 184KB，谁先到不确定：如果只在新包落地那一刻合并，
+  // 后到的条目（rest/rn/volumes）就会永远缺作者与全拼，表现为「这本书搜不到作者」。
+  function applyIdx(name) {
+    var sh = IDX_SHARDS[name];
+    var map = sh && sh.data;
+    if (!map) return;
+    DATA.forEach(function (item) {
+      var pair = map[String(item.i)];
+      if (!pair) return;
+      if (name === 'au') {
+        if (pair[0]) item.au = pair[0];
+        if (pair[1]) item.il = pair[1];
+      } else {
+        item[sh.field] = pair;
+      }
+    });
+    normCache.clear();
+  }
+  function applyAllIdx() {
+    Object.keys(IDX_SHARDS).forEach(function (name) {
+      if (IDX_SHARDS[name].ready) applyIdx(name);
+    });
+  }
+
+  // 加载一个索引包并把数据挂到对应条目上。失败与成功必须可区分：
+  // 作者包没到位时搜作者会「0 条但不报错」，用户会以为库里没有该作者。
+  function loadIdx(name, force) {
+    var sh = IDX_SHARDS[name];
+    if (!sh || sh.ready) return Promise.resolve();
+    if (sh.failed && !force) return Promise.resolve();
+    if (sh.loading) return sh.loading;
+    sh.attempts += 1;
+    var attempt = sh.attempts;
+    sh.failed = false;
+    sh.loading = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = sh.url + (attempt > 2 ? '?v=' + Date.now() : '');
+      script.onload = function () {
+        var raw = window[sh.glob] || {};
+        // 存两份：data 留作「后到条目」补铺，item 上的字段供匹配直接读取
+        sh.data = raw;
+        sh.ready = true;
+        sh.failed = false;
+        sh.loading = null;
+        applyIdx(name);
+        document.dispatchEvent(new CustomEvent('ln-idx-ready', { detail: { name: name } }));
+        resolve();
+      };
+      script.onerror = function () {
+        sh.failed = true;
+        sh.loading = null;
+        document.dispatchEvent(new CustomEvent('ln-idx-failed', { detail: { name: name } }));
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+    return sh.loading;
+  }
+
+  // 搜索框聚焦时预取作者索引（最高频维度），空闲时再取全拼与罗马字
+  function prefetchSearchIndex() {
+    loadIdx('au');
+    var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 1200); };
+    idle(function () {
+      loadIdx('pyf');
+      loadIdx('rpy');
+    });
+  }
+  // 供回归脚本显式驱动索引加载，不必依赖聚焦时序
+  window.__lnLoadIdx = loadIdx;
+  window.__lnIdxState = function () {
+    var out = {};
+    Object.keys(IDX_SHARDS).forEach(function (k) {
+      out[k] = { ready: IDX_SHARDS[k].ready, failed: IDX_SHARDS[k].failed, attempts: IDX_SHARDS[k].attempts };
+    });
+    return out;
+  };
+  window.__lnT2CNReady = function () { return !!T2CN; };
+  // 仅测试用：把某个索引包重置成「未加载」，用来复现「索引还没到位」的时序
+  window.__lnResetIdxForTest = function (name) {
+    var sh = IDX_SHARDS[name];
+    if (!sh) return false;
+    sh.ready = false;
+    sh.failed = false;
+    sh.loading = null;
+    sh.data = null;
+    DATA.forEach(function (item) {
+      if (name === 'au') {
+        if (Object.prototype.hasOwnProperty.call(item, 'au')) delete item.au;
+        if (Object.prototype.hasOwnProperty.call(item, 'il')) delete item.il;
+      } else if (sh.field && Object.prototype.hasOwnProperty.call(item, sh.field)) {
+        delete item[sh.field];
+      }
+    });
+    normCache.clear();
+    return true;
+  };
+  // 仅测试用：在页面内直接调用归一化，断言「繁→简」是否生效
+  window.__lnNormalizeForTest = normalize;
+
+  // 免费查询下还需要哪些索引：名字类查 CJK 要作者包，拼音/罗马字查拉丁字母要全拼与罗马字包。
+  // 只列「既没就绪也没失败」的，失败态要走另一条文案，否则会把失败说成加载中。
+  function pendingIdxFor(q) {
+    var names = [];
+    var latin = /^[a-z0-9]+$/.test(q);
+    if (!latin && !IDX_SHARDS.au.ready && !IDX_SHARDS.au.failed) names.push('au');
+    if (latin) {
+      if (!IDX_SHARDS.pyf.ready && !IDX_SHARDS.pyf.failed) names.push('pyf');
+      if (!IDX_SHARDS.rpy.ready && !IDX_SHARDS.rpy.failed) names.push('rpy');
+    }
+    return names;
+  }
+  // 同理，失败态：相关的索引包里有失败的
+  function failedIdxFor(q) {
+    var names = [];
+    var latin = /^[a-z0-9]+$/.test(q);
+    if (!latin && IDX_SHARDS.au.failed && !IDX_SHARDS.au.ready) names.push('au');
+    if (latin) {
+      if (IDX_SHARDS.pyf.failed && !IDX_SHARDS.pyf.ready) names.push('pyf');
+      if (IDX_SHARDS.rpy.failed && !IDX_SHARDS.rpy.ready) names.push('rpy');
+    }
+    return names;
+  }
+  var IDX_LABEL = { au: '作者', pyf: '全拼', rpy: '罗马字' };
 
   var now = new Date();
   var YEAR_START = parseInt(String(META.minDate || '').slice(0, 4), 10) || 1865;
@@ -4358,20 +4546,22 @@
 
   // 搜索联想：书名前缀 > 原名前缀 > 作者命中 > 书名包含，去重后取前 6 条
   function suggestItems(q) {
-    var needle = q.toLowerCase();
+    // 与主搜索共用同一套归一化：繁体/全角输入也能联想出简体书名
+    var needle = normalize(q);
     var buckets = [[], [], [], []];
     var seen = {};
     for (var i = 0; i < DATA.length; i += 1) {
       var x = DATA[i];
       var title = String(x.cn || x.n || '').trim();
       if (!title) continue;
-      var t = title.toLowerCase();
-      var n = String(x.n || '').toLowerCase();
+      var t = normOf(x, 'cn', x.cn);
+      var n = normOf(x, 'n', x.n);
+      if (!t) t = n;
       var au = String(x.au || '');
       var rank = -1;
       if (t.indexOf(needle) === 0) rank = 0;
       else if (n.indexOf(needle) === 0) rank = 1;
-      else if (au.toLowerCase().indexOf(needle) >= 0) rank = 2;
+      else if (au && normOf(x, 'au', au).indexOf(needle) >= 0) rank = 2;
       else if (t.indexOf(needle) >= 0) rank = 3;
       if (rank < 0) continue;
       var key = title + '|' + au;
@@ -4608,7 +4798,11 @@
     var raw = String(str == null ? '' : str);
     var needle = String(q == null ? '' : q).trim();
     if (!needle) return escapeHtml(raw);
-    var lower = raw.toLowerCase();
+    // 关键词已归一化（简体），原文可能是繁体/全角。只有归一化前后「逐字符等长」时，
+    // 才能拿归一化串上的命中位置去切原文；长度变了就退回原文小写匹配——
+    // 宁可这次不高亮，也不能把 <mark> 套到别的字上。
+    var normRaw = normalize(raw);
+    var lower = normRaw.length === raw.length ? normRaw : raw.toLowerCase();
     var target = needle.toLowerCase();
     var ranges = [];
     var whole = lower.indexOf(target);
@@ -4779,12 +4973,12 @@
 
   // 搜索相关度：0 完全一致 > 1 前缀 > 2 包含，越靠前越优先
   function searchRank(x, q) {
-    var cn = String(x.cn || '').toLowerCase();
-    var n = String(x.n || '').toLowerCase();
-    var en = String(x.en || '').toLowerCase();
-    var py = String(x.py || '');
+    // q 已在调用侧归一化；索引字段同样走 normalize，保证「全角/繁体/大小写」两侧一致
+    var cn = normOf(x, 'cn', x.cn);
+    var n = normOf(x, 'n', x.n);
+    var en = normOf(x, 'en', x.en);
     // 本地别名与中日文名同档参与相关度：完全一致 > 前缀 > 包含
-    var fields = [cn, n, en].concat((x.al || []).map(function (a) { return String(a).toLowerCase(); }));
+    var fields = [cn, n, en].concat((x.al || []).map(function (a) { return normalize(a); }));
     var best = 3;
     fields.forEach(function (f) {
       if (!f) return;
@@ -4792,10 +4986,19 @@
       else if (f.indexOf(q) === 0) best = Math.min(best, 1);
       else if (f.indexOf(q) >= 0) best = Math.min(best, 2);
     });
-    if (py && /^[a-z0-9]+$/.test(q)) {
-      if (py === q) best = Math.min(best, 0);
-      else if (py.indexOf(q) === 0) best = Math.min(best, 1);
-      else if (py.indexOf(q) >= 0) best = Math.min(best, 2);
+    // 拼音：px 是首字母（核心包内），pyFull 是全拼（索引包），两者都参与
+    var px = String(x.py || '');
+    var pyFull = String(x.pyFull || '');
+    if (/^[a-z0-9]+$/.test(q)) {
+      if (px === q || pyFull === q) best = Math.min(best, 0);
+      else if (px.indexOf(q) === 0 || pyFull.indexOf(q) === 0) best = Math.min(best, 1);
+      else if (px.indexOf(q) >= 0 || pyFull.indexOf(q) >= 0) best = Math.min(best, 2);
+      // 罗马字读音比拼音再低一档：用户打罗马字能找到，但不应压过真正的中文命中
+      var rpy = String(x.rpyFull || '');
+      if (rpy && best === 3) {
+        if (rpy.indexOf(q) === 0) best = 1;
+        else if (rpy.indexOf(q) >= 0) best = 2;
+      }
     }
     // 多关键词时整串通常不会命中，退而用首个关键词的匹配档位排序
     var tokens = searchTokens(q).filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
@@ -4806,23 +5009,52 @@
         if (f.indexOf(head) === 0) best = Math.min(best, 1);
         else if (f.indexOf(head) >= 0) best = Math.min(best, 2);
       });
-      if (py && /^[a-z0-9]+$/.test(head) && py.indexOf(head) >= 0) best = Math.min(best, 2);
+      if (/^[a-z0-9]+$/.test(head) &&
+        (px.indexOf(head) >= 0 || pyFull.indexOf(head) >= 0)) best = Math.min(best, 2);
     }
     return best;
   }
 
-  // 单条记录是否命中关键词：中文名 / 原名 / 拼音首字母 / 作者 / 本地别名
-  function matchesQuery(x, token) {
-    var cn = String(x.cn || '').toLowerCase();
-    var n = String(x.n || '').toLowerCase();
-    var en = String(x.en || '').toLowerCase();
-    var py = String(x.py || '');
-    var au = String(x.au || '').toLowerCase();
-    if (cn.indexOf(token) >= 0 || n.indexOf(token) >= 0 || en.indexOf(token) >= 0 ||
-      au.indexOf(token) >= 0 || (/^[a-z0-9]+$/.test(token) && py.indexOf(token) >= 0)) return true;
+  // 紧凑形式：去掉空白与标点，只留字母数字、假名与汉字。
+  // 用户不会严格照抄书名里的「＆」「・」「:」「(1)」，紧凑匹配能把这些写法差异抹平。
+  // 故意不放进主匹配流程：它比严格匹配宽松，只在一本都没搜到时兜底，避免把噪音塞进正常结果。
+  function compactOf(s) {
+    return String(s == null ? '' : s)
+      .replace(/[\s\u3000!-/:-@[-`{-~·・、。，．：；！？「」『』（）【】《》〈〉〜～—–―…＆＃＠]/g, '');
+  }
+
+  // 单条记录是否命中关键词：中文名 / 原名 / 拼音（首字母 + 全拼）/ 罗马字 / 作者 / 本地别名
+  // token 已由调用方 normalize，这里的每个字段也要过同一套归一化
+  function matchesQuery(x, token, loose) {
+    if (!token) return true;
+    if (normOf(x, 'cn', x.cn).indexOf(token) >= 0) return true;
+    if (normOf(x, 'n', x.n).indexOf(token) >= 0) return true;
+    if (normOf(x, 'en', x.en).indexOf(token) >= 0) return true;
+    // 作者与插图来自索引包：未加载时 au 为空，此时不该断言「没有这本书」，
+    // 由 render 的空结果分支提示「作者索引加载中」
+    if (normOf(x, 'au', x.au).indexOf(token) >= 0) return true;
+    if (normOf(x, 'il', x.il).indexOf(token) >= 0) return true;
     var al = x.al || [];
     for (var i = 0; i < al.length; i += 1) {
-      if (String(al[i]).toLowerCase().indexOf(token) >= 0) return true;
+      if (normOf(x, 'al' + i, al[i]).indexOf(token) >= 0) return true;
+    }
+    // 拉丁字母类查询才走拼音/罗马字索引，避免「魔法」这种中文串白跑一遍
+    if (/^[a-z0-9]+$/.test(token)) {
+      if (String(x.py || '').indexOf(token) >= 0) return true;
+      if (String(x.pyFull || '').indexOf(token) >= 0) return true;
+      if (String(x.rpyFull || '').indexOf(token) >= 0) return true;
+    }
+    if (loose) {
+      // 兜底一遍：抹掉标点与空白后再比。注意不能直接调用 normalize 之外的转换，
+      // 否则「Ａ」与「A」这类全角差异会再次出现。
+      var t = compactOf(token);
+      if (t) {
+        if (compactOf(normOf(x, 'cn', x.cn)).indexOf(t) >= 0) return true;
+        if (compactOf(normOf(x, 'n', x.n)).indexOf(t) >= 0) return true;
+        if (compactOf(normOf(x, 'au', x.au)).indexOf(t) >= 0) return true;
+        if (/^[a-z0-9]+$/.test(t) &&
+          (compactOf(x.pyFull).indexOf(t) >= 0 || String(x.rpyFull || '').indexOf(t) >= 0)) return true;
+      }
     }
     return false;
   }
@@ -4882,7 +5114,7 @@
 
   // 高亮与相关度只使用普通关键词，忽略「作者:」等字段语法
   function keywordQuery() {
-    return parseSearchFields(searchTokens(state.q.trim().toLowerCase())).rest.join(' ');
+    return normalize(parseSearchFields(searchTokens(normalize(state.q))).rest.join(' '));
   }
 
   function filteredList() {
@@ -4890,7 +5122,9 @@
     if (state.line) {
       list = list.filter(function (x) { return String(x.line || '').trim() === state.line; });
     }
-    var q = state.q.trim().toLowerCase();
+    // 输入侧统一归一化：全角折半、大小写、繁转简。索引侧由 normOf 做同一套转换，
+    // 这样「这个勇者」（简）能命中库里的「這個勇者」（繁）。
+    var q = normalize(state.q);
     var allTokens = searchTokens(q);
     // 「-词」表示排除：含该词的条目不出现在结果里，可与普通关键词组合
     var normal = allTokens.filter(function (t) { return t.charAt(0) !== '-' || t.length < 2; });
@@ -4899,17 +5133,17 @@
     var excludes = allTokens.filter(function (t) { return t.charAt(0) === '-' && t.length > 1; })
       .map(function (t) { return t.slice(1); });
 
-    // 高级字段与关键词互不干扰，可组合使用
+    // 高级字段与关键词互不干扰，可组合使用（字段值同样归一化）
     parsed.fields.forEach(function (f) {
       if (f.k === '作者') {
-        var au = f.v.toLowerCase();
-        list = list.filter(function (x) { return String(x.au || '').toLowerCase().indexOf(au) >= 0; });
+        var au = normalize(f.v);
+        list = list.filter(function (x) { return normOf(x, 'au', x.au).indexOf(au) >= 0; });
       } else if (f.k === '出版社' || f.k === 'pub') {
-        var pub = f.v.toLowerCase();
-        list = list.filter(function (x) { return String(x.pub || '').toLowerCase().indexOf(pub) >= 0; });
+        var pub = normalize(f.v);
+        list = list.filter(function (x) { return normOf(x, 'pub', x.pub).indexOf(pub) >= 0; });
       } else if (f.k === '书系' || f.k === 'line') {
-        var line = f.v.toLowerCase();
-        list = list.filter(function (x) { return String(x.line || '').toLowerCase().indexOf(line) >= 0; });
+        var line = normalize(f.v);
+        list = list.filter(function (x) { return normOf(x, 'line', x.line).indexOf(line) >= 0; });
       } else if (f.k === '年') {
         list = list.filter(function (x) { return matchYear(x.d, f.v); });
       } else if (f.k === '分') {
@@ -4949,9 +5183,25 @@
 
     if (tokens.length || excludes.length) {
       if (tokens.length) {
-        list = list.filter(function (x) {
+        // 先严格匹配；一本都没有时才放开到「忽略标点与空白」再搜一次。
+        // 只在全局无结果时降级，避免宽松规则把噪音混进本来正常的结果集。
+        var strict = list.filter(function (x) {
           return tokens.every(function (t) { return matchesQuery(x, t); });
         });
+        if (!strict.length) {
+          var loose = list.filter(function (x) {
+            return tokens.every(function (t) { return matchesQuery(x, t, true); });
+          });
+          // 排除词在宽松模式下也要生效，否则会冒出用户明确要排除的书
+          if (loose.length && excludes.length) {
+            loose = loose.filter(function (x) {
+              return !excludes.some(function (t) { return matchesQuery(x, t, true); });
+            });
+          }
+          list = loose;
+        } else {
+          list = strict;
+        }
       }
       if (excludes.length) {
         list = list.filter(function (x) {
@@ -6219,7 +6469,8 @@
       $('statCount').textContent = list.length;
     }
 
-    var q = state.q.trim();
+    // 与 filteredList 用同一份归一化查询：全角「ＧＲＩＤＭＡＮ」也该走拉丁字母那条索引分支
+    var q = normalize(state.q).trim();
     var countText;
     var labelText;
     if (state.tab === 'mine') {
@@ -6307,10 +6558,23 @@
         emptyEl.innerHTML = '<b>当前条件下没有书目</b>可能是系列子卷被隐藏了，关闭「隐藏系列子卷」再看看' +
           '<br><button class="btn" id="showChildrenBtn" type="button">显示系列子卷</button>';
       } else if (!fullReady) {
-        // 后台分片还没到位：此时搜不到不等于没有，必须区分「加载中 / 加载失败」两态
+        // 全库数据本身还没到：这是更根本的原因，优先说它。索引提示排在后面，
+        // 否则「只搜了首屏 2026 本」会被说成「索引正在加载」，掩盖真正的问题。
         emptyEl.innerHTML = restFailed
           ? '<b>全库数据加载失败</b>当前只搜了首屏 ' + DATA.length + ' 本 <button class="btn" id="retryRest" type="button">重新加载</button>'
           : '<b>全库数据正在加载</b>已加载 ' + DATA.length + ' 本，完成后会自动刷新结果';
+      } else if (q && pendingIdxFor(q).length) {
+        // 还有索引包没到位：作者名/全拼/罗马字都不在核心包里，此时「0 条」不等于库里没有。
+        // 直接报「没有找到」会让用户误判库藏，所以主动拉一次并说明在加载。
+        var need = pendingIdxFor(q);
+        need.forEach(function (n) { loadIdx(n); });
+        emptyEl.innerHTML = '<b>正在加载' + need.map(function (n) { return IDX_LABEL[n]; }).join('与') + '索引</b>' +
+          '书名与拼音已搜完，这部分还需要额外索引' +
+          '<button class="btn" id="retryAuIdx" type="button">立即加载</button>';
+      } else if (q && failedIdxFor(q).length) {
+        emptyEl.innerHTML = '<b>' + failedIdxFor(q).map(function (n) { return IDX_LABEL[n]; }).join('与') +
+          '索引加载失败</b>当前只能在已就绪的维度里搜索' +
+          '<button class="btn" id="retryAuIdx" type="button">重试</button>';
       } else if (DATA.length) {
         renderEmptyRecovery();
       } else {
@@ -7693,7 +7957,19 @@
         else toast('仍然加载失败，请检查网络后重试');
       });
       return;
-    }    if (e.target.closest('#clearMineFilter')) {
+    }
+    // 作者索引的重试 / 立即加载：按钮在空结果区，走 emptyEl 委托
+    if (e.target.closest('#retryAuIdx')) {
+      var auBtn = e.target.closest('#retryAuIdx');
+      if (auBtn.disabled) return;
+      auBtn.disabled = true;
+      loadIdx('au', true).then(function () {
+        render();
+        toast(IDX_SHARDS.au.ready ? '作者索引已加载' : '仍然加载失败，请检查网络后重试');
+      });
+      return;
+    }
+    if (e.target.closest('#clearMineFilter')) {
       if (state.q) {
         state.q = '';
         searchEl.value = '';
@@ -7775,6 +8051,17 @@
     }, 140);
   });
 
+  // 索引包到位后按当前关键词重绘：用户可能在索引加载期间就输入了作者名，
+  // 此时结果应该自动补上，而不是停在「正在加载作者索引」
+  document.addEventListener('ln-idx-ready', function () {
+    updateDataHint();
+    if (state.q.trim()) render();
+  });
+  document.addEventListener('ln-idx-failed', function () {
+    // 失败也要重绘，让空结果区显示「作者索引加载失败 · 重试」
+    if (state.q.trim()) render();
+  });
+
   // 提交搜索（回车 / 失焦）时写入历史；Esc 一键清空关键词并恢复列表
   searchEl.addEventListener('keydown', function (e) {
     // 中文输入法组词中的 Enter / Esc 由输入法处理，不触发搜索或清空
@@ -7835,6 +8122,9 @@
     sugIndex = -1;
     sugMuted = false;
     renderHist();
+    // 聚焦即预取搜索索引：作者最高频先取，全拼与罗马字交给空闲回调。
+    // 用户真正开始打字时索引通常已就绪，避免「搜不到人名」的空窗。
+    prefetchSearchIndex();
   });
   searchEl.addEventListener('blur', function () {
     // 延迟隐藏，给「点击历史词」留出时间

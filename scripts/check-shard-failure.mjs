@@ -24,7 +24,7 @@ const BROWSERS = [
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
-const fault = { extraFail: 0, chFail: 0, volumesFail: 0, rnFail: 0 };
+const fault = { extraFail: 0, chFail: 0, volumesFail: 0, rnFail: 0, idxFail: 0, idxDelay: 0 };
 
 function startServer() {
   const server = http.createServer(async (req, res) => {
@@ -60,6 +60,16 @@ function startServer() {
         res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end('service unavailable');
         return;
+      }
+      // 搜索索引包：作者 / 全拼 / 罗马字
+      if (/light-novels-(pyf|rpy|au)\.js/.test(p) && fault.idxFail > 0) {
+        fault.idxFail -= 1;
+        res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end('service unavailable');
+        return;
+      }
+      if (/light-novels-(pyf|rpy|au)\.js/.test(p) && fault.idxDelay > 0) {
+        await sleep(fault.idxDelay);
       }
       const body = await readFile(path.join(ROOT, p));
       res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
@@ -302,6 +312,91 @@ async function main() {
     check('rn 重试后扩展书目进入列表且失败提示消失',
       /扩展书目加载失败/.test(rnOk.text) === false && rnOk.count > 0,
       `新增 ${rnOk.count} 部`);
+
+    // ---- 搜索索引包失败：作者名只存在于此，失败时不能谎报「没有找到」 ----
+    const setSearch = async (q) => {
+      await c.evaluate(`(() => {
+        const el = document.getElementById('search');
+        el.value = ${JSON.stringify(q)};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await sleep(500);
+    };
+
+    // 先测「加载中」：索引包慢 3 秒，此时搜作者名必须说加载中，不能说没有
+    await c.evaluate(`(() => { window.__lnResetIdxForTest('au'); return true; })()`);
+    fault.idxDelay = 3000;
+    await setSearch('zzzz不存在的作者zzzz');
+    const idxPending = await c.evaluate(`(() => {
+      const e = document.getElementById('empty');
+      const t = (e ? e.textContent : '').replace(/\\s+/g, ' ').trim();
+      return { text: t, retry: !!document.getElementById('retryAuIdx'),
+               state: window.__lnIdxState() };
+    })()`);
+    check('索引加载中时提示「正在加载」而非「没有找到」',
+      /正在加载.*索引/.test(idxPending.text) && !/没有找到/.test(idxPending.text),
+      JSON.stringify(idxPending.text.slice(0, 50)));
+    check('索引加载中时提供立即加载入口', idxPending.retry === true);
+    fault.idxDelay = 0;
+
+    // 等这次慢请求落地，再测失败态（否则两个用例会互相干扰）
+    for (let i = 0; i < 60; i += 1) {
+      if (await c.evaluate(`window.__lnIdxState().au.ready === true`).catch(() => false)) break;
+      await sleep(150);
+    }
+
+    // 再测失败：复位后注入 503
+    await c.evaluate(`(() => { window.__lnResetIdxForTest('au'); return true; })()`);
+    fault.idxFail = 999;
+    await setSearch('zzzz不存在的作者zzzz');
+    const idxFail = await c.evaluate(`(() => {
+      const e = document.getElementById('empty');
+      const t = (e ? e.textContent : '').replace(/\\s+/g, ' ').trim();
+      return { text: t, retry: !!document.getElementById('retryAuIdx'),
+               state: window.__lnIdxState() };
+    })()`);
+    check('索引失败时提示「索引加载失败」而非「没有找到」',
+      /索引加载失败/.test(idxFail.text) && !/没有找到/.test(idxFail.text),
+      JSON.stringify(idxFail.text.slice(0, 50)));
+    check('索引失败时提供重试入口', idxFail.retry === true);
+    check('索引失败状态被记录（未与「未加载」混淆）',
+      idxFail.state.au.failed === true && idxFail.state.au.ready === false,
+      JSON.stringify(idxFail.state.au));
+
+    // ---- 索引重试成功 ----
+    fault.idxFail = 0;
+    await c.evaluate(`(() => { const b = document.getElementById('retryAuIdx'); if (b) b.click(); })()`);
+    for (let i = 0; i < 60; i += 1) {
+      if (await c.evaluate(`window.__lnIdxState().au.ready === true`).catch(() => false)) break;
+      await sleep(150);
+    }
+    await sleep(400);
+    const idxOk = await c.evaluate(`(() => {
+      const s = window.__lnIdxState();
+      const withAu = (window.LN_DATA || []).filter((x) => x.au).length;
+      return { ready: s.au.ready, withAu };
+    })()`);
+    check('索引重试后作者包就绪并挂上字段',
+      idxOk.ready === true && idxOk.withAu > 3000, JSON.stringify(idxOk));
+
+    // 作者名恢复可搜：用真实作者名验证「重试后真的能搜到」
+    const realAuthor = await c.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => v.au && !v.c && !v.gn && !v.ver);
+      return x ? String(x.au).split(/[\\/、,，&]/)[0].trim() : '';
+    })()`);
+    await setSearch(realAuthor);
+    const authorHit = await c.evaluate(`(() => ({
+      count: Number(document.getElementById('resultCount').textContent),
+      empty: document.getElementById('empty').hidden,
+    }))()`);
+    check('索引重试后作者名可搜到', authorHit.count > 0,
+      `${realAuthor} → ${authorHit.count} 条`);
+
+    // ---- 索引包不会被重复请求（防死循环） ----
+    const idxBefore = await c.evaluate(`document.querySelectorAll('script[src*="light-novels-au"]').length`);
+    await sleep(1200);
+    const idxAfter = await c.evaluate(`document.querySelectorAll('script[src*="light-novels-au"]').length`);
+    check('索引就绪后不再重复请求', idxBefore === idxAfter, `${idxBefore} → ${idxAfter}`);
   } finally {
     try { ws?.close(); } catch {}
     try { child?.kill(); } catch {}

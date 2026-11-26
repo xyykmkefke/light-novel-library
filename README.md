@@ -2,7 +2,9 @@
 
 本地优先的轻小说浏览与阅读记录 PWA。内置 Bangumi「轻小说」与「小说」标签合并去重后 5076 条核心数据，另从系列关联补入 7817 卷懒加载卷包，合计 12893 条；其中 788 条为仅「小说」标签的一般小说，默认隐藏。另接入 RanobeDB 扩展书目 8487 个系列（≥2 卷，31254 卷），默认隐藏、按需加载。通过 openBD 补入 3490 个单册 ISBN、906 个系列首卷 ISBN、2950 条日文版发售日，并用 RanobeDB 补系列首卷 ISBN 与缺失卷。无账号、无后端。
 
-状态：**v1.23.3 已完成**（数据、页面、书评、统计、云同步、PWA、本地纠错、格式与藏书、自动化验收 226 项 + 分片失败回归 15 项）
+状态：**v1.24.0 已完成**（数据、页面、书评、统计、云同步、PWA、本地纠错、格式与藏书、多语言搜索、自动化验收 236 项 + 分片失败回归 23 项）
+
+v1.24.0：搜索支持多写法与多语言——此前搜索只按字面匹配，实测五类查询全部落空：`ＧＲＩＤＭＡＮ`（全角）→ 0 而 `GRIDMAN` → 1；`这个勇者`（简体）→ 0 而 `這個勇者`（繁体）→ 1；`mofashizhiye`（全拼）→ 0，因为 `py` 只存首字母；`mahou`（罗马字）→ 0；作者名完全不在核心包里，未加载索引时搜人名一律 0 条且无任何提示——这是最糟的一类，用户会以为库里没有这个作者。现在：①查询与索引两侧走同一套归一化（NFC → 全角折半 → 大小写折叠 → 繁转简，后者用 `opencc-js` 的 t2cn 表，52KB gzip，前端运行时转换）；②构建期新增全拼包（4705 条）与罗马字包（4218 条，假名转写含促音双写，`プラスチック` → `purashikku`）；③作者与插图拆成独立小包（5050 条），搜索框聚焦即预取，空闲时再取全拼与罗马字；④索引未就绪时不再谎报「没有找到」，改说「正在加载作者索引」并可立即加载；⑤新增紧凑兜底——用户省略书名里的 `＆` `・` `:` `(1)` 等分隔符时（811 条可见条目属此类），严格匹配 0 条后自动放开到「忽略标点与空白」再搜一次，且不影响本来能搜到的查询。索引包不进 SW 预缓存（避免首次安装多下 152KB），`opencc` 进预缓存保证离线搜索可用。
 
 v1.23.3：补完 v1.23.2 的漏项，分片失败处理真正收口——上一版声称 `volumes` / `rn` 也已收口，实际只加了失败标记，**没有任何 UI 读取**：`ln-volumes-failed` / `ln-rn-failed` 两个事件零监听者。实测后果：卷包失败时，豹头王传说 151 卷全部渲染成「卷 51736 —」这种**裸露 ID 加空日期**，用户会当它就是书名；扩展书目包失败时，开关已高亮成「已开启」但一本书都没多，页脚毫无说明。现在卷清单按「加载中 / 加载失败」两态提示并可重试，一条都解析不出来时不渲染裸 ID；页脚显示「扩展书目加载失败 · 重试」。顺带修掉两处关联缺陷：`updateDataHint()` 的 `!restLoaded` 分支会提前 return 吞掉扩展书目失败提示（首屏阶段点开关完全看不到）；扩展书目重试按钮原先在空结果区的委托里，而按钮渲染在页脚，点击无效。
 
@@ -155,18 +157,35 @@ npm run validate-ranobedb # 生成 RanobeDB 卷目对照报告
 npm run check-data    # 数据校验
 npm run check-deploy  # 部署边界校验（完整核心不得进入 Pages）
 npm run build-pinyin  # 离线重算拼音首字母
+npm run build-index   # 生成全拼 / 罗马字 / 作者搜索索引包
+npm run split-shards  # 拆分分片（lite / rest / ch / 三个索引包）
 npm run test-merge    # 同步合并逻辑单元测试（28 项）
-npm run verify        # 无头浏览器自动化验收（226 项）
-npm run check-shards  # 分片加载失败三态回归（15 项，需禁用 SW 才能模拟故障）
+npm run verify        # 无头浏览器自动化验收（236 项）
+npm run check-shards  # 分片加载失败三态回归（23 项，需禁用 SW 才能模拟故障）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data`、`test-merge`、`check-deploy`、`verify` 与 `check-shards`（Ubuntu 自带 Chrome，失败时上传截图）。
 
-> `check-shards` 不并入 `verify` 是有意的：`extra` 与 `ch` 在 `sw.js` 的 SHELL 预缓存列表里，`verify` 跑到中段 Service Worker 已接管，请求走缓存优先，服务端的 503 根本拦不到，断言会假通过。该脚本改用「服务端不提供 `sw.js`」的方式确保走真实网络。
+> `check-shards` 不并入 `verify` 是有意的：`extra` / `ch` / `opencc` 在 `sw.js` 的 SHELL 预缓存列表里，`au` / `pyf` / `rpy` 一旦成功取到也会被缓存，`verify` 跑到中段 Service Worker 已接管，请求走缓存优先，服务端的 503 根本拦不到，断言会假通过。该脚本改用「服务端不提供 `sw.js`」的方式确保走真实网络。
 
 ## 本地存储
 
-同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`、`yuc_ln_synclog_v1`、`yuc_ln_meta_v1`；Service Worker 缓存名 `yuc-ln-shell-v47`。
+同源部署下所有键均带 `yuc_ln_` 前缀：`yuc_ln_mine_v1`、`yuc_ln_prefs_v1`、`yuc_ln_hist_v1`、`yuc_ln_deleted_v1`、`yuc_ln_settings_v1`、`yuc_ln_gist_v1`、`yuc_ln_backup_v1`、`yuc_ln_dirty_v1`、`yuc_ln_backup_warn_v1`、`yuc_ln_views_v1`、`yuc_ln_goal_v1`、`yuc_ln_draft_v1`、`yuc_ln_days_v1`、`yuc_ln_synclog_v1`、`yuc_ln_meta_v1`；Service Worker 缓存名 `yuc-ln-shell-v51`。
+
+## 搜索支持的写法
+
+查询侧与索引侧走同一套归一化（NFC → 全角折半 → 大小写折叠 → 繁转简），因此下列写法都能命中同一本书：
+
+| 输入 | 命中方式 |
+| --- | --- |
+| `ＧＲＩＤＭＡＮ` / `GRIDMAN` | 全角折半 |
+| `这个勇者` / `這個勇者` | 繁简互通（`opencc-js` t2cn，52KB gzip，运行时转换） |
+| `youjiumonbuxiujian` | 全拼索引包（4705 条） |
+| `tonumadeniritaikoto` | 罗马字索引包（4218 条，假名转写含促音双写） |
+| `道造` | 作者索引包（5050 条，含插图 3997 条） |
+| `メタルプラスチック` | 紧凑兜底：严格匹配 0 条时忽略标点与空白再搜 |
+
+索引包按需加载：搜索框聚焦即取作者包，空闲时再取全拼与罗马字。未就绪时结果区提示「正在加载作者索引」而非「没有找到」；失败时提示「索引加载失败」并可重试。三个索引包不进 SW 预缓存，避免首次安装多下 152KB。
 
 ## 部署
 

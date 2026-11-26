@@ -51,7 +51,7 @@ function findBrowser() {
   return found;
 }
 
-// 测试钩子：模拟 rest 分片慢网与失败，用于验证加载期文案与重试
+// 测试钩子：模拟分片慢网与失败，用于验证加载期文案与重试
 // （extra / ch 的失败三态由 scripts/check-shard-failure.mjs 单独测：它们在 SW 预缓存里，
 //   verify 跑到这里 SW 已接管，缓存优先会绕过服务端故障）
 const fault = { restDelay: 0, restFail: 0 };
@@ -614,6 +614,160 @@ async function main() {
     await setSearch('分:>=8 题材:恋爱');
     check('字段与关键词可组合',
       (await cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`)) > 0);
+    await setSearch('');
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+
+    // ---- 多语言 / 多写法搜索：同一本书无论按哪种写法都要能搜到 ----
+    // 五项能力：全角折半、繁转简、全拼命中、罗马字命中、作者独立索引
+    const normReady = await (async () => {
+      for (let i = 0; i < 60; i += 1) {
+        const ok = await cdp.evaluate('window.__lnT2CNReady && window.__lnT2CNReady()').catch(() => false);
+        if (ok) return true;
+        await sleep(100);
+      }
+      return false;
+    })();
+    check('繁简转换表已就绪', normReady === true, `opencc=${normReady}`);
+
+    // 索引包按需加载：显式驱动，不依赖聚焦时序
+    const idxState = await cdp.evaluate(`(async () => {
+      await Promise.all([window.__lnLoadIdx('au'), window.__lnLoadIdx('pyf'), window.__lnLoadIdx('rpy')]);
+      return window.__lnIdxState();
+    })()`);
+    check('三个搜索索引包均可加载',
+      idxState.au.ready && idxState.pyf.ready && idxState.rpy.ready, JSON.stringify(idxState));
+
+    const resultCountOf = () =>
+      cdp.evaluate(`(() => Number(document.getElementById('resultCount').textContent))()`);
+
+    // 1) 全角输入：ＧＲＩＤＭＡＮ 与 GRIDMAN 结果应一致
+    await setSearch('GRIDMAN');
+    const halfWidth = await resultCountOf();
+    await setSearch('ＧＲＩＤＭＡＮ');
+    const fullWidth = await resultCountOf();
+    check('全角字母可搜到半角书名', halfWidth > 0 && fullWidth === halfWidth,
+      `半角 ${halfWidth} / 全角 ${fullWidth}`);
+
+    // 2) 繁体书名：用简体写法能搜到库里以繁体存储的条目
+    const tradSample = await cdp.evaluate(`(() => {
+      const conv = window.__lnNormalizeForTest;
+      const list = (window.LN_DATA || []).filter((x) => x.cn && !x.c && !x.gn && !x.ver);
+      for (const x of list) {
+        const simple = conv(x.cn);
+        if (simple !== x.cn) return { id: String(x.i), raw: x.cn, simple };
+      }
+      return null;
+    })()`);
+    if (tradSample) {
+      await setSearch(tradSample.simple);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('简体写法可搜到繁体书名', ids.includes(tradSample.id),
+        `${tradSample.simple} → ${ids.length} 条，含目标=${ids.includes(tradSample.id)}`);
+      await setSearch(tradSample.raw);
+      const tradIds = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('繁体写法同样可搜到', tradIds.includes(tradSample.id),
+        `${tradSample.raw} → ${tradIds.length} 条`);
+    } else {
+      check('简体写法可搜到繁体书名', false, '未取到繁体样本');
+    }
+
+    // 3) 全拼：用完整拼音（非首字母）搜到目标
+    const fullPy = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => v.pyFull && v.pyFull.length >= 10 && !v.c && !v.gn && !v.ver);
+      return x ? { id: String(x.i), py: x.pyFull, title: x.cn || x.n } : null;
+    })()`);
+    if (fullPy) {
+      await setSearch(fullPy.py);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('全拼命中目标书名', ids.includes(fullPy.id),
+        `${fullPy.py} → ${ids.length} 条，含目标=${ids.includes(fullPy.id)}`);
+    } else {
+      check('全拼命中目标书名', false, '未取到全拼样本');
+    }
+
+    // 4) 罗马字：假名标题可用罗马字读音搜到
+    const romaji = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => v.rpyFull && v.rpyFull.length >= 10 && !v.c && !v.gn && !v.ver);
+      return x ? { id: String(x.i), rpy: x.rpyFull, title: x.cn || x.n } : null;
+    })()`);
+    if (romaji) {
+      await setSearch(romaji.rpy);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('罗马字读音可搜到日文标题', ids.includes(romaji.id),
+        `${romaji.rpy} → ${ids.length} 条，含目标=${ids.includes(romaji.id)}`);
+    } else {
+      check('罗马字读音可搜到日文标题', false, '未取到罗马字样本');
+    }
+
+    // 5) 作者独立索引：作者名只存在于 au 包，不出现于任何书名
+    const auOnly = await cdp.evaluate(`(() => {
+      const corpus = (window.LN_DATA || []).map((x) => (x.cn || '') + '|' + (x.n || '')).join('\\n');
+      for (const x of window.LN_DATA || []) {
+        const name = String(x.au || '').split(/[\\/、,，&]/)[0].trim();
+        if (!name || name.length < 2) continue;
+        if (!/^[\\u4e00-\\u9fff]+$/.test(name)) continue;
+        if (corpus.includes(name)) continue;
+        return { name, id: String(x.i) };
+      }
+      return null;
+    })()`);
+    if (auOnly) {
+      await setSearch(auOnly.name);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('作者独立索引可搜到', ids.includes(auOnly.id),
+        `${auOnly.name} → ${ids.length} 条，含目标=${ids.includes(auOnly.id)}`);
+    } else {
+      check('作者独立索引可搜到', false, '未取到纯作者名样本');
+    }
+
+    // 7) 写法差异兜底：用户省略书名里的标点/空格时也要能搜到
+    const compactCase = await cdp.evaluate(`(() => {
+      const list = (window.LN_DATA || []).filter((x) => x.n && !x.c && !x.gn && !x.ver);
+      for (const x of list) {
+        // 找一个「原文里含分隔符、去掉后成为纯连续串」的书名
+        const n = String(x.n);
+        const compacted = n.replace(/[\\s!-/:-@\\[-\\\`{-~·・、。，．：；！？「」『』（）【】《》〈〉〜～—–―…＆＃＠]/g, '');
+        if (compacted.length < 6 || compacted === n) continue;
+        // 只有当「严格搜 compacted」确实搜不到时才算有效用例
+        return { id: String(x.i), raw: n, compacted };
+      }
+      return null;
+    })()`);
+    if (compactCase) {
+      // 先确认严格匹配确实为 0（否则这个用例证明不了兜底）
+      const strictHit = await cdp.evaluate(`(() => {
+        const t = ${JSON.stringify(compactCase.compacted)}.toLowerCase();
+        return (window.LN_DATA || []).some((x) => {
+          if (x.c || x.gn || x.ver) return false;
+          return [x.cn, x.n].some((s) => String(s || '').toLowerCase().includes(t));
+        });
+      })()`);
+      await setSearch(compactCase.compacted);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('省略标点/空格也能搜到',
+        ids.includes(compactCase.id),
+        `${compactCase.compacted.slice(0, 20)} → ${ids.length} 条（严格匹配原有=${strictHit}）`);
+    } else {
+      check('省略标点/空格也能搜到', false, '未取到含分隔符样本');
+    }
+
+    // 8) 兜底不得污染正常结果：能严格搜到的查询，结果数不应因为兜底而变多
+    await setSearch('文学少女');
+    const normalCount = await resultCountOf();
+    await setSearch('');
+    const strictExpected = await cdp.evaluate(`(() => (window.LN_DATA || []).filter((x) => {
+      if (x.c || x.gn || x.ver) return false;
+      return [x.cn, x.n].some((s) => String(s || '').includes('文学少女'));
+    }).length)()`);
+    check('严格命中时不启用宽松兜底', normalCount === strictExpected,
+      `页面 ${normalCount} / 严格 ${strictExpected}`);
+
+    await setSearch('');
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+
+    // 6) 索引未就绪 / 加载失败两态：由 scripts/check-shard-failure.mjs 覆盖。
+    //    不能在这里测：verify 跑到这里索引包已被 SW 缓存，重置后 loadIdx 会立刻从缓存返回，
+    //    「加载中」窗口短到抓不住，断言只能测到竞态。失败态更测不了——缓存优先挡掉 503。
     await setSearch('');
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
 

@@ -46,6 +46,10 @@ const RUNTIME_FILES = [
   'data/light-novels-ch.js',
   'data/light-novels-volumes.js',
   'data/light-novels-rn.js',
+  'data/light-novels-pyf.js',
+  'data/light-novels-rpy.js',
+  'data/light-novels-au.js',
+  'vendor/opencc-t2cn.js',
 ];
 
 const problems = [];
@@ -88,7 +92,7 @@ for (const file of RUNTIME_FILES) {
 const index = await read('index.html');
 const sw = await read('sw.js');
 const runtimeRefs = new Set(
-  [...`${index}\n${sw}`.matchAll(/data\/light-novels-[a-z]+\.js/g)].map((m) => m[0]),
+  [...`${index}\n${sw}`.matchAll(/(?:data\/light-novels-[a-z]+\.js|vendor\/[a-z0-9-]+\.js)/g)].map((m) => m[0]),
 );
 
 if (`${index}\n${sw}`.includes(FULL_CORE)) {
