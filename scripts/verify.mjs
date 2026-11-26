@@ -2341,8 +2341,15 @@ async function main() {
         if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
         await sleep(150);
       }
-      await sleep(600);
-      const afterReady = await readEmpty();
+      // 不能只等固定时长：数据就绪到结果区重渲染之间还有一次异步刷新，
+      // 固定 sleep 会随机读到旧状态，表现为「偶发失败」（实测跑 2 次挂 1 次）。
+      // 改为轮询到结果真正出现为止，超时才判失败。
+      let afterReady = await readEmpty();
+      for (let i = 0; i < 40; i += 1) {
+        if (afterReady.hidden === true && String(afterReady.count) !== '0') break;
+        await sleep(150);
+        afterReady = await readEmpty();
+      }
       check('全库就绪后按当前关键词自动刷新结果',
         afterReady.hidden === true && String(afterReady.count) !== '0',
         JSON.stringify({ hidden: afterReady.hidden, count: afterReady.count }));

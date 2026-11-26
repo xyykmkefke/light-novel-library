@@ -89,6 +89,31 @@ function record(name, ok, detail, gapInfo) {
   if (!ok && gapInfo) current.gaps.push(gapInfo);
 }
 
+// 「筛样本再统计」类断言的统一出口。
+//
+// 为什么单独包一层：这类断言写成 `hit === tested` 时，一旦筛选条件把用例全过滤掉，
+// 0 === 0 会一路报通过 —— 而它可能从写下当天起就没执行过。v1.24.1 的长音项就是这么
+// 空跑了几天的（判据 `!/-/.test(rpyFull)`，而 rpyFull 早被清洗成纯字母）。
+// 所以这里强制「用例数为 0 一律 FAIL」，并且不允许调用方绕过。
+//
+// 参数：
+//   label  断言名（不含计数，计数由本函数拼）
+//   r      { tested, hit, miss } 统计对象
+//   empty  用例为 0 时的说明，写清「为什么筛不出样本」，便于判断是数据变了还是判据坏了
+function recordCoverage(label, r, empty) {
+  const { tested, hit, miss } = r || {};
+  if (!tested) {
+    record(`${label}（0/0）`, false, empty || '用例为 0，断言空跑 —— 判据可能已失效', []);
+    return;
+  }
+  record(
+    `${label}（${hit}/${tested}）`,
+    hit === tested,
+    miss && miss.length ? `漏 ${tested - hit} 条` : '全部命中',
+    miss || [],
+  );
+}
+
 const browser = BROWSERS.find((p) => existsSync(p));
 if (!browser) throw new Error('未找到 Edge/Chrome');
 
@@ -171,10 +196,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`简体写法可命中繁体书名（${simplReport.hit}/${simplReport.tested}）`,
-    simplReport.tested > 0 && simplReport.hit === simplReport.tested,
-    simplReport.miss.length ? `漏 ${simplReport.tested - simplReport.hit} 条` : '全部命中',
-    simplReport.miss);
+  recordCoverage('简体写法可命中繁体书名', simplReport,
+    '全库无「含繁体字且 t2cn 确实改动」的用例 —— 繁简表可能未就绪');
 
   // ============ 2. 全角 → 半角 全量 ============
   section('全角折半（全量逐条）');
@@ -197,9 +220,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`半角写法可命中全角书名（${fwReport.hit}/${fwReport.tested}）`,
-    fwReport.hit === fwReport.tested, fwReport.miss.length ? `漏 ${fwReport.tested - fwReport.hit} 条` : '全部命中',
-    fwReport.miss);
+  recordCoverage('半角写法可命中全角书名', fwReport,
+    '全库无含全角 ASCII 的书名 —— 该维度无样本可验');
 
   // 反向：全角查询必须能命中半角书名
   const fwReverse = await c.evaluate(`(() => {
@@ -219,10 +241,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`全角写法可命中半角书名（${fwReverse.hit}/${fwReverse.tested}）`,
-    fwReverse.hit === fwReverse.tested,
-    fwReverse.miss.length ? `漏 ${fwReverse.tested - fwReverse.hit} 条` : '全部命中',
-    fwReverse.miss);
+  recordCoverage('全角写法可命中半角书名', fwReverse,
+    '全库无含半角字母/数字的书名 —— 该维度无样本可验');
 
   // ============ 3. 全拼 全量 ============
   section('全拼命中（全量逐条）');
@@ -240,9 +260,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`全拼查询可命中自身（${pyReport.hit}/${pyReport.tested}）`,
-    pyReport.hit === pyReport.tested, pyReport.miss.length ? `漏 ${pyReport.tested - pyReport.hit} 条` : '全部命中',
-    pyReport.miss);
+  recordCoverage('全拼查询可命中自身', pyReport,
+    '全库无长度 ≥4 的全拼 —— 全拼索引包可能未加载');
 
   // ============ 4. 罗马字 全量 ============
   section('罗马字命中（全量逐条）');
@@ -260,9 +279,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`罗马字查询可命中自身（${rpyReport.hit}/${rpyReport.tested}）`,
-    rpyReport.hit === rpyReport.tested, rpyReport.miss.length ? `漏 ${rpyReport.tested - rpyReport.hit} 条` : '全部命中',
-    rpyReport.miss);
+  recordCoverage('罗马字查询可命中自身', rpyReport,
+    '全库无长度 ≥4 的罗马字 —— 罗马字索引包可能未加载');
 
   // ============ 5. 作者 全量 ============
   section('作者名命中（全量逐条）');
@@ -284,10 +302,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`作者名查询可命中其作品（${auReport.hit}/${auReport.tested}）`,
-    auReport.hit === auReport.tested,
-    auReport.miss.length ? `漏 ${auReport.tested - auReport.hit} 条` : '全部命中',
-    auReport.miss);
+  recordCoverage('作者名查询可命中其作品', auReport,
+    '全库无作者名 —— 作者索引包可能未加载，此时不该判定通过');
 
   // ============ 6. 插图 全量 ============
   section('插图名命中（全量逐条）');
@@ -305,9 +321,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`插图名查询可命中其作品（${ilReport.hit}/${ilReport.tested}）`,
-    ilReport.hit === ilReport.tested, ilReport.miss.length ? `漏 ${ilReport.tested - ilReport.hit} 条` : '全部命中',
-    ilReport.miss);
+  recordCoverage('插图名查询可命中其作品', ilReport,
+    '全库无插图名 —— 作者索引包（含插图）可能未加载');
 
   // ============ 7. 省略标点 全量 ============
   section('省略标点/空格（全量逐条）');
@@ -329,10 +344,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`省略标点后仍可命中（${compactReport.hit}/${compactReport.tested}）`,
-    compactReport.hit === compactReport.tested,
-    compactReport.miss.length ? `漏 ${compactReport.tested - compactReport.hit} 条` : '全部命中',
-    compactReport.miss);
+  recordCoverage('省略标点后仍可命中', compactReport,
+    '全库无「去掉标点后与原文不同」的书名 —— 该维度无样本可验');
 
   // ============ 8. 大小写 ============
   section('大小写不敏感（全量逐条）');
@@ -351,9 +364,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`大写查询可命中原名（${caseReport.hit}/${caseReport.tested}）`,
-    caseReport.hit === caseReport.tested, caseReport.miss.length ? `漏 ${caseReport.tested - caseReport.hit} 条` : '全部命中',
-    caseReport.miss);
+  recordCoverage('大写查询可命中原名', caseReport,
+    '全库无含小写字母的书名 —— 该维度无样本可验');
 
   // ============ 9. 假名：片假名 ↔ 平假名 ============
   section('平假名 ↔ 片假名（全量逐条）');
@@ -374,10 +386,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`平假名查询可命中片假名书名（${kanaReport.hit}/${kanaReport.tested}）`,
-    kanaReport.hit === kanaReport.tested,
-    kanaReport.miss.length ? `漏 ${kanaReport.tested - kanaReport.hit} 条` : '全部命中',
-    kanaReport.miss);
+  recordCoverage('平假名查询可命中片假名书名', kanaReport,
+    '全库无含片假名的书名 —— 该维度无样本可验');
 
   // ============ 10. 罗马字长音 ー ============
   // 库内把 ー 直接删掉（コーヒー→kohi、アーク→aku），按赫本式双写元音的用户会打
@@ -405,12 +415,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`长音折叠/展开两种写法都可命中（${choonReport.hit}/${choonReport.tested}）`,
-    choonReport.tested > 0 && choonReport.hit === choonReport.tested,
-    choonReport.tested === 0
-      ? '用例为 0，断言空跑'
-      : (choonReport.miss.length ? `漏 ${choonReport.tested - choonReport.hit} 条` : '全部命中'),
-    choonReport.miss);
+  recordCoverage('长音折叠/展开两种写法都可命中', choonReport,
+    '全库无「折叠后确有变化」的罗马字 —— 长音索引可能未加载');
 
   // ============ 11. 多关键词 AND ============
   section('多关键词交集（抽样）');
@@ -436,10 +442,8 @@ try {
     }
     return { tested, hit, miss };
   })()`);
-  record(`多关键词交集可命中（${multiReport.hit}/${multiReport.tested}）`,
-    multiReport.hit === multiReport.tested,
-    multiReport.miss.length ? `漏 ${multiReport.tested - multiReport.hit} 条` : '全部命中',
-    multiReport.miss);
+  recordCoverage('多关键词交集可命中', multiReport,
+    '全库无「标题≥4字且有作者」的样本 —— 作者索引可能未加载');
 
   // ============ 12. 无关查询必须 0 结果（防误报） ============
   section('无关查询不误报');
