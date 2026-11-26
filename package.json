@@ -23,6 +23,7 @@
     "check-deploy": "node scripts/check-deploy.mjs",
     "test-merge": "node scripts/test-merge.mjs",
     "verify": "node scripts/verify.mjs",
+    "audit-search": "node scripts/audit-search-coverage.mjs",
     "enrich-volumes": "node scripts/enrich-volume-dates.mjs",
     "fill-cn": "node scripts/fill-bgm-cn.mjs",
     "enrich-ndl": "node scripts/enrich-ndl.mjs",

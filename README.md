@@ -164,11 +164,14 @@ npm run split-shards  # 拆分分片（lite / rest / ch / 三个索引包）
 npm run test-merge    # 同步合并逻辑单元测试（28 项）
 npm run verify        # 无头浏览器自动化验收（238 项）
 npm run check-shards  # 分片加载失败三态回归（23 项，需禁用 SW 才能模拟故障）
+npm run audit-search  # 搜索覆盖率全量审计（对全库 5076 条逐条验 13 个维度，不抽样）
 ```
 
 `npm run verify` 会在 `screenshots/` 输出桌面与移动端截图。push `main` 或 PR 时 GitHub Actions 自动运行 `check-data`、`test-merge`、`check-deploy`、`verify` 与 `check-shards`（Ubuntu 自带 Chrome，失败时上传截图）。
 
 > `check-shards` 不并入 `verify` 是有意的：`extra` / `ch` / `opencc` 在 `sw.js` 的 SHELL 预缓存列表里，`au` / `pyf` / `rpy` 一旦成功取到也会被缓存，`verify` 跑到中段 Service Worker 已接管，请求走缓存优先，服务端的 503 根本拦不到，断言会假通过。该脚本改用「服务端不提供 `sw.js`」的方式确保走真实网络。
+
+> `audit-search` 同样不并入 `verify`，理由是**判据性质不同**：`verify` 用少量样本验证「功能是否存在」，`audit-search` 对全库逐条验证「覆盖率是否完整」。抽样永远抽不到「用户会打但开发者没想到」的写法——v1.24.1 之前 `verify` 的 6 个搜索案例全绿，而假名维度实际覆盖率是 0%（0/207）。改搜索归一化、索引构建或兜底逻辑后，除了 `verify` 还应跑一次它。该脚本内置「用例数为 0 一律 FAIL」的守卫，筛不出样本时会报错而不是静默通过。
 
 ## 本地存储
 
