@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.23.2">
+<meta name="version" content="1.23.3">
 <style>
   :root {
     --bg: #0d0f14;
@@ -714,6 +714,8 @@
   .vol-actions button:disabled { opacity: 0.45; cursor: default; }
   .vol-actions .vol-tip { color: var(--muted); font-size: 12px; margin-left: auto; }
   .vol-empty { padding: 11px; color: var(--muted); font-size: 12px; }
+  /* 卷包未到位时单行标题占位：弱化，避免被当作真实书名 */
+  .vol-pending { color: var(--muted); font-style: italic; }
 
   .status-opts {
     display: grid;
@@ -3164,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.23.3</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3602,6 +3604,11 @@
       openDetail(id);
     }
   });
+  // 卷包加载失败：卷清单会退化成裸 ID，必须重绘让两态提示出现
+  document.addEventListener('ln-volumes-failed', function () {
+    if (modalId) renderDetail(modalId);
+    updateDataHint();
+  });
 
   // RanobeDB 扩展书目：默认不下载，打开「显示扩展书目」后按需加载
   var rnLoaded = false;
@@ -3661,6 +3668,11 @@
       pendingDetail = null;
       openDetail(id);
     }
+  });
+  // 扩展书目加载失败：开关已高亮成「已开启」但一本书都没多，必须说明并给重试
+  document.addEventListener('ln-rn-failed', function () {
+    updateDataHint();
+    render();
   });
 
   // 剩余核心：子卷、一般小说与重复版本，首屏之后空闲时加载，不阻塞首屏
@@ -6892,15 +6904,32 @@
     var total = ordered.length;
     var open = !!volOpen[id];
     var pct = total ? Math.round((done / total) * 100) : 0;
-    var html = '<div class="vol-head"><b>卷清单</b><span class="vol-count">已读 ' + done + ' / ' + total + '</span>' +
+    // 子卷条目来自 volumes 包（ch 只给 id 列表）：包没到位时 byId 查不到，标题会退化成「卷 51736」这种裸 ID。
+    // 有缺失就说明条目没齐，不能装成真实数据——按「加载中 / 加载失败」两态提示并给重试入口。
+    var missing = ordered.filter(function (cid) { return !byId.has(cid); }).length;
+    var volNote = '';
+    if (missing) {
+      volNote = volumesFailed
+        ? ' · <button class="linkbtn" type="button" data-retry-volumes="1">卷信息加载失败，重试</button>'
+        : ' · 卷信息加载中…';
+    }
+    var html = '<div class="vol-head"><b>卷清单</b><span class="vol-count">已读 ' + done + ' / ' + total + volNote + '</span>' +
       '<button type="button" data-vol-expand aria-expanded="' + open + '">' + (open ? '收起' : '展开') + '</button></div>' +
       '<div class="vol-bar" aria-hidden="true"><i style="width:' + pct + '%"></i></div>';
     if (!open) return html;
     if (!total) return html + '<div class="vol-empty">该系列暂无子卷记录</div>';
+    if (missing === total) {
+      // 一条都没解析出来：不渲染 151 行裸 ID，直接说明情况
+      return html + '<div class="vol-empty">' + (volumesFailed
+        ? '卷信息加载失败，暂时无法显示卷名与封面。' +
+          '<button class="linkbtn" type="button" data-retry-volumes="1">重试</button>'
+        : '卷信息加载中，稍后自动显示卷名与封面…') + '</div>';
+    }
     html += '<div class="vol-rows">' + ordered.map(function (cid) {
       var c = byId.get(cid);
       var isDone = !!(myMap[cid] && myMap[cid].s === 'done');
-      var title = c ? (c.cn || c.n || ('卷 ' + cid)) : ('卷 ' + cid);
+      // 解析不到条目时不能编造「卷 51736」，宁可留空让上方提示说明原因
+      var title = c ? (c.cn || c.n || '') : '';
       var initial = String(title).replace(/^[\s「『《【(（"'“]+/, '').charAt(0) || '?';
       var thumb = c && c.img ? coverThumb(c.img) : '';
       var date = c && c.d ? dateText(c.d) : '—';
@@ -6911,7 +6940,8 @@
           (thumb ? '<img loading="lazy" decoding="async" src="' + escapeHtml(thumb) +
             '" alt="" onerror="this.style.display=\'none\'">' : '') +
           '<i>' + escapeHtml(initial) + '</i></span>' +
-        '<span class="vol-title">' + escapeHtml(title) + '</span>' +
+        '<span class="vol-title">' + (title ? escapeHtml(title) : '<span class="vol-pending">卷 ' + escapeHtml(cid) + '</span>') +
+        '</span>' +
         '<span class="vol-date">' + escapeHtml(date) + '</span></button>';
     }).join('') + '</div>';
     var allDone = done >= total;
@@ -6986,8 +7016,9 @@
     return true;
   }
 
+  // 展开卷清单＝明确的「我要看这些卷」意图，带上 force 让失败过的包再试一次
   function ensureVolumeMeta() {
-    return Promise.all([loadRest(), loadVolumes(), loadCh()]);
+    return Promise.all([loadRest(), loadVolumes(true), loadCh(true)]);
   }
 
   function setStatus(id, status) {
@@ -7147,8 +7178,23 @@
     state.showRn = !state.showRn;
     syncControls();
     updateDataHint();
-    if (state.showRn) loadRn().then(updateDataHint);
+    // 用户主动打开开关＝明确想看到扩展书目，失败后也要给一次重新请求的机会
+    if (state.showRn) loadRn(true).then(updateDataHint);
     render();
+  });
+
+  // 页脚 dataHint 里的「扩展书目加载失败，重试」：按钮渲染在页脚，不在 emptyEl 委托范围内，
+  // 因此必须单独挂在 document 上（不与空结果区的委托混在一起）
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#retryRn')) return;
+    var btn = e.target.closest('#retryRn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    loadRn(true).then(function () {
+      updateDataHint();
+      render();
+      toast(rnLoaded ? '扩展书目已加载' : '仍然加载失败，请检查网络后重试');
+    });
   });
 
   // 隐藏已收藏：只看还没加入清单的书，便于发现新作
@@ -7456,7 +7502,7 @@
         state.showRn = !state.showRn;
         syncControls();
         updateDataHint();
-        if (state.showRn) loadRn().then(updateDataHint);
+        if (state.showRn) loadRn(true).then(updateDataHint);
         render();
       } },
       { name: '只看轻小说', kind: '筛选', run: function () { state.kind = 'novel'; syncControls(); render(); } },
@@ -7647,8 +7693,7 @@
         else toast('仍然加载失败，请检查网络后重试');
       });
       return;
-    }
-    if (e.target.closest('#clearMineFilter')) {
+    }    if (e.target.closest('#clearMineFilter')) {
       if (state.q) {
         state.q = '';
         searchEl.value = '';
@@ -8192,6 +8237,16 @@
       loadCh(true).then(function () {
         if (modalId) renderDetail(modalId);
         toast(chLoaded ? '卷清单已加载' : '仍然加载失败，请检查网络后重试');
+      });
+      return;
+    }
+    // 卷包（卷名 / 封面 / 日期）加载失败后的重试：与 ch 是两个包，必须分别重试
+    var retryVolumes = e.target.closest('[data-retry-volumes]');
+    if (retryVolumes) {
+      retryVolumes.disabled = true;
+      loadVolumes(true).then(function () {
+        if (modalId) renderDetail(modalId);
+        toast(volumesLoaded ? '卷信息已加载' : '仍然加载失败，请检查网络后重试');
       });
       return;
     }
@@ -9522,17 +9577,23 @@
   function updateDataHint() {
     var el = $('dataHint');
     if (!el) return;
+    // 扩展书目失败提示与「全库就绪」与否无关：两个包各自独立，首屏阶段用户也可能先打开扩展书目开关。
+    // 所以这个提示要在所有分支之前决定，不能被 !restLoaded 的提前 return 吞掉。
+    var rnNote = (state.showRn && !rnLoaded && rnFailed)
+      ? ' · <button class="linkbtn" type="button" id="retryRn">扩展书目加载失败，重试</button>'
+      : '';
     if (!DATA.length) {
       el.textContent = '数据未就绪';
       return;
     }
     if (!restLoaded) {
-      el.textContent = restFailed
+      el.innerHTML = escapeHtml(restFailed
         ? '全库加载失败，仅首屏 ' + DATA.length + ' 本可用'
-        : '正在加载全库… 已载入 ' + DATA.length + ' 本';
+        : '正在加载全库… 已载入 ' + DATA.length + ' 本') + rnNote;
       el.title = restFailed
         ? '后台分片未能加载，可在搜索无结果时点击「重新加载」重试'
         : '首屏先加载默认可见书目，剩余书目后台补齐';
+      if (rnNote) el.title = '扩展书目数据包未能加载，当前列表不含 RanobeDB 扩展书目';
       return;
     }
     var general = DATA.filter(function (x) { return x.gn; }).length;
@@ -9550,6 +9611,11 @@
       (split ? ' · 拆分卷 ' + split + ' 册' : '') +
       (general ? ' · ' + general + ' 本一般小说' : '');
     el.title = '系列新卷与扩展书目按需加载；拆分卷按「册」统计，上/中/下折合为故事卷；一般小说、重复版本与扩展书目默认隐藏';
+    // 扩展书目开关已打开但一卷都没进来：开关会显示「已开启」，不说明会被当成「扩展书目本来就这么少」
+    if (rnNote) {
+      el.innerHTML = escapeHtml(el.textContent) + rnNote;
+      el.title = '扩展书目数据包未能加载，当前列表不含 RanobeDB 扩展书目';
+    }
   }
 
   // 页脚展示数据快照时间（本地时区），让用户知道数据新鲜度

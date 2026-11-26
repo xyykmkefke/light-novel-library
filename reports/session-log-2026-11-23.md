@@ -314,3 +314,28 @@ git -c http.version=HTTP/1.1 push origin main
 - 新增 `scripts/check-shard-failure.mjs`（`npm run check-shards`）8/8。**关键踩坑**：extra 与 ch 在 `sw.js` 的 SHELL 预缓存列表里，verify 中 SW 已接管 → 缓存优先 → 服务端 503 拦不到，断言假通过（实测先 FAIL 3 项）。独立脚本改为服务端不提供 `sw.js` 强制走网络；rest 不在 SHELL，故仍可在 verify 内测。CI 增加该步骤（带 linux `--no-sandbox`）。
 - 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过（21 项排除）、`verify` 226/226、`check-shards` 8/8。
 - 版本 1.23.2，SW `yuc-ln-shell-v49`。
+
+## 28. v1.23.3 补完 volumes / rn 的失败提示（2026-11-26）
+
+- 复核 v1.23.2 发现文档与实现不符：9.49 写「同类缺陷本次已全部收口（rest、extra、volumes、rn、ch）」，实际 `volumesFailed`/`rnFailed` 只被赋值与用于「失败后不自动重试」，**零 UI 读取**；`ln-volumes-failed` 与 `ln-rn-failed` 两个事件 **监听者数量为 0**。
+- 故障注入实测后果：
+  - volumes 失败：`ch` 只给 id，卷名/封面/日期来自 volumes 包。包失败后 `byId.get(cid)` 全落空，标题退化为 `'卷 ' + cid`——豹头王传说（51735）151 卷全部渲染成「卷 51736 —」。ch 索引 10040 条引用中 7817 条（77.9%）只在 volumes 包里，涉及 960/1128 个系列。
+  - rn 失败：开关已高亮「已开启」（`aria-pressed=true`），`__LN_RN_COUNT` 为 0，页脚无任何说明。
+- 修复：`volumeSectionHtml()` 新增 `missing` 统计，两态提示 + 重试；`missing===total` 时不渲染裸 ID；个别缺失用 `.vol-pending` 弱化并留空标题。补 `ln-volumes-failed` / `ln-rn-failed` 监听；`loadVolumes(true)` / `loadRn(true)` 于显式操作时放行。
+- **连带修掉的两个 bug**：
+  1. `updateDataHint()` 的 `!restLoaded` 分支提前 `return`，首屏阶段（2026 本）点开扩展书目失败时提示被吞掉（实测 `innerHTML` 就是「正在加载全库…」）。改为先把 `rnNote` 算好再用。
+  2. `#retryRn` 原写在 `emptyEl` 的点击委托里，但按钮渲染在页脚 `dataHint`（`emptyEl` 之外），冒泡不到委托根 → 点击无效。改为独立 `document` 级监听 + `disabled` 防连点。`#retryRest` 在空结果区内，不受影响。
+- `check-shards` 8 → 15 项：volumes 提示/重试/不渲染裸 ID、volumes 重试恢复（首行恢复「ググイン・サーガ (1) 豹頭の仮面 1979-09-29」）、rn 页脚提示/重试入口/重试后 8487 部进列表。
+- 结果：`check-data` 0、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226、`check-shards` 15/15。
+- 版本 1.23.3，SW `yuc-ln-shell-v50`。
+- 教训：失败态变量必须连到 UI 才算修完。自检应包含 `grep -c "addEventListener('ln-xxx-failed'"`，为 0 即未修完。
+
+## 29. 数据补全方向的实测结论（2026-11-26，未改动代码）
+
+排查「题材 / 书系 / 中文名 / 插图」四个字段缺口，结论是**当前都无法靠本地重算补上**，记录以免后续重复尝试：
+
+- **题材缺口 932 本（默认可见 21.7%，全量 1203/5076 = 23.7%）**：`scripts/genres.mjs` 从 Bangumi 标签映射。放开 `TAG_MIN_COUNT=3` 阈值重算，只能补回 32.4% 的样本，且会把「ミッキーマウス90周年記念イラスト集」映射成 `sci|rom|sch|com`（命中作者名「諫山創/大暮維人」等噪声标签）——引入错误比缺失更糟。缺题材条目的标签构成是作者名、出版社、年份、载体、地域、状态，真正的题材标签极少（玄幻 22、武侠 14、修仙 5）。同系列继承只能覆盖 38 条（3.2%）。
+- **书系缺口 584 本（13.6%），其中 305 本有 ISBN**：openBD 实测可通（1.7s，200），但抽样 20 个 ISBN 只有 14 个有记录，且 `series` 字段**全部为空**——只能补出版社，补不了书系。
+- **中文名缺口 1926 本（44.9%）**：`data/build/bgm-subject` 缓存里能匹配上的 48 条，`name_cn` 全部为空。
+- **插图缺口 513 本（12.0%），其中 417 本有 ISBN**：同样受 openBD 无该字段所限。
+- **上游接口现状**：Bangumi API 直连与走代理均不通（`000`，10s 超时）；NDL Search 代理 502。数据补全需等网络恢复后重新抓取，不能靠本地脚本。

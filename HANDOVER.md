@@ -1,7 +1,7 @@
 # 轻小说库 · 落实与交接
 
 - 文档日期：2026-11-23
-- 当前状态：**v1.23.2 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 226/226 + 分片失败回归 8/8）
+- 当前状态：**v1.23.3 完成**（数据、页面、书评、统计、Gist 同步、PWA、本地纠错、格式与藏书、自动化验收 226/226 + 分片失败回归 15/15）
 - 项目线上：<https://xyykmkefke.github.io/light-novel-library/>
 - 本次会话日志：`reports/session-log-2026-11-23.md`
 - 模板项目：`../番剧`（Bangumi Anime Library v1.6.8）
@@ -886,6 +886,34 @@ PWA / 移动端：
 
 - 版本 1.23.2，SW `yuc-ln-shell-v49`。
 
+> ⚠️ **上面这条「已全部收口」是错的**，v1.23.3 已纠正：`volumes` 与 `rn` 当时只加了失败标记，没有任何 UI 读取，两个失败事件零监听者。详见 9.50。
+
+## 9.50 v1.23.3 补完 volumes / rn 的失败提示（2026-11-26）
+
+**背景**：复核 v1.23.2 的实现时发现它与自己的文档不符。9.49 声称「同类缺陷本次已全部收口（rest、extra、volumes、rn、ch）」，但 `volumesFailed` / `rnFailed` 全项目只有 6 处引用：4 处是赋值与「失败后不自动重试」的判断，**没有任何 UI 读取它们**；`document.addEventListener('ln-volumes-failed')` 与 `ln-rn-failed` 两个事件的监听者数量为 **0**。
+
+**实测的用户可见后果**（故障注入，探针用完即删）：
+
+- **volumes 失败**：`ch` 只提供子卷 id 列表，卷名 / 封面 / 日期来自 `volumes` 包。包失败后 `byId.get(cid)` 全部落空，标题退化成 `('卷 ' + cid)`——豹头王传说（51735）的 151 卷全部渲染成「卷 51736 —」「卷 51737 —」。`ch` 索引共 10040 条引用中有 **7817 条（77.9%）只在 volumes 包里**，涉及 **960 / 1128 个系列**，面很大。
+- **rn 失败**：开关已高亮成「已开启」（`aria-pressed=true`），`__LN_RN_COUNT` 为 0，页脚 `dataHint` 与 v1.23.2 之前完全一样，没有任何说明。用户的合理推断是「扩展书目本来就这么少」。
+
+**改动（均在 `index.html`）**：
+
+- `volumeSectionHtml()`：新增 `missing` 统计（`ordered` 中 `byId` 查不到的条数）。有缺失时在卷清单头部按 `volumesFailed` 两态提示（「卷信息加载失败，重试」/「卷信息加载中…」）；`missing === total` 时**不渲染 151 行裸 ID**，改为一行说明 + 重试按钮；个别缺失时把该行标题留空并标注 `.vol-pending`（弱化斜体），不再编造「卷 51736」。
+- 补 `ln-volumes-failed` 监听（重绘详情 + 刷新页脚）与 `[data-retry-volumes]` 点击处理（`loadVolumes(true)`）。
+- 补 `ln-rn-failed` 监听（刷新页脚 + 重绘）。
+- `updateDataHint()`：把 `rnNote` 的计算提到所有 `if` 之前。**这是第二个 bug**——原实现里 `!restLoaded` 分支会提前 `return`，首屏阶段（2026 本）点开扩展书目开关失败时提示被完全吞掉，实测 `innerHTML` 就是「正在加载全库… 已载入 2026 本」。
+- **第三个 bug**：`#retryRn` 原先写在 `emptyEl` 的点击委托里，但按钮渲染在页脚 `dataHint`（`emptyEl` 之外），点击无法冒泡到委托根。改为独立的 `document` 级监听并带 `disabled` 防连点。`#retryRest` 位于空结果区内，不受此问题影响。
+- 显式打开扩展书目开关（工具栏按钮 + 命令面板）改为 `loadRn(true)`，展开卷清单改 `ensureVolumeMeta()` 内部走 `loadVolumes(true)` / `loadCh(true)`——用户主动操作等于明确意图，失败过的包要能重新请求，否则「关掉再打开」这个最自然的救回动作无效。
+
+**验收**：
+
+- `check-shards` **8 → 15 项**，新增 volumes 3 项（提示 / 重试入口 / 不渲染裸 ID）、rn 3 项（页脚提示 / 重试入口 / 重试后 8487 部进列表）、volumes 重试恢复 1 项。实测 volumes 重试后首行恢复为「ググイン・サーガ (1) 豹頭の仮面 1979-09-29」。
+- `verify` 226/226、`test-merge` 28/28、`check-data` 0 问题、`check-deploy` 通过（21 项排除）。
+- 版本 1.23.3，SW `yuc-ln-shell-v50`。
+
+**教训**：失败态变量必须连到 UI 才算修完。v1.23.2 的 grep 只查了 `onerror` 是否赋值，没查变量是否被读取、事件是否有监听者——`grep -c "addEventListener('ln-xxx-failed'"` 为 0 就该报警。后续新增分片一律按「标记 → 事件 → 监听 → 文案 → 重试 → 断言」六步走。
+
 ## 10. 已知风险与决策
 
 1. 搜索接口 1000 条上限：必须按 `rating_count` 分区抓取，不能直接 offset 翻到底；数据增长后要重新核对各分区是否仍小于 1000 条。
@@ -901,7 +929,7 @@ PWA / 移动端：
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226、`check-shards` 8/8。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过、`verify` 226/226、`check-shards` 15/15。
 4. **CI**：commit → push `main`，五项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -911,4 +939,4 @@ PWA / 移动端：
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.2 已完成，后续按第 10 节风险与决策、第 9.49 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（226 项）/ `check-shards`（8 项），push/PR 由 CI 自动跑五项，不要修改 `../番剧`。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.23.3 已完成，后续按第 10 节风险与决策、第 9.50 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（226 项）/ `check-shards`（15 项），push/PR 由 CI 自动跑五项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。

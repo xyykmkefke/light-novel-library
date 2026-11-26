@@ -24,7 +24,7 @@ const BROWSERS = [
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
-const fault = { extraFail: 0, chFail: 0 };
+const fault = { extraFail: 0, chFail: 0, volumesFail: 0, rnFail: 0 };
 
 function startServer() {
   const server = http.createServer(async (req, res) => {
@@ -45,6 +45,18 @@ function startServer() {
       }
       if (p.includes('light-novels-ch.js') && fault.chFail > 0) {
         fault.chFail -= 1;
+        res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end('service unavailable');
+        return;
+      }
+      if (p.includes('light-novels-volumes.js') && fault.volumesFail > 0) {
+        fault.volumesFail -= 1;
+        res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end('service unavailable');
+        return;
+      }
+      if (p.includes('light-novels-rn.js') && fault.rnFail > 0) {
+        fault.rnFail -= 1;
         res.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end('service unavailable');
         return;
@@ -195,6 +207,101 @@ async function main() {
       return { text: t, hasFail: /卷清单加载失败/.test(t) };
     })()`);
     check('ch 重试后卷清单恢复且失败提示消失', chOk.hasFail === false, JSON.stringify(chOk.text.slice(0, 44)));
+
+    // ---- volumes 失败：卷包（卷名 / 封面 / 日期）没到位，不能渲染成「卷 51736」裸 ID ----
+    // 选一个子卷只存在于 volumes 包的系列（豹头王传说 151 卷，子卷全不在 lite/rest 里）
+    fault.volumesFail = 999;
+    await c.evaluate(`location.hash = ''`);
+    await sleep(200);
+    await c.evaluate(`location.hash = 'd=51735'`);
+    for (let i = 0; i < 40; i += 1) {
+      if (await c.evaluate('window.__lnVolumesFailed === true').catch(() => false)) break;
+      await sleep(150);
+    }
+    await sleep(400);
+    // 展开卷清单，触发渲染
+    await c.evaluate(`(() => {
+      const b = document.getElementById('detailVolumes');
+      const btn = b && b.querySelector('[data-vol-expand]');
+      if (btn && btn.getAttribute('aria-expanded') === 'false') btn.click();
+    })()`);
+    await sleep(600);
+    const volFail = await c.evaluate(`(() => {
+      const b = document.getElementById('detailVolumes');
+      const t = (b ? b.textContent : '').replace(/\\s+/g, ' ').trim();
+      return { text: t, retry: !!document.querySelector('[data-retry-volumes]'),
+               failedFlag: window.__lnVolumesFailed === true };
+    })()`);
+    check('volumes 失败时卷清单提示「卷信息加载失败」',
+      /卷信息加载失败/.test(volFail.text), JSON.stringify(volFail.text.slice(0, 50)));
+    check('volumes 失败时提供重试入口', volFail.retry === true);
+    check('volumes 失败时不渲染裸 ID 当书名',
+      !/卷 51736/.test(volFail.text), JSON.stringify(volFail.text.slice(0, 50)));
+
+    // ---- volumes 重试成功 ----
+    fault.volumesFail = 0;
+    await c.evaluate(`(() => { const b = document.querySelector('[data-retry-volumes]'); if (b) b.click(); })()`);
+    for (let i = 0; i < 60; i += 1) {
+      if (await c.evaluate('window.__LN_VOLUMES_READY === true').catch(() => false)) break;
+      await sleep(150);
+    }
+    await sleep(600);
+    const volOk = await c.evaluate(`(() => {
+      const b = document.getElementById('detailVolumes');
+      const t = (b ? b.textContent : '').replace(/\\s+/g, ' ').trim();
+      const first = b ? (b.querySelector('[data-vol-toggle]') || {}).textContent : '';
+      return { text: t, hasFail: /卷信息加载失败/.test(t),
+               firstRow: String(first || '').replace(/\\s+/g, ' ').trim().slice(0, 40) };
+    })()`);
+    check('volumes 重试后卷名恢复且失败提示消失',
+      volOk.hasFail === false && !/卷 5173\\d/.test(volOk.firstRow),
+      JSON.stringify(volOk.firstRow));
+
+    // ---- rn 失败：开关显示「已开启」却一本书都没多，必须说明 ----
+    // 先等全库到位，贴近真实场景（用户通常在列表稳定后才去点扩展书目开关）
+    for (let i = 0; i < 80; i += 1) {
+      if (await c.evaluate('window.__LN_REST_READY === true').catch(() => false)) break;
+      await sleep(200);
+    }
+    fault.rnFail = 999;
+    await c.evaluate(`location.hash = ''`);
+    await sleep(300);
+    await c.evaluate(`(() => {
+      const b = document.getElementById('showRnBtn');
+      if (b && b.getAttribute('aria-pressed') !== 'true') b.click();
+    })()`);
+    for (let i = 0; i < 40; i += 1) {
+      if (await c.evaluate('window.__lnRnFailed === true').catch(() => false)) break;
+      await sleep(150);
+    }
+    await sleep(500);
+    const rnFail = await c.evaluate(`(() => {
+      const h = document.getElementById('dataHint');
+      return { text: (h ? h.textContent : '').replace(/\\s+/g, ' ').trim(),
+               retry: !!document.querySelector('#retryRn'),
+               pressed: (document.getElementById('showRnBtn') || {}).getAttribute
+                 ? document.getElementById('showRnBtn').getAttribute('aria-pressed') : null };
+    })()`);
+    check('rn 失败时页脚提示「扩展书目加载失败」',
+      /扩展书目加载失败/.test(rnFail.text), JSON.stringify(rnFail.text.slice(-40)));
+    check('rn 失败时提供重试入口', rnFail.retry === true && rnFail.pressed === 'true');
+
+    // ---- rn 重试成功 ----
+    fault.rnFail = 0;
+    await c.evaluate(`(() => { const b = document.getElementById('retryRn'); if (b) b.click(); })()`);
+    for (let i = 0; i < 80; i += 1) {
+      if (await c.evaluate('window.__LN_RN_READY === true').catch(() => false)) break;
+      await sleep(200);
+    }
+    await sleep(600);
+    const rnOk = await c.evaluate(`(() => {
+      const h = document.getElementById('dataHint');
+      return { text: (h ? h.textContent : '').replace(/\\s+/g, ' ').trim(),
+               count: window.__LN_RN_COUNT || 0 };
+    })()`);
+    check('rn 重试后扩展书目进入列表且失败提示消失',
+      /扩展书目加载失败/.test(rnOk.text) === false && rnOk.count > 0,
+      `新增 ${rnOk.count} 部`);
   } finally {
     try { ws?.close(); } catch {}
     try { child?.kill(); } catch {}
