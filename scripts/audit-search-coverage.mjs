@@ -282,6 +282,41 @@ try {
   recordCoverage('罗马字查询可命中自身', rpyReport,
     '全库无长度 ≥4 的罗马字 —— 罗马字索引包可能未加载');
 
+  // 4b) 罗马字检索价值：不能有「整串就是 no / to」这种索引。
+  //
+  // 背景：罗马字只转写假名、丢弃汉字，而日文书名多是「汉字+助词」结构，
+  // 于是 七角錐の少女 / 8階の神話 / 刹那の夏 的罗马字全都退化成 "no"。
+  // 实测曾有 127 条长度 ≤2，光 "no" 一个串就对应 110 本书——不是搜不到，
+  // 而是搜什么都能搜到。构建期加了 romajiWorthIndexing（长度 <4 不建索引），
+  // 这里守住该不变量，避免哪天重建又被写回去。
+  section('罗马字检索价值（不建无效索引）');
+  const rpyQuality = await c.evaluate(`(() => {
+    const A = window.__lnAudit;
+    const ids = ${JSON.stringify(ids)};
+    let withRpy = 0; const junk = [];
+    for (const id of ids) {
+      const it = A.item(id);
+      if (!it || it.c || it.gn || it.ver) continue;
+      const r = String(it.rpyFull || '');
+      if (!r) continue;
+      withRpy += 1;
+      // 长度 <4 一律视为无检索价值：no / to / nono / tono 这类纯助词串
+      if (r.length < 4) { if (junk.length < 10) junk.push({ id, r }); }
+    }
+    return { withRpy, junkCount: junk.length, junk };
+  })()`);
+  if (!rpyQuality.withRpy) {
+    record('罗马字索引无「no/to」类无效串（0/0）', false,
+      '全库无任何罗马字 —— 索引包可能未加载，此时不该判定通过', []);
+  } else if (rpyQuality.junkCount) {
+    record('罗马字索引无「no/to」类无效串', false,
+      `${rpyQuality.junkCount} 条长度 <4：${JSON.stringify(rpyQuality.junk.slice(0, 5))}`,
+      rpyQuality.junk);
+  } else {
+    record('罗马字索引无「no/to」类无效串', true,
+      `${rpyQuality.withRpy} 条罗马字全部长度 ≥4`, []);
+  }
+
   // ============ 5. 作者 全量 ============
   section('作者名命中（全量逐条）');
   const auReport = await c.evaluate(`(() => {

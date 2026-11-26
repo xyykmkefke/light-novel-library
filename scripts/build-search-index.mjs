@@ -8,7 +8,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { pinyin } from 'pinyin-pro';
-import { kanaInitials } from './build-pinyin.mjs';
+import { kanaInitials, initials } from './build-pinyin.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const FULL_FILE = path.join(ROOT, 'data', 'light-novels.js');
@@ -77,6 +77,24 @@ function hasKana(text) {
   return /[\u3041-\u309f\u30a1-\u30f6]/.test(String(text || ''));
 }
 
+// 罗马字有没有检索价值。
+//
+// 背景：kanaRomaji 只转写假名、丢弃汉字。日文书名大量是「汉字 + 助词」结构，
+// 假名部分常常只有「の」「と」这类助词，汉字部分全被扔掉，于是：
+//   七角錐の少女 → no      8階の神話 → no      魔女と毒殺文芸部 → to
+// 实测 5076 条里有 127 条罗马字长度 ≤2，光 "no" 一个串就对应 110 本不同的书。
+// 后果不是「搜不到」，而是「搜什么都能搜到」——搜 no 出 958 条（标题本身只含 30 条），
+// 搜 tono / noto / nono 各出 65 / 53 / 65 条，且没有一条标题或全拼真含该串。
+//
+// 判据：长度 <4 的罗马字一律不建索引。实测这样丢弃 142 条，
+// 但这 142 条全部仍有中文名或全拼可搜，不损失任何检索能力。
+//
+// 注意这与「汉字标题推不出读音」（mahouka 搜不到 魔法科高校の劣等生）是两件事：
+// 那是已知的数据局限，需要日文读音词典才能补，不在本判据范围内。
+function romajiWorthIndexing(rpy) {
+  return String(rpy || '').length >= 4;
+}
+
 // 全拼：只对含汉字的文本生成；纯假名/纯英文没有中文读音，返回空串
 export function fullPinyin(text) {
   const s = String(text || '');
@@ -90,18 +108,37 @@ export function fullPinyin(text) {
 // 一条记录的搜索索引：py 存「首字母|全拼」，rpy 存假名罗马字
 function buildIndex(x) {
   const base = x.cn || x.n || '';
-  const initial = x.py && !/[|]/.test(x.py) ? x.py : (kanaInitials(base) || '');
+  // 首字母的取法要能兼容三种既有状态，否则重复运行会一层层吃掉信息：
+  //   1) 旧格式 "首字母|全拼" → 取竖线左边
+  //   2) 新格式 "首字母"      → 直接用
+  //   3) 空                    → 现算
+  // 早期写成 `x.py && !/[|]/.test(x.py) ? x.py : kanaInitials(base)`，问题在于：
+  // kanaInitials 只处理假名，对中文标题返回空串。第一次重建时 x.py 是旧格式（含竖线），
+  // 于是走 kanaInitials 得到空、py 退化成纯全拼；第二次重建时 x.py 已不含竖线，
+  // 纯全拼被当成首字母原样写回，错误就此固化。实测这个 bug 让 2997 条中文条目
+  // 丢了首字母检索（魔法使之夜 的 mfsszy 搜不到了）。
+  let initial = '';
+  if (typeof x.py === 'string' && x.py) {
+    initial = x.py.includes('|') ? x.py.split('|')[0] : x.py;
+  }
+  if (!initial) initial = initials(base) || kanaInitials(base) || '';
   const full = fullPinyin(base);
   const parts = [];
   if (initial) parts.push(initial);
   if (full && full !== initial) parts.push(full);
   const py = parts.join('|');
-  const rpy = hasKana(x.n) ? kanaRomaji(x.n) : '';
+  const rpyRaw = hasKana(x.n) ? kanaRomaji(x.n) : '';
+  // 没有检索价值的短罗马字不建索引，否则「no」这类串会把 110 本无关的书带出来
+  const rpy = romajiWorthIndexing(rpyRaw) ? rpyRaw : '';
   return { py, rpy };
 }
 
 function parseDataFile(src) {
-  const metaMatch = src.match(/window\.LN_META\s*=\s*(\{[\s\S]*?\});\n/);
+  // 换行必须是 \r?\n：仓库里 data/*.js 的换行取决于谁写的、在哪个平台 checkout。
+  // git 在 Windows 上默认 autocrlf 会把它们写成 CRLF，而早期正则写死了 `\});\n`，
+  // \r 卡在中间就匹配不上，在 Windows 上直接抛「无法解析数据文件」——
+  // CI 跑 Linux（LF）所以一直没暴露。
+  const metaMatch = src.match(/window\.LN_META\s*=\s*(\{[\s\S]*?\});\r?\n/);
   const open = src.indexOf('[', src.indexOf('window.LN_DATA'));
   const close = src.lastIndexOf(']');
   if (!metaMatch || open < 0 || close < 0) throw new Error('无法解析数据文件');
@@ -118,15 +155,24 @@ export async function buildSearchIndex() {
 
   let pyChanged = 0;
   let rpyAdded = 0;
+  let rpyCleared = 0;
   all.forEach((x) => {
     const { py, rpy } = buildIndex(x);
     if (py && py !== x.py) {
       x.py = py;
       pyChanged += 1;
     }
-    if (rpy && x.rpy !== rpy) {
-      x.rpy = rpy;
-      rpyAdded += 1;
+    // 注意这里不能写成 `if (rpy && ...)`。旧值可能是「no」这类无检索价值的串，
+    // 而新算出的结果为空串——只在非空时写回，脏数据就永远清不掉，
+    // 门槛形同虚设（实测重建后 rpy 一条都没变）。必须允许用空串覆盖旧值。
+    if ((rpy || x.rpy) && x.rpy !== rpy) {
+      if (rpy) {
+        x.rpy = rpy;
+        rpyAdded += 1;
+      } else {
+        delete x.rpy;
+        rpyCleared += 1;
+      }
     }
   });
 
@@ -136,10 +182,11 @@ export async function buildSearchIndex() {
     `window.LN_META = ${JSON.stringify({ ...meta, generatedAt: new Date().toISOString() })};\n` +
     `window.LN_DATA = ${JSON.stringify(all)};\n`, 'utf8');
 
-  return { total: all.length, pyChanged, rpyAdded };
+  return { total: all.length, pyChanged, rpyAdded, rpyCleared };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const r = await buildSearchIndex();
-  console.log(`搜索索引已更新：${r.total} 条；拼音改写 ${r.pyChanged} 条；罗马字新增 ${r.rpyAdded} 条`);
+  console.log(`搜索索引已更新：${r.total} 条；拼音改写 ${r.pyChanged} 条；` +
+    `罗马字新增 ${r.rpyAdded} 条；清理无检索价值的罗马字 ${r.rpyCleared} 条`);
 }

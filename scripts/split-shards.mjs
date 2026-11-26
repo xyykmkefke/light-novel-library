@@ -12,7 +12,8 @@ const DATA = path.join(ROOT, 'data');
 const HEADER = '// 由 scripts/fetch-books.mjs / clean-series.mjs 生成，请勿手动修改\n';
 
 const src = await readFile(path.join(DATA, 'light-novels.js'), 'utf8');
-const meta = JSON.parse(src.match(/window\.LN_META\s*=\s*(\{[\s\S]*?\});\n/)[1]);
+// \r?\n：Windows checkout 下 data/*.js 是 CRLF，只写 \n 会匹配不上（同 build-search-index）
+const meta = JSON.parse(src.match(/window\.LN_META\s*=\s*(\{[\s\S]*?\});\r?\n/)[1]);
 const open = src.indexOf('[', src.indexOf('window.LN_DATA'));
 const all = JSON.parse(src.slice(open, src.lastIndexOf(']') + 1));
 
