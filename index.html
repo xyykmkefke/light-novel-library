@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.0">
+<meta name="version" content="1.24.1">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.0</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.1</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3900,7 +3900,8 @@
     document.head.appendChild(s);
   })();
 
-  // 全角转半角 + 大小写折叠 + 繁转简。NFC 先规整组合字符（如「か」+ 浊点）。
+  // 全角转半角 + 大小写折叠 + 繁转简 + 片假名折平假名。
+  // NFC 先规整组合字符（如「か」+ 浊点）。
   function normalize(s) {
     var v = String(s == null ? '' : s);
     if (!v) return '';
@@ -3912,6 +3913,15 @@
       });
     }
     v = v.toLowerCase();
+    // 片假名 → 平假名（U+30A1-U+30F6 与 U+3041-U+3096 一一对应，减 0x60）。
+    // 日文输入法里「ムダに」和「むだに」是同一个词，用户不会记得库里存的是哪一种；
+    // 923 条可见条目标题含片假名，不折叠就有两成条目搜不到。
+    // 长音符「ー」(U+30FC) 不在范围内，保留原样，避免把 コーヒー 折成 こーひー 之外的东西。
+    if (/[\u30A1-\u30F6]/.test(v)) {
+      v = v.replace(/[\u30A1-\u30F6]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0x60);
+      });
+    }
     if (T2CN) {
       try { v = T2CN(v); } catch (e) { /* 单字符异常不该拖垮搜索 */ }
     }
@@ -4036,6 +4046,36 @@
   };
   // 仅测试用：在页面内直接调用归一化，断言「繁→简」是否生效
   window.__lnNormalizeForTest = normalize;
+
+  // 只读审计钩子：直接调用产品代码本体（matchesQuery / compactOf / normOf），
+  // 供全量覆盖率审计使用。不修改任何状态，不参与线上逻辑。
+  window.__lnAudit = {
+    normalize: normalize,
+    compactOf: compactOf,
+    matches: function (id, token, loose) {
+      var item = byId.get(String(id));
+      if (!item) return null;
+      return matchesQuery(item, token, !!loose);
+    },
+    find: function (token, loose) {
+      var t = normalize(token);
+      var ids = [];
+      DATA.forEach(function (x) {
+        if (matchesQuery(x, t, !!loose)) ids.push(String(x.i));
+      });
+      return ids;
+    },
+    item: function (id) {
+      var x = byId.get(String(id));
+      if (!x) return null;
+      return {
+        i: String(x.i), cn: x.cn || '', n: x.n || '', au: x.au || '', il: x.il || '',
+        py: x.py || '', pyFull: x.pyFull || '', rpyFull: x.rpyFull || '',
+        c: !!x.c, gn: !!x.gn, ver: !!x.ver
+      };
+    },
+    count: function () { return DATA.length; }
+  };
 
   // 免费查询下还需要哪些索引：名字类查 CJK 要作者包，拼音/罗马字查拉丁字母要全拼与罗马字包。
   // 只列「既没就绪也没失败」的，失败态要走另一条文案，否则会把失败说成加载中。
@@ -5023,6 +5063,19 @@
       .replace(/[\s\u3000!-/:-@[-`{-~·・、。，．：；！？「」『』（）【】《》〈〉〜～—–―…＆＃＠]/g, '');
   }
 
+  // 罗马字长音的两种写法要能互相命中：
+  //   库内把 ー 直接删掉（コーヒー→kohi、アーク→aku），好处是 ramen 能命中 ラーメン；
+  //   但按赫本式双写元音的用户会打 koohii / aaku，删长音的那一侧就永远搜不到。
+  //   反过来 おう 段在库里是展开的（王→ou、東京→toukyou），用户又常简写成 o。
+  // 两种写法归一到同一串：先把 ou 并成 o，再把双写元音压成一个。
+  // 只用于响应用户「打长音」的写法，所以只挂在兜底通道、只对罗马字生效 ——
+  // 中文拼音没有长音概念，跟着折叠「zhou→zho」只会制造误报。
+  function foldLong(s) {
+    return String(s == null ? '' : s)
+      .replace(/ou/g, 'o')
+      .replace(/([aiueo])\1+/g, '$1');
+  }
+
   // 单条记录是否命中关键词：中文名 / 原名 / 拼音（首字母 + 全拼）/ 罗马字 / 作者 / 本地别名
   // token 已由调用方 normalize，这里的每个字段也要过同一套归一化
   function matchesQuery(x, token, loose) {
@@ -5054,6 +5107,13 @@
         if (compactOf(normOf(x, 'au', x.au)).indexOf(t) >= 0) return true;
         if (/^[a-z0-9]+$/.test(t) &&
           (compactOf(x.pyFull).indexOf(t) >= 0 || String(x.rpyFull || '').indexOf(t) >= 0)) return true;
+        // 罗马字长音：用户打 koohii / aaku 时，库内记的是 kohi / aku（长音被删），
+        // 反过来用户打 kohi / aku 时库内也可能是 koohii。两边都折叠后比一次。
+        if (/^[a-z]+$/.test(t)) {
+          var ft = foldLong(t);
+          var fr = foldLong(String(x.rpyFull || ''));
+          if (fr && fr.indexOf(ft) >= 0) return true;
+        }
       }
     }
     return false;

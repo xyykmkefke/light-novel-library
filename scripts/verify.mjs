@@ -699,6 +699,54 @@ async function main() {
       check('罗马字读音可搜到日文标题', false, '未取到罗马字样本');
     }
 
+    // 4b) 假名折叠：书名用片假名存储时，用户按平假名输入（同一个词的另一种写法）也要能搜到。
+    //     日文输入法里「ムダに」和「むだに」是同一个词，用户记不住库里存的是哪一种。
+    const kanaCase = await cdp.evaluate(`(() => {
+      const toHira = (s) => String(s).replace(/[\\u30A1-\\u30F6]/g, (ch) =>
+        String.fromCharCode(ch.charCodeAt(0) - 0x60));
+      for (const x of window.LN_DATA || []) {
+        if (x.c || x.gn || x.ver) continue;
+        const t = String(x.cn || x.n || '');
+        if (!/[\\u30A1-\\u30F6]/.test(t)) continue;
+        const hira = toHira(t);
+        // 片假名与平假名折叠后是同一串，查询必须仍能命中
+        return { id: String(x.i), kata: t, hira };
+      }
+      return null;
+    })()`);
+    if (kanaCase) {
+      // 反向确认：这个平假名查询在「不折叠」时应为 0，否则用例证明不了折叠
+      await setSearch(kanaCase.hira);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('平假名写法可搜到片假名书名', ids.includes(kanaCase.id),
+        `${kanaCase.hira.slice(0, 16)} → ${ids.length} 条，含目标=${ids.includes(kanaCase.id)}`);
+    } else {
+      check('平假名写法可搜到片假名书名', false, '未取到含片假名样本');
+    }
+
+    // 4c) 长音折叠：库里罗马字把 ー 直接删掉（コーヒー→kohi），按赫本式双写元音打的
+    //     koohii 必须也能命中。严格匹配下折叠式一本都中不了，产品会切到兜底通道。
+    const choonCase = await cdp.evaluate(`(() => {
+      const fold = (s) => String(s || '').replace(/ou/g, 'o').replace(/([aiueo])\\1+/g, '$1');
+      for (const x of window.LN_DATA || []) {
+        if (x.c || x.gn || x.ver) continue;
+        const r = String(x.rpyFull || '');
+        if (r.length < 6) continue;
+        const f = fold(r);
+        if (f === r || f.length < 6) continue;
+        return { id: String(x.i), rpy: r, folded: f };
+      }
+      return null;
+    })()`);
+    if (choonCase) {
+      await setSearch(choonCase.folded);
+      const ids = await cdp.evaluate(`(() => [...document.querySelectorAll('.card')].map((c) => c.dataset.id))()`);
+      check('罗马字长音省略写法可命中', ids.includes(choonCase.id),
+        `${choonCase.folded.slice(0, 20)} → ${ids.length} 条，含目标=${ids.includes(choonCase.id)}`);
+    } else {
+      check('罗马字长音省略写法可命中', false, '未取到含长音样本');
+    }
+
     // 5) 作者独立索引：作者名只存在于 au 包，不出现于任何书名
     const auOnly = await cdp.evaluate(`(() => {
       const corpus = (window.LN_DATA || []).map((x) => (x.cn || '') + '|' + (x.n || '')).join('\\n');
