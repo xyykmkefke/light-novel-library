@@ -1257,9 +1257,18 @@ toast('已标记为「' + STATUS[status] + '」：' + item.cn);   // 下一行
 
 **判断标准写在这里，供以后复查**：写入的内容**是不是用户手打、且界面上会显示「已保存」**。是 → 必须上报；不是 → 静默可接受。
 
-### 9.55.7 验收
+### 9.55.7 顺带核过、结论是「没问题」的项
 
-`verify` **247/247**（240 → 247），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+排查时一并查了这几处，都是能过但值得留下结论的：
+
+- **`JSON.parse` 全部有保护**：脚本内共 14 处，逐处检查「向前 8 行内是否包在 `try` 里」，14/14 均受保护。`loadDrafts` / `loadDeleted` / `loadSettings` 等还有字段级校验（`/^\d+$/` 验 id、`typeof` 验对象、`slice` 截长度），坏数据不会流进内存。
+- **函数声明提升已验证**：`isQuotaError`（4478 行附近）被 `persistMeta`（3432）前向调用，两者同在顶层作用域，`function` 声明提升保证可用。这是刻意的位置安排——放在统一上报旁边便于阅读，不必为「定义在前」而上移。
+- **`storeFailed` 用 `Object.create(null)`**：不用 `{}`，避免 key 叫 `__proto__` 之类的写法污染原型链。虽然本项目的 key 都是常量，改一行不增加成本。
+- **剩下 19 处空 catch 逐个确认过归属**：除本次修的 3 处，其余分两类——①可重建的派生状态（设置 / 偏好 / 搜索历史 / 打卡 / 目标 / 同步配置与日志 / 视图 / 备份时间戳）；②有意降级（`T2CN` 单字符异常不该拖垮整个搜索、`execCommand` 复制失败退回、`fetch` 不支持时退回普通请求、`sessionStorage` 隐私模式）。没有第三类。
+
+### 9.55.8 验收
+
+`verify` **247/247**（240 → 247），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
 
 版本 **1.24.4 → 1.24.5**，SW `yuc-ln-shell-v55` → **`v56`**（`index.html` 是运行时文件，按清单第 2 条升 SW）。版本五处一致：`index.html` meta + 页脚、`package.json`、`package-lock.json` 两处、`manifest.webmanifest`。
 
