@@ -492,6 +492,26 @@ try {
     noisy.length ? JSON.stringify(noisy) : noiseReport.map((x) => x.q + '=0').join(', '),
     noisy);
 
+  // 上一条是「单侧验证」：只要求无关查询返回 0。
+  // 如果 `__lnAudit.find()` 本身坏了（DATA 空、matchesQuery 恒 false、钩子被改坏），
+  // 它对任何输入都返回空数组 —— 那 4 条无关查询会全部「通过」，
+  // 而整个审计的其余维度也会因为「找不到」而集体失真。
+  // 所以必须补一条正向对照：同一个 find() 对一个必然存在的查询必须返回 >0。
+  // 两条一起看才说明「0 是真的因为无关，而不是因为搜索坏了」。
+  const positiveCtl = await c.evaluate(`(() => {
+    const A = window.__lnAudit;
+    const all = A.find('a');            // 单字母，几乎必然命中
+    const first = (window.LN_DATA || [])[0];
+    // 再拿第一条的真实标题片段做一次，避免只靠单字母偶然命中
+    const frag = first ? String(first.n || '').slice(0, 4) : '';
+    const byFrag = frag ? A.find(frag) : [];
+    return { total: (window.LN_DATA || []).length, byA: all.length, frag: frag, byFrag: byFrag.length };
+  })()`);
+  record('正向对照：搜索本身能命中（防「无关查询」断言空跑）',
+    positiveCtl.total > 0 && positiveCtl.byA > 0 && positiveCtl.byFrag > 0,
+    `全库 ${positiveCtl.total} 条 · 搜 a → ${positiveCtl.byA} · 搜「${positiveCtl.frag}」→ ${positiveCtl.byFrag}`,
+    []);
+
   // ---- 本地纠错改写字段后，搜索必须立刻跟上 ----
   //
   // 为什么单独一项：v1.24.3 修的 bug 就是这里——normCache 以「条目 ID + 字段名」为键，

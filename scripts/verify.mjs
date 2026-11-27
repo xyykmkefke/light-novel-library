@@ -302,10 +302,24 @@ async function main() {
     };
 
     // 等某条目的作者字段真正到位，返回是否等到。
-    // 只检查 window.__LN_EXTRA_READY 不够：该标志为真不代表目标条目的 au 已经落到数据上。
-    // 实测偶发「标志已真但 item.au 仍为空」，随后「恢复上游清除覆盖与别名」拿 '' 去比
-    // 页面加载时记下的 editPick.au 就 FAIL，详情区同时显示「字段加载中…」。
-    // 这是前置条件问题，不是被测功能的问题，必须等真实数据而不是等标志。
+    //
+    // 原注释写的是「`__LN_EXTRA_READY` 为真不代表目标条目的 au 已落到数据上」，
+    // 这个归因**是错的**（2026-11-27 核实）。看 index.html 的实现：extra 包 onload 里
+    // 先 `Object.keys(fields).forEach(key => x[key] = fields[key])` 把字段写进 DATA，
+    // **之后**才 `window.__LN_EXTRA_READY = true`。全文件只有这一处赋值。
+    // 所以「标志为真」时字段必然已经写完 —— 不存在「标志真但字段空」的窗口。
+    //
+    // 真正的失败原因有两个，都与加载时序无关：
+    //   ① 有 12 条候选条目 extra 包里**本就没有 `au`**（画集只有插图 `il`）。
+    //      2019 年那次失败是选中了这类条目，等多久都不会有作者。
+    //      已在挑 editPick 时排除（见上面的注释）。
+    //   ② `editPick.au` 在 extra 加载前取，那一刻 lite 包**完全没有 au 字段**
+    //      （实测 lite 2026 条里带 au 的是 0 条），所以初始值必为空串。
+    //      这是调用方的问题，已由下面「以就绪后的真实值为准」修掉。
+    //
+    // 那这个等待还要不要？要。它守的是「打开详情到 extra 到位」这段真实窗口：
+    // 实测注入 3 秒延迟时，au 要 3071ms 才到位，期间详情区显示「字段加载中…」。
+    // 但它是**加载等待**，不是 bug 修复，注释不能写成「修掉了某个竞态」。
     const waitAuthor = async (id, tries = 120) => {
       for (let i = 0; i < tries; i += 1) {
         const ok = await cdp.evaluate(`(() => {
@@ -1208,6 +1222,54 @@ async function main() {
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(300);
 
+    // ---- 草稿写失败时不能谎报「已自动保存」 ----
+    // 草稿是「输入即存」，用户看不到任何保存动作，唯一的信息来源就是这行提示。
+    // 若 persistDrafts 静默失败而提示照旧，用户会以为内容已稳妥，关掉详情才发现全丢。
+    await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(pick.id)}; })()`);
+    await sleep(350);
+    const draftFail = await cdp.evaluate(`(async () => {
+      // 必须改 Storage.prototype，不能给 localStorage 实例挂属性：
+      // \`localStorage.setItem = fn\` 会在 Storage 对象上建一个自有属性，
+      // Object.keys(localStorage) 会多出一个 'setItem'，把后面的
+      // 「本地存储全部使用 yuc_ln_ 前缀」断言搞挂（也确实不是真正的键）。
+      // 而且后面写回原函数也只是把它换回同名的自有属性，污染会一直留着。
+      const rawSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k) {
+        if (String(k).indexOf('draft') >= 0) {
+          const err = new Error('QuotaExceededError simulated');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+        return rawSet.apply(this, arguments);
+      };
+      let out = {};
+      try {
+        const el = document.getElementById('reviewShort');
+        el.value = '配额探测草稿';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 250));
+        out.hint = (document.getElementById('reviewCount').textContent || '').slice(0, 60);
+        out.bannerHidden = document.getElementById('storageWarn').hidden;
+        out.draftWritten = !!JSON.parse(localStorage.getItem('yuc_ln_draft_v1') || '{}')[${JSON.stringify(pick.id)}];
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      // 收尾：清空输入，别把探测文本留在草稿里影响后续断言
+      const el2 = document.getElementById('reviewShort');
+      el2.value = '';
+      el2.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      return out;
+    })()`);
+    check('草稿写失败时不谎报「已自动保存」',
+      draftFail.draftWritten === false && /未能保存/.test(draftFail.hint) &&
+      !/已自动保存/.test(draftFail.hint),
+      JSON.stringify(draftFail));
+    check('草稿写失败时也亮出常驻横幅',
+      draftFail.bannerHidden === false, JSON.stringify({ bannerHidden: draftFail.bannerHidden }));
+    await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(300);
+
     // ---- 视图与分组 ----
     await click('.tab[data-tab="mine"]');
     // 列表视图封面仅 64px 宽，sizes 应随之收窄，避免误取 400w 大图
@@ -1997,17 +2059,61 @@ async function main() {
     await sleep(200);
 
     // ---- 本地纠错与别名 ----
-    const editPick = await cdp.evaluate(`(() => {
-      const s = (window.LN_DATA || []).find((x) => !x.rn && !x.ver && !x.c && !x.gn && x.n);
-      return s ? { id: String(s.i), au: s.au || '', n: s.n } : null;
+    //
+    // 选条目时要主动避开「本来就没有作者」的条目，否则 waitAuthor 会白等到超时。
+    //
+    // 实测（2026-11-27）：候选 2026 条里有 12 条 extra 包里本就没有 `au` 字段——
+    // 不是加载慢，是数据本身没有：画集只有插图（`il`）、`ミッキーマウス90周年記念
+    // イラスト集 gift` 属此类。原写法 `find(...)` 取第一条、恰好那条有作者，所以一直
+    // 蒙混通过；一旦数据顺序变化、选中无作者条目，就会空等 18 秒后 FAIL，
+    // 而 FAIL 信息写的是「等了 18 秒仍未拿到作者字段」——看起来像加载竞态，
+    // 实际是选了个数据上没有作者的条目，排查方向会被完全带偏。
+    //
+    // 判据用「extra 包里有非空 au」而不是「页面上 au 非空」：后者要等加载，
+    // 在挑条目的时点还拿不到。extra 包是全局 `window.LN_EXTRA`（脚本一 onload 就在了），
+    // 而 `loadExtra` 是闭包内函数、没挂到 window，所以只能靠「打开一次详情」把它拉下来。
+    const editPick = await cdp.evaluate(`(async () => {
+      const cands = (window.LN_DATA || []).filter((x) => !x.rn && !x.ver && !x.c && !x.gn && x.n);
+      if (!cands.length) return null;
+      // 打开一条详情触发 loadExtra。loadExtra 是闭包函数、不是全局，只能这样拉。
+      const keep = location.hash;
+      location.hash = 'd=' + cands[0].i;
+      for (let k = 0; k < 200 && !window.__LN_EXTRA_READY; k += 1) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      location.hash = keep;
+      if (!window.__LN_EXTRA_READY) return { id: String(cands[0].i), au: '', n: cands[0].n, hasAu: false, reason: 'extra 未就绪' };
+      const ext = window.LN_EXTRA || {};
+      const withAu = cands.find((x) => String((ext[String(x.i)] || {}).au || ''));
+      const s = withAu || cands[0];
+      // hasAu 必须判「**选中这条**的 au 是否非空」，不能写 !!withAu。
+      // 后者只表示「找到了某条有作者的」，一旦挑选逻辑退化、选中无作者条目，
+      // 它仍会是 true —— 断言会显示 au="" 却照样 PASS（实测过，见 2026-11-27）。
+      const pickedAu = String((ext[String(s.i)] || {}).au || '');
+      return { id: String(s.i), au: s.au || '', n: s.n, hasAu: !!pickedAu, pickedAu: pickedAu };
     })()`);
+    if (!editPick) {
+      check('本地纠错的前置条件（找到可编辑条目）', false, '候选为空');
+    }
+    if (editPick && !editPick.hasAu) {
+      // 兜底：全库都挑不出有作者的条目，说明数据出了问题，而不是选错了条目
+      check('本地纠错的前置条件（存在带作者的条目）', false, '2026 条候选里没有一条 extra 带作者');
+    }
+    // 把选中的条目记进断言，下次失败时能立刻看出是不是又选中了无作者的条目。
+    // 这条同时守住 editPick 的挑选逻辑：若有人把它改回 find() 取第一条，
+    // 一旦第一条恰是无作者的画集，这里会 FAIL 并直接点出书名。
+    if (editPick) {
+      check('本地纠错的测试条目带作者（避免选中画集类无作者条目）', editPick.hasAu === true,
+        `${editPick.n ? editPick.n.slice(0, 26) : ''} · extra.au=${JSON.stringify(editPick.pickedAu)}`);
+    }
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
     await sleep(450);
     // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回。
-    // 等「作者的字段真正到位」而不是只等 ready 标志，见 waitAuthor 的注释。
+    // 注意这是**加载等待**，不是「修掉了某个竞态」——原因见 waitAuthor 的注释。
     const extraOk = await waitAuthor(editPick.id);
     if (!extraOk) {
-      check('详情包已就绪（本地纠错的前置条件）', false, '等了 18 秒仍未拿到作者字段');
+      check('详情包已就绪（本地纠错的前置条件）', false,
+        `等了 ${(120 * 150 / 1000).toFixed(0)} 秒仍未拿到作者字段（条目：${editPick.n ? editPick.n.slice(0, 26) : editPick.id}）`);
     }
     // editPick.au 是在 extra 包到位之前取的，那时可能还是空串；「恢复上游」要在恢复后
     // 拿它做比较基准，基准本身为空会让断言永远不可能通过。这里以就绪后的真实值为准。
@@ -2165,6 +2271,159 @@ async function main() {
     await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
     await sleep(200);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
+    await sleep(200);
+
+    // ---- 存储写入失败必须让用户真的看得见 ----
+    // 走真实入口：把 localStorage.setItem 换成抛配额错误，再从详情面板存一次纠错。
+    //
+    // 这里要验两件不同的事，不能混为一谈：
+    //   ① 「提示发出过」—— 用 MutationObserver 记录 toast 的全部历史。
+    //      不能只看最终文本：页面只有一个 toast 元素，任何后续提示（PWA 的
+    //      「安装到主屏幕」、云同步状态、调用方自己的成功提示）都会把它覆盖。
+    //      实测过两种覆盖：紧随其后的 toast('已保存本地纠错')，以及随机时机的
+    //      PWA 安装提示。所以「最终屏幕上那条是什么」本身就不是稳定判据。
+    //   ② 「用户最终看得到」—— 只有顶部常驻横幅 storageWarn 是可信通道，
+    //      它不会因为别的 toast 而消失，刷新前一直在。
+    //
+    // 只验 ②不验 ①，会把「catch 里裸 toast 然后被覆盖」的假修复放过；
+    // 只验 ①不验 ②，会把「提示一闪而过、用户根本没看见」放过。两个都要。
+    const storeFail = await cdp.evaluate(`(async () => {
+      const id = ${JSON.stringify(editPick.id)};
+      const toastEl = document.getElementById('toast');
+      const seen = [];
+      const mo = new MutationObserver(() => {
+        const t = (toastEl.textContent || '').trim();
+        if (t && seen[seen.length - 1] !== t) seen.push(t);
+      });
+      mo.observe(toastEl, { childList: true, subtree: true, characterData: true });
+      seen.push((toastEl.textContent || '').trim());
+      // 改原型而不是实例，理由同上面的草稿用例：给 localStorage 挂自有属性
+      // 会让 Object.keys(localStorage) 多出 'setItem'，污染后续前缀断言。
+      const rawSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function () {
+        const err = new Error('QuotaExceededError simulated');
+        err.name = 'QuotaExceededError';
+        throw err;
+      };
+      let out = { ok: false };
+      try {
+        location.hash = 'd=' + id;
+        await new Promise((r) => setTimeout(r, 450));
+        const panel = document.getElementById('detailMetaEdit');
+        if (panel && panel.hidden) {
+          const btn = document.getElementById('detailEdit');
+          if (btn) btn.click();
+          await new Promise((r) => setTimeout(r, 180));
+        }
+        const au = document.querySelector('[data-meta-field="au"]');
+        if (au) au.value = '配额探测作者';
+        const save = document.querySelector('#detailMetaEdit [data-meta-act="save"]');
+        if (save) save.click();
+        // 调用方的成功 toast 紧接着进来，必须等它落定再读
+        await new Promise((r) => setTimeout(r, 400));
+        const warn = document.getElementById('storageWarn');
+        out = {
+          ok: true,
+          warnHidden: warn.hidden,
+          warnText: (warn.textContent || '').slice(0, 60),
+          toasts: seen.slice(),
+          failureToasted: seen.some((t) => /未保存/.test(t)),
+        };
+      } finally {
+        Storage.prototype.setItem = rawSet;
+        mo.disconnect();
+      }
+      // 收尾：写入已恢复正常，再存一次纠错（这次会真正落盘），
+      // 顺带验证横幅会在写入恢复后自动消失。
+      // 注意不能直接点 reset：保存后面板会收起（metaEditing=false），
+      // reset 按钮只在面板展开且 metaMap 有该条目时才渲染，此时它不存在。
+      const editBtn = document.getElementById('detailEdit');
+      if (editBtn) editBtn.click();
+      await new Promise((r) => setTimeout(r, 200));
+      const au2 = document.querySelector('[data-meta-field="au"]');
+      if (au2) au2.value = '恢复写入作者';
+      const save2 = document.querySelector('#detailMetaEdit [data-meta-act="save"]');
+      if (save2) save2.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const warnAfter = document.getElementById('storageWarn');
+      // 「能收起」必须以「曾经显示过」为前提。否则在缺陷态（横幅从头到尾没显示）
+      // hidden 天然为 true，这条断言恒真、永远 PASS，反向验证时也抓不出来。
+      out.bannerWasShown = out.warnHidden === false;
+      out.bannerRestored = out.bannerWasShown && warnAfter.hidden === true;
+      out.metaCleared = JSON.parse(localStorage.getItem('yuc_ln_meta_v1') || '{}')[id].au === '恢复写入作者';
+      return out;
+    })()`);
+    check('存储写满时会发出失败提示',
+      storeFail.ok === true && storeFail.failureToasted === true,
+      JSON.stringify({ failureToasted: storeFail.failureToasted, toasts: (storeFail.toasts || []).slice(-4) }));
+    check('存储写满时失败信息常驻可见（不依赖 toast，不会被别的提示覆盖）',
+      storeFail.warnHidden === false && /已满/.test(storeFail.warnText || ''),
+      JSON.stringify({ warnHidden: storeFail.warnHidden, warnText: storeFail.warnText }));
+    check('写入恢复后自动撤掉失败横幅',
+      storeFail.bannerWasShown === true && storeFail.bannerRestored === true &&
+      storeFail.metaCleared === true,
+      JSON.stringify({ wasShown: storeFail.bannerWasShown, restored: storeFail.bannerRestored, metaCleared: storeFail.metaCleared }));
+    // 清理探针，避免污染后续「恢复上游」类断言的基准
+    await cdp.evaluate(`(() => {
+      const b = document.getElementById('detailEdit');
+      if (b) b.click();
+      const r = document.querySelector('#detailMetaEdit [data-meta-act="reset"]');
+      if (r) r.click();
+    })()`);
+    await sleep(250);
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+    await sleep(200);
+
+    // ---- 删除墓碑写失败也要可见 ----
+    // 墓碑丢失的后果不是「删除没生效」，而是「删掉的书在下次云同步时自己回来」：
+    // 内存里已删，但远端没有墓碑作废，合并时又被拉回来。用户完全猜不到原因。
+    const tombFail = await cdp.evaluate(`(async () => {
+      const rawSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k) {
+        if (String(k).indexOf('del') >= 0) {
+          const err = new Error('QuotaExceededError simulated');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+        return rawSet.apply(this, arguments);
+      };
+      let out = {};
+      try {
+        location.hash = 'd=' + ${JSON.stringify(editPick.id)};
+        await new Promise((r) => setTimeout(r, 400));
+        const box = document.getElementById('detailMetaEdit');
+        if (box && !box.hidden) {
+          const c = document.querySelector('#detailMetaEdit [data-meta-act="cancel"]');
+          if (c) c.click();
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        // 先确保这本书在收藏里，才能走「移除」这条路径写出墓碑
+        const t = document.getElementById('detailToggle');
+        if (t && t.textContent.indexOf('加入') >= 0) {
+          t.click();
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        const t2 = document.getElementById('detailToggle');
+        if (t2) t2.click();
+        await new Promise((r) => setTimeout(r, 300));
+        out.bannerHidden = document.getElementById('storageWarn').hidden;
+        out.bannerText = (document.getElementById('storageWarn').textContent || '').slice(0, 40);
+        out.inMine = !!JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(editPick.id)}];
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      return out;
+    })()`);
+    check('删除墓碑写失败时亮出常驻横幅（防删掉的书被云同步拉回）',
+      tombFail.bannerHidden === false && tombFail.inMine === false,
+      JSON.stringify({ bannerHidden: tombFail.bannerHidden, inMine: tombFail.inMine, bannerText: tombFail.bannerText }));
+    // 收尾：把书加回收藏，后续断言依赖该条目存在
+    await cdp.evaluate(`(() => {
+      const t = document.getElementById('detailToggle');
+      if (t && t.textContent.indexOf('加入') >= 0) t.click();
+    })()`);
+    await sleep(250);
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
     await sleep(200);
 
     // ---- 阅读格式与藏书 ----

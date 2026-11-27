@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.4">
+<meta name="version" content="1.24.5">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.4</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.5</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3430,11 +3430,28 @@
   }
 
   function persistMeta() {
-    if (!canStore) return;
+    if (!canStore) return false;
     try {
       if (!Object.keys(metaMap).length) localStorage.removeItem(META_KEY);
       else localStorage.setItem(META_KEY, JSON.stringify(metaMap));
-    } catch (e) { /* 隐私模式下忽略 */ }
+      clearStoreFailure(META_KEY);
+      return true;
+    } catch (e) {
+      // 原来这里是 `catch (e) { /* 隐私模式下忽略 */ }` —— 静默吞掉。
+      //
+      // 后果比「忽略」严重得多：本地纠错是用户手动改的中文名 / 原名 / 作者 / 别名，
+      // 界面上会立刻显示改后的值（因为改的是内存对象），但**没写进 localStorage**。
+      // 用户以为保存成功了，一刷新全部消失，而且全程没有任何提示。
+      // 配额满（约 5MB，收藏多了很容易撞）或隐私模式下都会走到这里。
+      //
+      // 纠错确实会进导出 JSON 与云同步（两处 payload 都是 meta: metaMap），
+      // 所以「之前导出过」的用户还有备份可回；但**这一次**的修改没有任何落地，
+      // 且用户完全无从知晓 —— 必须当场提示，让他有机会补救。
+      //
+      // 注意不能用裸 toast：调用方紧接着就会 toast('已保存本地纠错')，
+      // 同一帧内把这里的内容覆盖掉。必须走 reportStoreFailure 的常驻通道。
+      return reportStoreFailure(e, META_KEY);
+    }
   }
 
   // 覆盖写回内存条目；__mo_applied 记住被覆盖字段的上游原值，供「恢复上游」还原
@@ -4340,7 +4357,13 @@
     if (!canStore) return;
     try {
       localStorage.setItem(DEL_KEY, JSON.stringify(myDeleted));
-    } catch (e) { /* 忽略存储失败 */ }
+      clearStoreFailure(DEL_KEY);
+    } catch (e) {
+      // 墓碑丢了比「删除没生效」更麻烦：本地看着是删了（内存里已删），
+      // 但下次云同步拉回远端数据时，没有墓碑就会把这本书重新合并进来，
+      // 表现为「删掉的书过一会儿自己回来了」，用户完全猜不到原因。
+      reportStoreFailure(e, DEL_KEY);
+    }
   }
 
   function markDeleted(id) {
@@ -4379,7 +4402,13 @@
   function persistDrafts(drafts) {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts));
-    } catch (e) { /* 隐私模式下忽略 */ }
+      return true;
+    } catch (e) {
+      // 书评草稿是「输入即存」的，用户看不到任何保存动作。写失败却静默返回时，
+      // 界面上仍然显示「草稿已自动保存」，用户以为几十分钟写的内容已经稳妥，
+      // 关掉详情就全部丢失。必须让失败可见。
+      return reportStoreFailure(e, DRAFT_KEY);
+    }
   }
 
   // 与已保存内容一致（或已移出收藏）时清掉草稿，避免恢复陈旧文本
@@ -4391,7 +4420,7 @@
     } else {
       drafts[id] = { rv: String(rv), nt: String(nt), t: Date.now() };
     }
-    persistDrafts(drafts);
+    return persistDrafts(drafts);
   }
 
   function clearDraft(id) {
@@ -4405,8 +4434,17 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
     } catch (e) {
-      toast('浏览器禁止本地存储，请及时导出备份');
-      return false;
+      // 区分两种失败，否则用户被指向错误方向：
+      //   QuotaExceededError —— 存满了（浏览器一般给 5MB），收藏本身没坏，
+      //     清点空间或导出后清理旧数据就能恢复；
+      //   其它 —— 真的被禁用（隐私模式、站点设置、无痕）。
+      // 原来一律说「浏览器禁止本地存储」，配额满时用户会去翻浏览器设置，
+      // 找不到任何「禁用」选项，反而看不出是空间不够。
+      // 无论哪种，这次写入**已经失败**，必须让用户立刻导出，否则关闭页面就丢了。
+      //
+      // 这里同样不能裸 toast —— 调用方常有 `saveMine(); toast('已标记为「…」')`
+      // 这种写法，失败提示会被紧随其后的成功提示覆盖。
+      return reportStoreFailure(e, STORAGE_KEY);
     }
     // 云同步写入本机时不计数，也不触发回推，避免同步循环
     if (!opts || !opts.fromSync) {
@@ -4414,6 +4452,69 @@
       scheduleSync();
     }
     return true;
+  }
+
+  // 判断是否是「配额超限」而不是「存储被禁用」。
+  // 各浏览器抛的名字不一样：Chrome/Edge 是 QuotaExceededError，
+  // Firefox/Safari 旧版给 NS_ERROR_DOM_QUOTA_REACHED 或 code 22 / 1014。
+  function isQuotaError(e) {
+    if (!e) return false;
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') return true;
+    if (e.code === 22 || e.code === 1014) return true;
+    return /quota/i.test(String(e.message || ''));
+  }
+
+  // ---- 存储写入失败的统一上报 ----
+  //
+  // 为什么不能直接 toast：页面只有一个 toast 元素，后一次调用会把前一次的内容清掉。
+  // 而 persistMeta / saveMine 的调用方几乎都在紧接着的一两行里 toast 一句成功提示
+  // （「已保存本地纠错」「已标记为「读完」」…），失败提示会在同一帧内被覆盖。
+  // 实测过：只在 catch 里 toast 一次，用户从头到尾只看得到「已保存」。
+  // 后来又实测到第二种覆盖源：PWA 的「安装到主屏幕」提示会随机时机弹出来，
+  // 连「延迟 60ms 再 toast」都靠不住。所以 toast 只是补充，横幅才是主通道。
+  //
+  // 横幅按 **key 粒度** 记账：只有写成功的那个 key 才算「补回来了」。
+  // 反例：纠错（META_KEY）写失败、紧接着收藏（STORAGE_KEY）写成功，
+  // 若用全局布尔量就会把横幅撤掉，而纠错那份数据其实已经丢了。
+  var storeFailed = Object.create(null);
+  var storeToasted = false;
+
+  function reportStoreFailure(e, key) {
+    var quota = isQuotaError(e);
+    var k = key || 'unknown';
+    storeFailed[k] = quota ? 'quota' : 'blocked';
+    var el = document.getElementById('storageWarn');
+    if (el) {
+      el.textContent = quota
+        ? '浏览器本地存储已满，有改动没能保存，刷新后会丢失。请先导出备份，再清理不需要的收藏或清空本站数据。'
+        : '当前浏览器禁用了本地存储，新的改动只在本次打开期间有效。请切到「我的阅读」用「导出备份」保存结果。';
+      el.hidden = false;
+    }
+    // toast 全局只弹一次：存储满时一次操作常会连写两三个 key（收藏 + 墓碑），
+    // 每个都弹一遍会刷屏，反而让人以为出了更大的问题。
+    if (!storeToasted) {
+      storeToasted = true;
+      setTimeout(function () {
+        toast(quota
+          ? '本地存储已满，本次改动未保存！请立即导出备份'
+          : '浏览器禁止本地存储，本次改动未保存！请立即导出备份');
+      }, 60);
+    }
+    return false;
+  }
+
+  // 某个 key 写成功后清掉它自己的失败标记；全部清空才收起横幅。
+  // 别的 key 还欠着账时横幅必须留着 —— 「另一个 key 写成功」不代表丢的数据回来了。
+  function clearStoreFailure(key) {
+    var k = key || 'unknown';
+    if (!storeFailed[k]) return;
+    delete storeFailed[k];
+    if (Object.keys(storeFailed).length) return;
+    var el = document.getElementById('storageWarn');
+    if (el) {
+      el.hidden = true;
+      el.textContent = '当前浏览器禁用了本地存储，加入的书目只在本次打开期间有效。请切到「我的阅读」用「导出备份」保存结果。';
+    }
   }
 
   function toast(msg, action) {
@@ -8734,15 +8835,20 @@
   });
 
   // 书评：评分即时保存；短评与笔记输入即存草稿，点「保存书评」正式提交
-  function refreshReviewCount() {
+  //
+  // 文案里的「草稿已自动保存」是一句承诺。persistDrafts 失败时（配额满 / 存储被禁）
+  // 如果照旧显示它，用户会以为几十分钟写的内容已经稳妥，关掉详情才发现没了。
+  // 所以这里接收 saveDraft 的返回值，失败时改说「草稿未能保存」。
+  function refreshReviewCount(draftSaved) {
     var row = $('reviewCount');
     var rv = $('reviewShort');
     var nt = $('reviewNote');
     if (!row || !rv || !nt) return;
     var entry = modalId ? myMap[modalId] : null;
     var dirty = !!(entry && (rv.value.trim() !== (entry.rv || '') || nt.value.trim() !== (entry.nt || '')));
-    row.textContent = rv.value.length + '/140 · ' + nt.value.length + '/1000' +
-      (dirty ? ' · 草稿已自动保存' : '');
+    var hint = '';
+    if (dirty) hint = draftSaved === false ? ' · 草稿未能保存' : ' · 草稿已自动保存';
+    row.textContent = rv.value.length + '/140 · ' + nt.value.length + '/1000' + hint;
   }
 
   $('detailReview').addEventListener('click', function (e) {
@@ -8767,8 +8873,11 @@
     if (!e.target.matches('textarea')) return;
     var rv = $('reviewShort');
     var nt = $('reviewNote');
-    if (modalId && myMap[modalId] && rv && nt) saveDraft(modalId, rv.value, nt.value);
-    refreshReviewCount();
+    if (modalId && myMap[modalId] && rv && nt) {
+      refreshReviewCount(saveDraft(modalId, rv.value, nt.value));
+    } else {
+      refreshReviewCount();
+    }
   });
   $('detailReview').addEventListener('click', function (e) {
     if (!e.target.closest('#reviewSave') || !modalId || !myMap[modalId]) return;
