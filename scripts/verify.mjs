@@ -6,7 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -186,18 +186,52 @@ function check(name, ok, detail) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  → ' + detail : ''}`);
 }
 
+// 杀掉本次验收启动的整个浏览器进程树。
+//
+// 为什么不能只 taskkill /PID child.pid /T：
+//   Edge 首次用一个新的 --user-data-dir 启动时，spawn 出来的进程可能只是个
+//   launcher，它把真正的 browser 进程拉起后自己就退了。child.pid 一旦失效，
+//   `/T` 无从展开子树，于是一个子进程都杀不到 —— 但 taskkill 仍返回 0（或只报
+//   「没有找到该进程」），从外部看像是「已经处理过了」。
+//   实测 2026-11-27：跑完一轮后残留 11 个 msedge.exe 仍引用着临时 profile，
+//   rm 报 EBUSY；而日志里没有任何清理失败提示，因为 rm 那步在等待后确实重试了，
+//   只是目录一直被占着。
+//
+// 兜底做法：按「命令行里含本轮的 profile 路径」精确匹配进程。
+// 这条判据不依赖父子关系，也不依赖 pid 是否还活着，能覆盖 launcher 模式。
+// 用 PowerShell 而不是 wmic：新版 Windows 已移除 wmic。
+function killBrowserTree(child, profileDir) {
+  if (process.platform !== 'win32') {
+    try { child?.kill(); } catch {}
+    return;
+  }
+  // 先按 pid 试一次（正常情况够用，也最快）
+  if (child && child.pid) {
+    try { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
+  }
+  // 再按 profile 路径兜底：清掉所有还在引用该目录的浏览器进程
+  //
+  // 匹配用目录「名」而不是完整路径：profileDir 名为 `ln-verify-profile-<pid>-<时间戳>`，
+  // 本身唯一，且不含反斜杠。早先想拼完整路径，却在 JS 里把 `\` 替换成 `\\`，
+  // 而 PowerShell 的 -like 中 `\` 是字面量、不需要转义 —— 结果是永远匹配不到，
+  // 兜底静默失效（连报错都没有，因为 spawnSync 的 stdio 是 ignore）。
+  const tag = path.basename(profileDir);
+  const ps = [
+    'Get-CimInstance Win32_Process -Filter "Name=\'msedge.exe\'"',
+    `| Where-Object { $_.CommandLine -like '*${tag}*' }`,
+    '| ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }',
+  ].join(' ');
+  try {
+    spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { stdio: 'ignore' });
+  } catch {}
+}
+
 async function main() {
   const browser = findBrowser();
-  const profile = path.join(os.tmpdir(), 'ln-verify-profile');
-  // profile 被上一个残留浏览器锁住时 rm 会抛 EBUSY，而那与本次运行无关：
-  // 换一个带时间戳的独立 profile，比在这里失败更符合「验收要能跑完」的目的。
-  let profileDir = profile;
-  try {
-    await rm(profile, { recursive: true, force: true });
-  } catch {
-    profileDir = `${profile}-${Date.now()}`;
-    console.log('提示：默认 profile 被占用，改用独立 profile');
-  }
+  // profile 每次运行都用独立目录（pid + 时间戳）。
+  // 早先写死 'ln-verify-profile'、仅在 rm 失败时兜底改名——能跑但每次都要白抛一次
+  // EBUSY 异常，且残留浏览器仍抱着旧目录。直接每次换新目录更简单可靠。
+  const profileDir = path.join(os.tmpdir(), 'ln-verify-profile-' + process.pid + '-' + Date.now());
   await mkdir(SHOT_DIR, { recursive: true });
 
   const server = await startServer();
@@ -2519,13 +2553,19 @@ async function main() {
         JSON.stringify(loadingState.text.slice(0, 40)));
 
       // 等 rest 到位，验证无需重搜即自动出结果
-      for (let i = 0; i < 80; i += 1) {
-        if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) break;
+      //
+      // 上限必须留足：服务端对这个分片注入 6s 延迟，而请求本身要等首屏渲染后
+      // 由 idle 回调发出（实测在 reload 后约 3s 才发出），6s 后返回再解析。
+      // 纯脚本实测「就绪」耗时 9.1s；verify 跑到这里时页面已累积大量状态、CPU 更忙，
+      // 12s 上限只剩不到 3s 余量，实测连跑第 2 次就会超时挂掉。
+      // 放宽到 20s，并显式记录是否真的就绪——超时是「没等到」，与「等到了但结果不对」
+      // 是两种完全不同的缺陷，混在一条失败信息里会误导排查方向。
+      let fullReady = false;
+      for (let i = 0; i < 134; i += 1) {
+        if (await cdp.evaluate('window.__FULL_DATA_READY === true').catch(() => false)) { fullReady = true; break; }
         await sleep(150);
       }
-      // 不能只等固定时长：数据就绪到结果区重渲染之间还有一次异步刷新，
-      // 固定 sleep 会随机读到旧状态，表现为「偶发失败」（实测跑 2 次挂 1 次）。
-      // 改为轮询到结果真正出现为止，超时才判失败。
+      // 就绪后数据到结果区还有一次异步刷新，轮询到结果真正出现为止。
       let afterReady = await readEmpty();
       for (let i = 0; i < 40; i += 1) {
         if (afterReady.hidden === true && String(afterReady.count) !== '0') break;
@@ -2533,11 +2573,12 @@ async function main() {
         afterReady = await readEmpty();
       }
       check('全库就绪后按当前关键词自动刷新结果',
-        afterReady.hidden === true && String(afterReady.count) !== '0',
+        fullReady && afterReady.hidden === true && String(afterReady.count) !== '0',
         JSON.stringify({
-          hidden: afterReady.hidden, count: afterReady.count,
-          novel: afterReady.novel, fullReady: afterReady.fullReady,
-          dataLen: afterReady.dataLen,
+          // fullReady 为 false 表示「20s 内全库就没加载完」，属等待超时；
+          // 为 true 但它项不达标，才是「刷新逻辑」本身的问题。分开才看得出方向。
+          fullReady: fullReady, hidden: afterReady.hidden, count: afterReady.count,
+          novel: afterReady.novel, dataLen: afterReady.dataLen,
         }));
       fault.restDelay = 0;
 
@@ -2578,9 +2619,18 @@ async function main() {
 
   } finally {
     try { ws?.close(); } catch {}
-    try { child?.kill(); } catch {}
+    killBrowserTree(child, profileDir);
     await new Promise((resolve) => server.close(resolve));
-    if (!KEEP) await rm(profileDir, { recursive: true, force: true }).catch(() => {});
+    if (!KEEP) {
+      // kill 返回时句柄可能未释放，立刻 rm 会 EBUSY；等一小会儿再清。
+      // 早先这里没有等待，rm 的失败被 .catch() 静默吞掉——不报错，但 profile 永远留在临时目录里。
+      await new Promise((r) => setTimeout(r, 600));
+      try {
+        await rm(profileDir, { recursive: true, force: true });
+      } catch (err) {
+        console.log(`提示：profile 清理失败（可忽略）: ${err && err.code ? err.code : err}`);
+      }
+    }
   }
 
   const failed = results.filter((r) => !r.ok);
@@ -2590,6 +2640,18 @@ async function main() {
     failed.forEach((r) => console.log(`- ${r.name} ${r.detail}`));
     process.exitCode = 1;
   }
+  // 显式退出：报告打完就该结束。
+  //
+  // 2026-11-27 实测：整轮跑完、打印「240/240 通过」之后，node 进程仍在，一挂十几分钟。
+  // 后果是它建的临时 profile 目录一直被占着，rm 报 EBUSY——外面看到的现象是
+  // 「profile 清理失败」/「临时目录残留 72MB」，很容易误判成 Edge 子进程没杀干净。
+  // 真正的持有着是这个没退出的 node 自己（`--user-data-dir` 是它传给 Edge 的，
+  // Windows 上父进程未退出会让目录句柄继续被算在它头上）。
+  //
+  // 原因大概是 finally 里的 close 之后仍有 WebSocket / 定时器拽着事件循环；
+  // child.kill() 与 server.close() 都只保证「发信号」「停止接受新连接」，不保证句柄释放。
+  // 这里显式 exit，避免进程悬挂。用 exitCode 而非 exit(0)，跑测试时失败仍能被感知。
+  process.exit(process.exitCode || 0);
 }
 
 main().catch((err) => {
