@@ -4117,12 +4117,18 @@
       var key = String(id);
       var hadRec = Object.prototype.hasOwnProperty.call(metaMap, key);
       var prevRec = hadRec ? metaMap[key] : null;
-      var rec = { cn: '', al: [], clr: [], u: Date.now() };
-      if (hadRec && prevRec) {
-        rec.cn = prevRec.cn || '';
+      // 基于原记录浅拷贝，而不是只挑 cn/al/clr 重建一个新的。
+      // 用户可能在这条上还改过日期、系列、出版等别的字段（META_FIELDS），
+      // 只复制三个字段会在探针期间把其余字段一起抹掉；中途抛错更会把残缺记录留在 metaMap 里。
+      var rec = {};
+      if (prevRec && typeof prevRec === 'object') {
+        Object.keys(prevRec).forEach(function (k) { rec[k] = prevRec[k]; });
         rec.al = (prevRec.al || []).slice();
         rec.clr = (prevRec.clr || []).slice();
+      } else {
+        rec = { cn: '', al: [], clr: [], u: Date.now() };
       }
+      if (!rec.u) rec.u = Date.now();
       rec[field] = probe;
       metaMap[key] = sanitizeMeta(rec) || rec;
       applyMetaOverride(item);
