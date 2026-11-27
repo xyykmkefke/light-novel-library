@@ -267,6 +267,24 @@ async function main() {
       }
     };
 
+    // 等某条目的作者字段真正到位，返回是否等到。
+    // 只检查 window.__LN_EXTRA_READY 不够：该标志为真不代表目标条目的 au 已经落到数据上。
+    // 实测偶发「标志已真但 item.au 仍为空」，随后「恢复上游清除覆盖与别名」拿 '' 去比
+    // 页面加载时记下的 editPick.au 就 FAIL，详情区同时显示「字段加载中…」。
+    // 这是前置条件问题，不是被测功能的问题，必须等真实数据而不是等标志。
+    const waitAuthor = async (id, tries = 120) => {
+      for (let i = 0; i < tries; i += 1) {
+        const ok = await cdp.evaluate(`(() => {
+          if (window.__LN_EXTRA_READY !== true) return false;
+          const x = (window.LN_DATA || []).find((v) => String(v.i) === ${JSON.stringify(id)});
+          return !!x && !!String(x.au || '');
+        })()`).catch(() => false);
+        if (ok) return true;
+        await sleep(150);
+      }
+      return false;
+    };
+
     // 清掉 Service Worker 与缓存：data 走缓存优先，不清掉则服务端的延迟 / 503 模拟不到
     const clearShellGlobal = async () => {
       await cdp.evaluate(`(async () => {
@@ -1951,11 +1969,18 @@ async function main() {
     })()`);
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
     await sleep(450);
-    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回
-    for (let i = 0; i < 80; i += 1) {
-      if (await cdp.evaluate('window.__LN_EXTRA_READY === true')) break;
-      await sleep(150);
+    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回。
+    // 等「作者的字段真正到位」而不是只等 ready 标志，见 waitAuthor 的注释。
+    const extraOk = await waitAuthor(editPick.id);
+    if (!extraOk) {
+      check('详情包已就绪（本地纠错的前置条件）', false, '等了 18 秒仍未拿到作者字段');
     }
+    // editPick.au 是在 extra 包到位之前取的，那时可能还是空串；「恢复上游」要在恢复后
+    // 拿它做比较基准，基准本身为空会让断言永远不可能通过。这里以就绪后的真实值为准。
+    editPick.au = await cdp.evaluate(`(() => {
+      const x = (window.LN_DATA || []).find((v) => String(v.i) === ${JSON.stringify(editPick.id)});
+      return x ? String(x.au || '') : '';
+    })()`);
     await click('#detailEdit');
     await sleep(200);
     const metaPanel = await cdp.evaluate(`(() => {
@@ -2080,10 +2105,11 @@ async function main() {
       JSON.stringify(metaReload));
     await cdp.evaluate(`(() => { location.hash = 'd=' + ${JSON.stringify(editPick.id)}; })()`);
     await sleep(450);
-    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回
-    for (let i = 0; i < 80; i += 1) {
-      if (await cdp.evaluate('window.__LN_EXTRA_READY === true')) break;
-      await sleep(150);
+    // 等详情包到位：作者 / 出版社等上游字段随包加载，恢复上游才有值可回。
+    // 等「作者的字段真正到位」而不是只等 ready 标志，见 waitAuthor 的注释。
+    const extraOkReset = await waitAuthor(editPick.id);
+    if (!extraOkReset) {
+      check('详情包已就绪（恢复上游的前置条件）', false, '等了 18 秒仍未拿到作者字段');
     }
     await click('#detailEdit');
     await sleep(200);
@@ -2464,7 +2490,15 @@ async function main() {
       const e = document.getElementById('empty');
       return { hidden: e.hidden, text: (e.textContent || '').trim(),
                count: document.getElementById('resultCount').textContent,
-               retry: !!document.getElementById('retryRest') };
+               retry: !!document.getElementById('retryRest'),
+               // 诊断字段：失败时要能自己说明原因，而不是只报 hidden/count 让人再猜一遍。
+               // 本条断言的失败形态是 count="0" 且 empty 可见 —— 那是「搜了但没结果」，
+               // 与「还在加载」完全不同，两者的修法也不一样。
+               novel: (document.getElementById('includeNovelBtn') || {}).getAttribute
+                 ? document.getElementById('includeNovelBtn').getAttribute('aria-pressed') : null,
+               q: (document.getElementById('search') || {}).value,
+               fullReady: window.__FULL_DATA_READY === true,
+               dataLen: (window.LN_DATA || []).length };
     })()`);
 
     if (restOnly) {
@@ -2500,7 +2534,11 @@ async function main() {
       }
       check('全库就绪后按当前关键词自动刷新结果',
         afterReady.hidden === true && String(afterReady.count) !== '0',
-        JSON.stringify({ hidden: afterReady.hidden, count: afterReady.count }));
+        JSON.stringify({
+          hidden: afterReady.hidden, count: afterReady.count,
+          novel: afterReady.novel, fullReady: afterReady.fullReady,
+          dataLen: afterReady.dataLen,
+        }));
       fault.restDelay = 0;
 
       // 场景 2：rest 持续返回 503（模拟网络仍不可用），应提示加载失败并可重试
