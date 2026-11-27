@@ -3,6 +3,7 @@
 // 退出码 0 表示全部通过，1 表示存在失败项
 
 import http from 'node:http';
+import net from 'node:net';
 import { readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -11,8 +12,15 @@ import os from 'node:os';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const PKG_VERSION = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
-const PORT = 8791;
-const CDP_PORT = 9337;
+// 端口可被环境变量覆盖，也允许自动顺延。
+// 起因：本次调试中上一个实例被强杀后，8791 的监听句柄挂在 OwningProcess=0 上不释放
+// （Windows 上强杀进程常见的残留），后续每次运行都在 listen 阶段直接 EADDRINUSE，
+// 而这时浏览器根本还没启动，报错看起来像「验收挂了」，实际一行断言都没跑。
+// 与其让人手工等端口，不如自己找一个能用的。
+const BASE_PORT = Number(process.env.LN_VERIFY_PORT) || 8791;
+const BASE_CDP_PORT = Number(process.env.LN_VERIFY_CDP_PORT) || 9337;
+let PORT = BASE_PORT;
+let CDP_PORT = BASE_CDP_PORT;
 const KEEP = process.argv.includes('--keep');
 const SHOT_DIR = path.join(ROOT, 'screenshots');
 
@@ -84,10 +92,42 @@ function startServer() {
       res.end('Not Found');
     }
   });
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(PORT, '127.0.0.1', () => resolve(server));
-  });
+  // 不在这里 listen：端口可能在调用时才确定（见 listenWithFallback）
+  return server;
+}
+
+// 找一个能监听的端口：默认用 BASE_PORT，被占用就向后顺延几个。
+// 端口进不了页面（页面走相对路径），换端口不影响任何断言。
+async function listenWithFallback(server) {
+  for (let i = 0; i < 12; i += 1) {
+    const port = BASE_PORT + i;
+    const ok = await new Promise((resolve) => {
+      const onErr = (e) => { server.removeListener('listening', onOk); resolve(e.code !== 'EADDRINUSE'); };
+      const onOk = () => { server.removeListener('error', onErr); resolve(true); };
+      server.once('error', onErr);
+      server.once('listening', onOk);
+      server.listen(port, '127.0.0.1');
+    });
+    if (ok && server.listening) { PORT = port; return port; }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`端口 ${BASE_PORT}~${BASE_PORT + 11} 都被占用，无法启动静态服务`);
+}
+
+// CDP 端口同理：浏览器绑定失败时只会静默退出，表现为「无法连接到浏览器调试端口」，
+// 与真正的浏览器崩溃难以区分。先探一个闲置端口再用。
+async function pickFreePort(base) {
+  for (let i = 0; i < 12; i += 1) {
+    const port = base + i;
+    const free = await new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.once('listening', () => probe.close(() => resolve(true)));
+      probe.listen(port, '127.0.0.1');
+    });
+    if (free) return port;
+  }
+  throw new Error(`CDP 端口 ${base}~${base + 11} 都被占用`);
 }
 
 async function getDebugPage() {
@@ -149,10 +189,22 @@ function check(name, ok, detail) {
 async function main() {
   const browser = findBrowser();
   const profile = path.join(os.tmpdir(), 'ln-verify-profile');
-  await rm(profile, { recursive: true, force: true });
+  // profile 被上一个残留浏览器锁住时 rm 会抛 EBUSY，而那与本次运行无关：
+  // 换一个带时间戳的独立 profile，比在这里失败更符合「验收要能跑完」的目的。
+  let profileDir = profile;
+  try {
+    await rm(profile, { recursive: true, force: true });
+  } catch {
+    profileDir = `${profile}-${Date.now()}`;
+    console.log('提示：默认 profile 被占用，改用独立 profile');
+  }
   await mkdir(SHOT_DIR, { recursive: true });
 
   const server = await startServer();
+  const port = await listenWithFallback(server);
+  if (port !== BASE_PORT) console.log(`提示：端口 ${BASE_PORT} 被占用，改用 ${port}`);
+  CDP_PORT = await pickFreePort(BASE_CDP_PORT);
+  if (CDP_PORT !== BASE_CDP_PORT) console.log(`提示：CDP 端口 ${BASE_CDP_PORT} 被占用，改用 ${CDP_PORT}`);
   let child = null;
   let ws = null;
 
@@ -173,7 +225,7 @@ async function main() {
         '--disable-component-extensions-with-background-pages',
         ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
         `--remote-debugging-port=${CDP_PORT}`,
-        `--user-data-dir=${profile}`,
+        `--user-data-dir=${profileDir}`,
         '--window-size=1440,1100',
         `http://127.0.0.1:${PORT}/`,
       ],
@@ -1939,6 +1991,81 @@ async function main() {
     check('本地别名参与搜索', aliasSearch.cards.includes(editPick.id),
       JSON.stringify(aliasSearch.cards).slice(0, 120));
     await setSearch('');
+
+    // ---- 保存本地纠错后，新值必须立刻可搜、旧值必须立刻失效 ----
+    // 回归 normCache 键设计：缓存曾以「条目 ID + 字段名」为键，而 applyMetaOverride
+    // 会原地改写 cn / au / al 却不失效缓存，于是保存后搜新名字 0 条、搜旧名字仍能命中。
+    // 这个 bug 时有时无（索引包加载会顺带 clear 一次，谁先到决定结果），正是它让
+    // 「本地别名参与搜索」随机失败。这里显式构造顺序：先搜一次灌满缓存，再改再搜。
+    // 判据必须同时验两侧——只看「新名字能搜到」会漏掉「旧名字还残留」的一半缺陷。
+    const cacheFresh = await cdp.evaluate(`(async () => {
+      const A = window.__lnAudit;
+      // 必须避开 editPick：那条的纠错在后续断言里还要用（「纠错与别名刷新后仍生效」），
+      // 探针若改到同一条并复位，会把它的纠错一起删掉 —— 两次运行挂一次的来源之一。
+      const avoid = ${JSON.stringify(editPick.id)};
+      const t = (window.LN_DATA || []).find(
+        (x) => x.cn && !x.c && !x.gn && !x.ver && String(x.i) !== avoid,
+      );
+      if (!t) return { skip: true };
+      const id = String(t.i);
+      const oldCn = String(t.cn);
+      // 1) 先搜旧名，把该条 cn 的归一化结果灌进缓存
+      const beforeHit = A.find(oldCn, false).length;
+      // 2) 打开详情走真实 UI，把中文名改成原库不存在的新值
+      location.hash = 'd=' + id;
+      await new Promise((r) => setTimeout(r, 500));
+      document.getElementById('detailEdit').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const input = document.querySelector('[data-meta-field="cn"]');
+      if (!input) return { skip: true };
+      input.value = '缓存探针改名QQQ';
+      document.querySelector('#detailMetaEdit [data-meta-act="save"]').click();
+      await new Promise((r) => setTimeout(r, 500));
+      const itemNow = A.item(id);
+      return {
+        skip: false,
+        id,
+        beforeHit,
+        cnAfterSave: itemNow ? itemNow.cn : null,
+        hitNew: A.find('缓存探针改名QQQ', false).length,
+        hitOld: A.find(oldCn, false).length,
+      };
+    })()`);
+    if (cacheFresh.skip) {
+      check('保存纠错后新值立即可搜（缓存已失效）', false, '筛不出可改名的条目，用例为 0');
+    } else {
+      check('保存纠错后新值立即可搜（缓存已失效）',
+        cacheFresh.cnAfterSave === '缓存探针改名QQQ' &&
+        cacheFresh.hitNew >= 1 && cacheFresh.hitOld === 0,
+        JSON.stringify(cacheFresh));
+    }
+    // 复位：保存后 metaEditing 已置 false，面板 innerHTML 被清空，reset 按钮此时并不存在。
+    // 所以不能靠点「恢复上游」，必须重新打开面板再点；否则探针的纠错会残留在 localStorage 里，
+    // 让后续依赖纠错计数的断言对不上（实测每两次就挂一次）。
+    await cdp.evaluate(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); })()`);
+    await sleep(250);
+    const probeReset = cacheFresh.skip ? { clicked: false, stillThere: false } : await cdp.evaluate(`(async () => {
+      location.hash = 'd=' + ${JSON.stringify(cacheFresh.id || '')};
+      await new Promise((r) => setTimeout(r, 450));
+      document.getElementById('detailEdit').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const b = document.querySelector('#detailMetaEdit [data-meta-act="reset"]');
+      if (!b) return { clicked: false };
+      b.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const map = JSON.parse(localStorage.getItem('yuc_ln_meta_v1') || '{}');
+      return { clicked: true, stillThere: !!map[${JSON.stringify(cacheFresh.id || '')}] };
+    })()`);
+    if (!cacheFresh.skip) {
+      check('探针纠错已清理（不污染后续断言）',
+        probeReset.clicked === true && probeReset.stillThere === false,
+        JSON.stringify(probeReset));
+    }
+    await cdp.evaluate(`(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      location.hash = '';
+    })()`);
+    await sleep(400);
     await cdp.send('Page.reload', { ignoreCache: true });
     for (let i = 0; i < 80; i += 1) {
       if ((await cdp.evaluate("document.querySelectorAll('.card').length").catch(() => 0)) > 0) break;
@@ -2275,8 +2402,22 @@ async function main() {
         e.method === 'Runtime.exceptionThrown' ||
         (e.method === 'Runtime.consoleAPICalled' && e.params?.type === 'error'),
     );
+    // 只截 200 字时，未捕获的 Promise 拒绝只会显示 "Uncaught (in promise)"，
+    // 后续的异常描述与调用栈全被切掉——报了警却不给线索，等于无法定位。
+    // 这里改为把异常描述与首条调用栈单独拼出来，长度上限只约束在展示上。
+    const describeJsError = (evt) => {
+      const p = evt.params || {};
+      if (evt.method === 'Runtime.consoleAPICalled') {
+        return 'console.error: ' + (p.args || []).map((a) => a.value || a.description || a.type).join(' ');
+      }
+      const d = p.exceptionDetails || {};
+      const desc = d.exception?.description || d.text || '(无描述)';
+      const frame = (d.stackTrace?.callFrames || [])[0];
+      const where = frame ? ` @ ${frame.functionName || '(anon)'} ${frame.url}:${frame.lineNumber + 1}` : '';
+      return desc.split('\n').slice(0, 3).join(' | ') + where;
+    };
     check('无 JS 异常', jsErrors.length === 0,
-      jsErrors.length ? JSON.stringify(jsErrors[0].params).slice(0, 200) : '');
+      jsErrors.length ? `${jsErrors.length} 条：${describeJsError(jsErrors[0])}`.slice(0, 300) : '');
 
     // ---- 旧常量残留 ----
     const legacy = await cdp.evaluate(`(() => ({
@@ -2401,7 +2542,7 @@ async function main() {
     try { ws?.close(); } catch {}
     try { child?.kill(); } catch {}
     await new Promise((resolve) => server.close(resolve));
-    if (!KEEP) await rm(profile, { recursive: true, force: true }).catch(() => {});
+    if (!KEEP) await rm(profileDir, { recursive: true, force: true }).catch(() => {});
   }
 
   const failed = results.filter((r) => !r.ok);

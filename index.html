@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.2">
+<meta name="version" content="1.24.3">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.2</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.3</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -3928,10 +3928,18 @@
     return v;
   }
 
-  // 索引侧只做一次归一化的缓存：5076 条 × 若干字段，首次搜索时算一遍即可
+  // 索引侧只做一次归一化的缓存：5076 条 × 若干字段，首次搜索时算一遍即可。
+  //
+  // 缓存键必须带上「被归一化的原始值」，不能只有「条目 ID + 字段名」。
+  // 本地纠错（applyMetaOverride）会原地改写 cn / au / al 这些字段，而键不变时
+  // 缓存会继续返回改写前的归一化结果，表现为「保存纠错后搜新名字 0 条、搜旧名字还能搜到」。
+  // 实测：把某条 cn 改成「探针改名AAA」并保存，item.cn 已是新值，但搜索新名为 0 条。
+  // 这个 bug 平时时有时无——索引包加载时也会 clear 一次，谁先到就决定了结果，
+  // 所以 verify 里「本地别名参与搜索」才会随机失败。
+  // 把原始值并进键里，字段一变键就变，不依赖「改完记得清缓存」这种容易漏写的约定。
   var normCache = new Map();
   function normOf(x, key, raw) {
-    var ck = String(x.i) + '\u0000' + key;
+    var ck = String(x.i) + '\u0000' + key + '\u0000' + raw;
     var hit = normCache.get(ck);
     if (hit !== undefined) return hit;
     var v = normalize(raw);
