@@ -491,6 +491,46 @@ try {
   record('无关查询返回 0 条', noisy.length === 0,
     noisy.length ? JSON.stringify(noisy) : noiseReport.map((x) => x.q + '=0').join(', '),
     noisy);
+
+  // ---- 本地纠错改写字段后，搜索必须立刻跟上 ----
+  //
+  // 为什么单独一项：v1.24.3 修的 bug 就是这里——normCache 以「条目 ID + 字段名」为键，
+  // 而 applyMetaOverride 原地改写 cn / au / al 却不失效缓存，于是保存纠错后
+  // 搜新名字 0 条、搜旧名字还能命中。当时只靠 verify 的一条抽样断言，而抽样恰好
+  // 会因「索引包加载顺带清缓存」而蒙混过关（时有时无）。这里改成全量逐条验。
+  //
+  // 判据必须两侧同验：新值必须能搜到，旧值必须搜不到。只验一侧会漏掉一半缺陷。
+  section('本地纠错改写后立即可搜（全量逐条）');
+  const overrideReport = await c.evaluate(`(async () => {
+    const A = window.__lnAudit;
+    if (!A.overrideProbe) return { tested: 0, hit: 0, miss: [], reason: '缺少 overrideProbe 钩子' };
+    // 均匀取样而不是取前 N 条：数据按年份/热度排列，前段同质化严重。
+    // 实测只取前 60 条时有中文名的仅 2 条，覆盖 2/60 等于没测。
+    const all = A.allIds();
+    const step = Math.max(1, Math.floor(all.length / 200));
+    const sample = [];
+    for (let i = 0; i < all.length && sample.length < 200; i += step) sample.push(all[i]);
+    let tested = 0, hit = 0;
+    const miss = [];
+    const byField = {};
+    for (const id of sample) {
+      const r = await A.overrideProbe(id);
+      if (!r || r.skip) continue;
+      tested += 1;
+      byField[r.field] = (byField[r.field] || 0) + 1;
+      if (r.ok) hit += 1;
+      else if (miss.length < 10) miss.push(r);
+    }
+    return { tested, hit, miss, byField };
+  })()`);
+  recordCoverage('本地纠错改写后立即可搜', overrideReport,
+    '没有可改写的条目 —— 该维度无样本可验');
+  // 字段分布单独报一下：只有 cn 一种时覆盖率会偏低，值得看得见
+  if (overrideReport && overrideReport.byField) {
+    const bf = overrideReport.byField;
+    record('纠错探针覆盖两类字段', (bf.cn || 0) > 0 && (bf.au || 0) > 0,
+      `cn=${bf.cn || 0} / au=${bf.au || 0}`, []);
+  }
 } catch (e) {
   console.error('审计异常：', e.message);
   process.exitCode = 1;

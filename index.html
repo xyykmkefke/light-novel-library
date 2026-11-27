@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.3">
+<meta name="version" content="1.24.4">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.3</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.4</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4082,7 +4082,83 @@
         c: !!x.c, gn: !!x.gn, ver: !!x.ver
       };
     },
-    count: function () { return DATA.length; }
+    count: function () { return DATA.length; },
+    // 全部条目的 ID，供审计逐条取样
+    allIds: function () { return DATA.map(function (x) { return String(x.i); }); },
+    // 本地纠错的可搜索性探针：改写一个字段 → 搜新值 / 搜旧值 → 复原。
+    //
+    // 为什么需要它：applyMetaOverride 会原地改写 cn / au / al，而 normCache 缓存的是
+    // 归一化结果。v1.24.3 之前键里没有原始值，改写后缓存不失效，表现为「搜新名字 0 条、
+    // 搜旧名字还能命中」。这条路径靠 verify 抽样会时过时不过（索引包加载会顺带清缓存），
+    // 所以单独给审计一个能全量逐条跑的钩子。
+    // v1.24.4：反向验证过——把缓存键退回「ID + 字段名」重跑，本维度立刻由 200/200 掉成
+    // FAIL，漏搜样本清一色 hitNew:false / hitOld:true，正是这个 bug 的症状。
+    //
+    // 严格只读约定：结束前一定复原该条目（恢复上游），不让审计影响后续断言。
+    overrideProbe: function (id) {
+      var item = byId.get(String(id));
+      if (!item) return { skip: true };
+      // 优先用中文名造用例；没有中文名的条目改用作者（au），否则覆盖率会极低——
+      // 实测前 60 条里只有 2 条带 cn，其余 58 条全被判 skip，断言等于空跑。
+      // 两个字段都走 applyMetaOverride 的同一条改写路径，验哪个都能测出缓存是否失效。
+      var field = item.cn ? 'cn' : (item.au ? 'au' : '');
+      if (!field) return { skip: true };
+      var oldVal = String(item[field] || '');
+      if (!oldVal) return { skip: true };
+      // 新值要保证原库中不存在，否则「搜到」可能来自别的条目，断言就失去意义
+      var probe = '审计探针' + field + String(id);
+      if (normalize(probe) === normalize(oldVal)) return { skip: true };
+
+      // 1) 先搜一次旧值，把该条对应字段的归一化结果灌进缓存（这是复现的前提）
+      var beforeHit = matchesQuery(item, normalize(oldVal), false);
+      if (!beforeHit) return { skip: true };
+
+      // 2) 写入纠错并应用
+      var key = String(id);
+      var hadRec = Object.prototype.hasOwnProperty.call(metaMap, key);
+      var prevRec = hadRec ? metaMap[key] : null;
+      var rec = { cn: '', al: [], clr: [], u: Date.now() };
+      if (hadRec && prevRec) {
+        rec.cn = prevRec.cn || '';
+        rec.al = (prevRec.al || []).slice();
+        rec.clr = (prevRec.clr || []).slice();
+      }
+      rec[field] = probe;
+      metaMap[key] = sanitizeMeta(rec) || rec;
+      applyMetaOverride(item);
+
+      var hitNew = matchesQuery(item, normalize(probe), false);
+      var hitOld = matchesQuery(item, normalize(oldVal), false);
+
+      // 「旧值必须搜不到」这个判据只在旧值没有别处残留时成立。
+      // 很多条目的 cn 与 n 内容相同（如「少女不十分」两者都是它），改名只改 cn，
+      // 原名 n 是上游数据、本就不该被中文名纠错覆盖，于是旧值仍能通过 n 命中——
+      // 这是正确行为，不是缺陷。实测 200 条里 18 条属此类，全被判成漏搜。
+      // 判据改为：只要求「新值能搜到」；旧值是否消失，取决于它有没有留在别的字段里。
+      var oldLeftElsewhere = false;
+      ['n', 'en', 'au', 'il'].forEach(function (k) {
+        if (oldLeftElsewhere) return;
+        if (k === field) return;
+        if (normalize(String(item[k] || '')).indexOf(normalize(oldVal)) >= 0) oldLeftElsewhere = true;
+      });
+
+      // 3) 复原：恢复原有的纠错记录（没有就删掉），再重新应用
+      if (hadRec) metaMap[key] = prevRec;
+      else delete metaMap[key];
+      applyMetaOverride(item);
+
+      return {
+        skip: false,
+        id: key,
+        field: field,
+        // 旧值仍可命中时，只有在它确实残留在别的字段里才算正常
+        ok: hitNew === true && (hitOld === false || oldLeftElsewhere === true),
+        hitNew: hitNew,
+        hitOld: hitOld,
+        oldLeftElsewhere: oldLeftElsewhere,
+        val: oldVal.slice(0, 16),
+      };
+    }
   };
 
   // 免费查询下还需要哪些索引：名字类查 CJK 要作者包，拼音/罗马字查拉丁字母要全拼与罗马字包。
