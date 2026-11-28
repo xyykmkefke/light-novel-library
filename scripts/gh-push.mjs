@@ -18,7 +18,9 @@ const BRANCH = process.argv[2] || 'main';
 
 function git(args, opts = {}) {
   // 只在调用方没指定 encoding 时补 utf8；要二进制时调用方传 'buffer'
-  const out = execFileSync('git', args, {
+  // core.quotepath=false：中文文件名默认会被转成 "\344\270\255..." 的
+  // 转义形式并加引号，cat-file blob HEAD:"..." 会找不到路径。
+  const out = execFileSync('git', ['-c', 'core.quotepath=false', ...args], {
     cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts,
   });
   return Buffer.isBuffer(out) ? out : String(out).trim();
@@ -41,35 +43,66 @@ if (!m) { console.error('无法从 origin 解析 owner/repo：' + remote); proce
 const [, OWNER, REPO] = m;
 
 const headSha = git(['rev-parse', 'HEAD']);
-const parentSha = git(['rev-parse', 'HEAD^']);
 const message = git(['log', '-1', '--pretty=%B']);
 
-// 相对父提交的改动文件（含新增/修改/删除）
-const nameStatus = git(['diff', '--name-status', parentSha, headSha]).split('\n').filter(Boolean);
-const files = nameStatus.map((line) => {
-  const parts = line.split('\t');
-  return { status: parts[0][0], path: parts[parts.length - 1] };
-});
+// 父提交：优先取**远端**当前 main 的 SHA，而不是本地 HEAD^。
+//
+// 原因：Git Data API 推送会重建 commit 对象，SHA 与本地不同（tree 相同
+// 但 committer 时间/信息可能被服务器改写）。若第二次推送还用本地 HEAD^
+// 当父提交，远端根本找不到那个对象 → 404 "Not Found"。
+// 远端 SHA 才是远端分支真正的上一个提交。
+const remoteTip = JSON.parse(gh(['api', `repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`])).object.sha;
 
-console.log(`仓库 ${OWNER}/${REPO} 分支 ${BRANCH}`);
-console.log(`提交 ${headSha.slice(0, 7)}，改动 ${files.length} 个文件`);
+// 远端 tip 可能是 Git Data API 重建出来的 commit，本地对象库里没有，
+// 所以不能 `git diff <remoteTip> HEAD`（bad object）。
+// 改用**blob SHA 对比**：blob 的 SHA 是内容哈希，跨仓库一致，
+// 只要两边同路径的 SHA 相同就说明内容一样，不用上传。
+// 这样只依赖 git ls-tree（纯本地）与 API 的 tree 列表，互不依赖对象库。
+const remoteCommit = JSON.parse(gh(['api', `repos/${OWNER}/${REPO}/git/commits/${remoteTip}`]));
+const baseTreeSha = remoteCommit.tree.sha;
 
-// 父提交的 tree
-const parentCommit = JSON.parse(gh(['api', `repos/${OWNER}/${REPO}/git/commits/${parentSha}`]));
-const baseTreeSha = parentCommit.tree.sha;
+async function apiTreeRecursive(sha) {
+  const out = JSON.parse(gh(['api', `repos/${OWNER}/${REPO}/git/trees/${sha}?recursive=1`]));
+  if (out.truncated) throw new Error('远端 tree 过大被截断，无法安全比对');
+  const map = new Map();
+  (out.tree || []).forEach((e) => { if (e.type === 'blob') map.set(e.path, e.sha); });
+  return map;
+}
+const remoteBlobs = await apiTreeRecursive(baseTreeSha);
 
-const tree = files.map((f) => {
-  if (f.status === 'D') {
-    return { path: f.path, mode: '100644', type: 'blob', sha: null };
-  }
-  // 必须从 git 对象库读，不能读工作区（CRLF 会导致 tree 校验失败）
-  const content = git(['cat-file', 'blob', `HEAD:${f.path}`], { encoding: 'buffer' });
+const localBlobs = new Map();
+git(['ls-tree', '-r', 'HEAD'])
+  .split('\n')
+  .filter(Boolean)
+  .forEach((line) => {
+    // 格式：<mode> blob <sha>\t<path>
+    const tab = line.indexOf('\t');
+    const meta = line.slice(0, tab).split(/\s+/);
+    localBlobs.set(line.slice(tab + 1), meta[2]);
+  });
+
+const tree = [];
+let changed = 0;
+for (const [p, sha] of localBlobs) {
+  if (remoteBlobs.get(p) === sha) continue;   // 内容一致，跳过
+  const content = git(['cat-file', 'blob', `HEAD:${p}`], { encoding: 'buffer' });
   const blob = JSON.parse(gh(['api', '-X', 'POST', `repos/${OWNER}/${REPO}/git/blobs`], {
     content: content.toString('base64'),
     encoding: 'base64',
   }));
-  return { path: f.path, mode: '100644', type: 'blob', sha: blob.sha };
-});
+  tree.push({ path: p, mode: '100644', type: 'blob', sha: blob.sha });
+  changed += 1;
+}
+// 远端有、本地没有 → 删除
+for (const p of remoteBlobs.keys()) {
+  if (localBlobs.has(p)) continue;
+  tree.push({ path: p, mode: '100644', type: 'blob', sha: null });
+  changed += 1;
+}
+
+console.log(`仓库 ${OWNER}/${REPO} 分支 ${BRANCH}`);
+console.log(`本地提交 ${headSha.slice(0, 7)}，远端 tip ${remoteTip.slice(0, 7)}`);
+console.log(`比对 ${localBlobs.size} 个文件，需更新 ${changed} 个`);
 
 const newTree = JSON.parse(gh(['api', '-X', 'POST', `repos/${OWNER}/${REPO}/git/trees`], {
   base_tree: baseTreeSha,
@@ -79,7 +112,7 @@ const newTree = JSON.parse(gh(['api', '-X', 'POST', `repos/${OWNER}/${REPO}/git/
 const newCommit = JSON.parse(gh(['api', '-X', 'POST', `repos/${OWNER}/${REPO}/git/commits`], {
   message,
   tree: newTree.sha,
-  parents: [parentSha],
+  parents: [remoteTip],
 }));
 
 gh(['api', '-X', 'PATCH', `repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`], {
