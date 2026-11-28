@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.7">
+<meta name="version" content="1.24.8">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.7</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.8</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4432,8 +4432,88 @@
     persistDrafts(drafts);
   }
 
+  // 保存前与磁盘对齐，避免「另一个标签页的写入被本页整体覆盖」。
+  //
+  // saveMine() 原来是 localStorage.setItem(KEY, JSON.stringify(myMap)) ——
+  // 拿**内存里的整个对象**去覆盖。而 loadMine() 只在页面启动时读一次。
+  // 于是同时开两个标签页时：
+  //   A 页加了 3 本 → 磁盘有 7 本
+  //   B 页（早先打开，内存还是 4 本）随便点一下收藏 → 写回 4 本
+  //   A 那 3 本**直接从磁盘消失**，无报错、无提示，A 页还显示着，刷新才发现没了。
+  //
+  // 这不是罕见场景：把详情页链接在新标签页打开、手机上从主屏幕再开一次、
+  // 甚至误触「在新标签页中打开」都会中招。而且丢的是用户手写的书评与笔记。
+  //
+  // 修法：写之前先读一眼磁盘，只把**本页完全不知道**的条目并入内存。
+  //   - 本页已有的条目：以内存为准（内存才是本页的最新意图，磁盘可能更旧）
+  //   - 本页墓碑里有的：说明是本页刚删的，不复活
+  //   - 磁盘墓碑里有的：说明另一端删过，不复活
+  //   - 其余磁盘有、本页没有的：另一端新增的，必须并进来
+  // 反向也要做：磁盘墓碑比本页条目的更新时间更晚时，说明另一端删了，本页跟着删。
+  //
+  // 返回 true 表示内存被改动过，调用方据此决定是否要重绘。
+  function adoptForeignState() {
+    var raw;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return false; // 读都读不了，交给随后的写入去报错
+    }
+    if (!raw) return false;
+    var disk;
+    try {
+      disk = JSON.parse(raw);
+    } catch (e) {
+      // 磁盘上是坏数据。不能因为别人写坏了就不保存自己的 —— 继续写，覆盖掉。
+      return false;
+    }
+    if (!disk || typeof disk !== 'object' || Array.isArray(disk)) return false;
+    var diskDeleted;
+    try {
+      var dRaw = localStorage.getItem(DEL_KEY);
+      diskDeleted = dRaw ? (JSON.parse(dRaw) || {}) : {};
+    } catch (e) {
+      diskDeleted = {};
+    }
+    if (!diskDeleted || typeof diskDeleted !== 'object') diskDeleted = {};
+    var changed = false;
+    // ① 另一端新增的条目
+    Object.keys(disk).forEach(function (id) {
+      if (!/^\d+$/.test(id)) return;
+      if (myMap[id]) return;        // 本页已有 → 以内存为准
+      // 本页刚删 → 不复活。
+      // 注意这行在实战里通常是**冗余**的：markDeleted 内部会立刻 persistDeleted，
+      // 墓碑先一步写到磁盘，于是上面的 diskDeleted 判断已经挡住了。
+      // 保留它是因为顺序不该被当成契约 —— 万一将来有人把 persistDeleted 挪到
+      // saveMine 之后，这里就是唯一的防线（那时磁盘墓碑还是旧的，挡不住）。
+      if (myDeleted[id]) return;
+      if (Number(diskDeleted[id]) > 0) return; // 另一端删过 → 不复活
+      var entry = normalizeEntry(disk[id]);
+      if (!entry) return;
+      myMap[id] = entry;
+      changed = true;
+    });
+    // ② 另一端删掉的条目
+    Object.keys(diskDeleted).forEach(function (id) {
+      if (!/^\d+$/.test(id)) return;
+      var cur = myMap[id];
+      if (!cur) return;
+      var tomb = Number(diskDeleted[id]) || 0;
+      if (!tomb) return;
+      var stamp = Number(cur.u) || Number(cur.t) || 0;
+      // 本页在这之后又动过就保留（可能是本页重新加回来的）
+      if (tomb < stamp) return;
+      delete myMap[id];
+      myDeleted[id] = tomb;
+      changed = true;
+    });
+    return changed;
+  }
+
   function saveMine(opts) {
     try {
+      // 先对齐再写。顺序不能反：写在前面就又把别人的数据盖掉了。
+      adoptForeignState();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
       // 必须销账：上面 reportStoreFailure 给这个 key 记了一笔失败，
       // 用户腾出空间后重新操作，这一次真的写进去了，界面却仍在喊

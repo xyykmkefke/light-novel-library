@@ -2811,6 +2811,193 @@ async function main() {
     await cdp.evaluate(`(() => { location.hash = 'tab=all'; })()`);
     await sleep(300);
 
+    // ---- 两个标签页同时打开时，后保存的不能覆盖先保存的 ----
+    //
+    // saveMine() 每次都用**内存里的 myMap 整个对象**覆盖 localStorage。
+    // 而 loadMine() 只在页面启动时读一次，之后永远不重新读。
+    // 于是：标签页 A 在收藏里加了 3 本，标签页 B（早先打开的，内存是旧的）
+    // 随便做个操作 —— 改个状态、点个收藏、甚至切一下进度 ——
+    // saveMine 一写，A 那 3 本**直接从 localStorage 消失**。
+    // 不报错、不提示，A 那页内存里还显示着，用户刷新才发现没了。
+    //
+    // 这里用「直接改 localStorage 模拟另一个标签页写入」来复现：
+    // 真正的 storage 事件在本页不会触发（只有别的标签页改才有），
+    // 但那正是关键 —— 本页确实「什么都没察觉」。
+    const crossTab = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_mine_v1';
+      const id = ${JSON.stringify(pick.id)};
+      const out = { ok: false };
+      // 必须在「我的阅读」里才有卡片可点
+      const tabMine = document.querySelector('.tab[data-tab="mine"]');
+      if (tabMine) { tabMine.click(); await new Promise((r) => setTimeout(r, 400)); }
+      const before = JSON.parse(localStorage.getItem(KEY) || '{}');
+      out.beforeCount = Object.keys(before).length;
+      out.mineTabCards = document.querySelectorAll('.card').length;
+      // 2) 模拟「另一个标签页」往 localStorage 里加了一条新记录
+      const ghostId = '6650';
+      const ghost = { s: 'done', t: 1, vol: 1, u: 1, f: 1, r: 7, rv: '另一标签页写的短评', nt: '另一标签页写的笔记', rvU: 1, fm: '', ow: 0, mu: 0 };
+      const fake = Object.assign({}, before);
+      fake[ghostId] = ghost;
+      localStorage.setItem(KEY, JSON.stringify(fake));
+      out.ghostWritten = !!JSON.parse(localStorage.getItem(KEY) || '{}')[ghostId];
+      // 3) 本页做一次**真正会落盘的写入**。
+      //    用「收藏状态按钮」而不是进度加减：进度控件只在有几卷的书上渲染，
+      //    而且 setVol 在有值相等时会提前 return、根本不调 saveMine。
+      //    收藏按钮一定存在，且必然写一次 localStorage。
+      const card = document.querySelector('.card[data-id="' + id + '"]');
+      if (!card) return { ok: false, reason: 'no-card' };
+      location.hash = 'd=' + id;
+      await new Promise((r) => setTimeout(r, 450));
+      const toggle = document.getElementById('detailToggle');
+      if (!toggle) return { ok: false, reason: 'no-toggle' };
+      out.toggleLabel = (toggle.textContent || '').trim().slice(0, 12);
+      // 让状态真的发生变化，确保走完 saveMine（而非被提前 return 掉）
+      const stBtn = document.querySelector('#detailStatus [data-status="done"]') ||
+        document.querySelector('[data-st="done"]');
+      const target = stBtn || toggle;
+      target.click();
+      await new Promise((r) => setTimeout(r, 400));
+      // 4) 看另一标签页那条还在不在
+      const after = JSON.parse(localStorage.getItem(KEY) || '{}');
+      out.ghostSurvived = !!after[ghostId];
+      out.ghostReview = after[ghostId] ? after[ghostId].rv : null;
+      out.afterCount = Object.keys(after).length;
+      out.ok = true;
+      // 收尾：这条探针点的是「移出我的阅读」，书已经从收藏里没了，
+      // 下一条墓碑探针需要它在收藏里，所以必须加回来。
+      const t2 = document.getElementById('detailToggle');
+      if (t2 && (t2.textContent || '').indexOf('加入') >= 0) {
+        t2.click();
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      out.restoredInMine = !!JSON.parse(localStorage.getItem(KEY) || '{}')[id];
+      // 把 ghost 从磁盘清掉。注意它此刻已经随 saveMine 的合并进了页面内存，
+      // 但那不要紧：紧接着的移动端用例会 Page.reload，内存会按磁盘重建。
+      const clean = JSON.parse(localStorage.getItem(KEY) || '{}');
+      delete clean[ghostId];
+      localStorage.setItem(KEY, JSON.stringify(clean));
+      // 复原 tab 与详情：后面「移动端筛选入口」等断言期望停在「全部」列表页，
+      // 且详情面板必须是关的（否则 focus / 抽屉断言全部落空）。
+      const tabAll = document.querySelector('.tab[data-tab="all"]');
+      if (tabAll) { tabAll.click(); await new Promise((r) => setTimeout(r, 400)); }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      out.tab = document.querySelector('.tab.active')?.dataset.tab || null;
+      out.detailOpen = !document.getElementById('modal').hidden;
+      return out;
+    })()`);
+    check('另一标签页写入的记录不会被本页保存覆盖',
+      crossTab.ok === true && crossTab.ghostWritten === true && crossTab.ghostSurvived === true &&
+      crossTab.ghostReview === '另一标签页写的短评' && crossTab.restoredInMine === true,
+      JSON.stringify(crossTab));
+
+    // ---- 对齐磁盘时不能把本页刚删掉的书复活 ----
+    //
+    // 上一条修复让 saveMine 在写之前先把「磁盘上有、本页没有」的条目并进来。
+    // 这个动作有个天生的危险：本页刚删掉的书，磁盘上当然还有（删除还没落盘），
+    // 于是会被当成「另一端新增的」又并回来 —— 删了又自己回来了。
+    // 所以必须靠墓碑（myDeleted）把它们排除掉。这条就是验那个排除。
+    //
+    // 两个方向都要验：
+    //   ① 本页刚删的书不被磁盘快照复活
+    //   ② 本页删书之后磁盘上别人的新条目仍然能并进来（不能因为怕复活就整个不合并）
+    const tombGuard = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_mine_v1';
+      const DEL = 'yuc_ln_deleted_v1';
+      const id = ${JSON.stringify(pick.id)};
+      const ghostId = '6651';
+      const out = { ok: false };
+      const tabMine = document.querySelector('.tab[data-tab="mine"]');
+      if (tabMine) { tabMine.click(); await new Promise((r) => setTimeout(r, 400)); }
+
+      // 统一的收场：把书加回收藏、清 ghost、回列表页。
+      // 关键点是**无论中途哪一步 return，都必须走到这里** ——
+      // 上一条探针就是因为提前 return 跳过了复原，把移动端四条断言带崩了。
+      const cleanup = async () => {
+        const tg = document.getElementById('detailToggle');
+        if (tg && (tg.textContent || '').indexOf('加入') >= 0) {
+          tg.click();
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        const clean = JSON.parse(localStorage.getItem(KEY) || '{}');
+        delete clean[ghostId];
+        localStorage.setItem(KEY, JSON.stringify(clean));
+        const cd = JSON.parse(localStorage.getItem(DEL) || '{}');
+        delete cd[ghostId];
+        localStorage.setItem(DEL, JSON.stringify(cd));
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await new Promise((r) => setTimeout(r, 250));
+        const tabAll = document.querySelector('.tab[data-tab="all"]');
+        if (tabAll) { tabAll.click(); await new Promise((r) => setTimeout(r, 400)); }
+        out.restoredInMine = !!JSON.parse(localStorage.getItem(KEY) || '{}')[id];
+        out.restoredTab = document.querySelector('.tab.active')?.dataset.tab || null;
+      };
+
+      // 前置条件：这本书必须在收藏里（上一条探针可能已经把它移出）
+      const disk0 = JSON.parse(localStorage.getItem(KEY) || '{}');
+      if (!disk0[id]) {
+        // 走详情页「加入」而不是直接改 localStorage，这样内存与磁盘一起更新
+        location.hash = 'd=' + id;
+        await new Promise((r) => setTimeout(r, 450));
+        const addBtn = document.getElementById('detailToggle');
+        if (addBtn && (addBtn.textContent || '').indexOf('加入') >= 0) {
+          addBtn.click();
+          await new Promise((r) => setTimeout(r, 450));
+        }
+      }
+      out.preInMine = !!JSON.parse(localStorage.getItem(KEY) || '{}')[id];
+
+      // 1) 「模拟另一端」往磁盘写一条新记录
+      const snapshot = JSON.parse(localStorage.getItem(KEY) || '{}');
+      out.snapshotHasBook = !!snapshot[id];
+      snapshot[ghostId] = { s: 'want', t: 1, vol: 0, u: 1, f: 0, r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0, mu: 0 };
+      localStorage.setItem(KEY, JSON.stringify(snapshot));
+
+    // 2) 本页把这本书删掉。这里必须让**墓碑写盘失败**，否则
+    //    markDeleted 内部会立刻 persistDeleted，磁盘墓碑先一步写好，
+    //    上面的 diskDeleted 判断就把复活挡住了 —— 于是无论 myDeleted 那行
+    //    有没有写，结论都一样，断言退化成恒真（第一版就是这样，拆掉守卫照样 PASS）。
+    //    真实世界里墓碑写盘失败的原因就是存储满，所以这里只拦 del 这个 key。
+    const rawSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k) {
+        if (String(k).indexOf('del') >= 0) {
+          const err = new Error('QuotaExceededError simulated');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+        return rawSet.apply(this, arguments);
+      };
+      try {
+        location.hash = 'd=' + id;
+        await new Promise((r) => setTimeout(r, 450));
+        const toggle = document.getElementById('detailToggle');
+        if (!toggle) { Storage.prototype.setItem = rawSet; await cleanup(); return Object.assign(out, { reason: 'no-toggle' }); }
+        out.wasInMine = (toggle.textContent || '').indexOf('移出') >= 0;
+        if (out.wasInMine) { toggle.click(); await new Promise((r) => setTimeout(r, 450)); }
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+
+      const after = JSON.parse(localStorage.getItem(KEY) || '{}');
+      const del = JSON.parse(localStorage.getItem(DEL) || '{}');
+      out.deletedGone = !after[id];
+      out.tombOnDisk = Number(del[id]) > 0;
+      // ghostKept 必须还在：证明「怕复活」没有变成「整个不合并」
+      out.ghostKept = !!after[ghostId];
+      out.ok = true;
+
+      await cleanup();
+      return out;
+    })()`);
+    check('墓碑没写进磁盘时，对齐磁盘也不会把刚删的书复活',
+      tombGuard.ok === true && tombGuard.preInMine === true && tombGuard.wasInMine === true &&
+      tombGuard.deletedGone === true &&
+      // 前提必须成立：盘上确实没有墓碑，否则这行守卫根本没被考到
+      tombGuard.tombOnDisk === false &&
+      tombGuard.ghostKept === true && tombGuard.restoredInMine === true &&
+      tombGuard.restoredTab === 'all',
+      JSON.stringify(tombGuard));
+
     // ---- 移动端 375×812 ----
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 375, height: 812, deviceScaleFactor: 2, mobile: true,
