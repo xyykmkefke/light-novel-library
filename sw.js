@@ -1,15 +1,31 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-ln-shell-v67';
+var CACHE = 'yuc-ln-shell-v68';
 // 索引包（pyf/rpy/au）故意不进预缓存：它们是按需加载的，进 SHELL 会让首次安装多下 152KB。
 // opencc 是搜索归一化的依赖，页面一打开就请求，所以放进预缓存保证离线时搜索仍然可用。
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './vendor/opencc-t2cn.js', './data/light-novels-lite.js', './data/light-novels-extra.js', './data/light-novels-ch.js'];
 var IMG_LIMIT = 400;
 
+// 判断「这条缓存是不是封面」**只有这一条正则**。
+//
+// 这里原本还写着 `req.destination === 'image' || ...`，但前半个条件在这条路径上
+// 恒为假：cache.keys() 返回的不是当初存进去的那个 Request，而是从缓存条目重建的，
+// 只保留 url / method / headers / mode —— destination 一律是空串。
+// 实测（scripts/probe-cache-dest.mjs）：同源脚本、bgmimg 封面、ranobedb 封面
+// 三类读回来全是 "destination": ""，命中情况 0 / 1 / 1，全部只靠正则。
+// 所以那个条件是装饰品，删掉不影响行为，但留着会误导：「destination 能兜底」
+// 这个印象一旦成立，将来新增图源时就不会去改正则，那些封面永远进不了回收范围，
+// 缓存一路涨到配额满，而表面上看不出来。
+// 注意区分：下面 fetch 事件里的 `req.destination === 'image'` 拿到的是原始请求，
+// 那个是真的有效，和这里不是一回事。
+// 判据是 URL 主机名，改图源必须改这里（index.html 的 IMG_CACHE_RE 要一起改，
+// 那个管的是设置面板里「封面 N 张」的计数）。
+var IMG_RE = /bgmimg|anibt|ranobedb/;
+
 // 封面缓存有上限：超出后按插入顺序清理最旧的，避免长期使用占满配额
 function trimImageCache(cache) {
   return cache.keys().then(function (keys) {
     var imgs = keys.filter(function (req) {
-      return req.destination === 'image' || /bgmimg|anibt|ranobedb/.test(req.url);
+      return IMG_RE.test(req.url);
     });
     if (imgs.length <= IMG_LIMIT) return null;
     var drop = imgs.slice(0, imgs.length - IMG_LIMIT);

@@ -2764,9 +2764,124 @@ async function main() {
     check('Service Worker 不预缓存剩余核心', !swTxt.includes('light-novels-rest'));
     check('Service Worker 缓存轻量核心与详情包',
       swTxt.includes('data/light-novels-lite.js') && swTxt.includes('data/light-novels-extra.js'));
-    check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
-    check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
+    // 封面缓存回收不能吃掉应用自己的文件。
+    //
+    // 原来这里只有一行 `swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT')` ——
+    // 纯文字存在性检查。把 trimImageCache 的函数体整个清空、或者把正则改成 /./，
+    // 它照样 PASS；而缓存会被删光（或永不回收，一路涨到配额满）。
+    // 这正是验收最该防的那类断言：绿着，但什么都没守住。
+    //
+    // 换成执行真实代码：fetch 出 sw.js 源码 → <script> 注入沙箱执行 → 拿回真正的
+    // trimImageCache 和 IMG_LIMIT → 喂一份真实形态的 key 列表 → 看它删了什么。
+    // 不在测试里重写判断逻辑，否则测的是测试自己的实现。
+    //
+    // 站点 CSP 是 script-src 'self' 'unsafe-inline'，不含 unsafe-eval，
+    // new Function / eval 会被拒（EvalError），所以走 <script> 标签注入。
+    // 这条断言因此也没有绕过任何安全策略。
+    const trimProbe = await cdp.evaluate(`(async () => {
+      const src = await fetch('sw.js').then((r) => r.text());
+      const swUrl = navigator.serviceWorker.controller
+        ? navigator.serviceWorker.controller.scriptURL
+        : location.origin + '/sw.js';
+      const scope = swUrl.replace(/[^/]*$/, '');
+
+      // 这段源码跑在页面里：self 是 window，没有 registration。
+      // trimImageCache 本身不碰这些，但文件顶层的三个 addEventListener 会执行。
+      window.__swSandbox = {
+        addEventListener() {}, skipWaiting() {}, clients: { claim() {} },
+        location: { origin: location.origin }, registration: { scope },
+      };
+      const el = document.createElement('script');
+      el.textContent =
+        'window.__swProbe = (function (self) {' + src +
+        '\\nreturn { trimImageCache: trimImageCache, SHELL: SHELL, IMG_LIMIT: IMG_LIMIT };\\n})(window.__swSandbox);';
+      document.head.appendChild(el);
+      el.remove();
+
+      const probe = window.__swProbe;
+      delete window.__swSandbox;
+      if (!probe || typeof probe.trimImageCache !== 'function') {
+        return { error: '未能从 sw.js 源码取出 trimImageCache' };
+      }
+
+      const run = async (keys) => {
+        const deleted = [];
+        const cache = {
+          keys: () => Promise.resolve(keys),
+          delete: (req) => { deleted.push(req.url); return Promise.resolve(true); },
+        };
+        await probe.trimImageCache(cache);
+        return deleted;
+      };
+
+      // ---- 场景一：真实形态。壳与数据在 install 阶段先写，封面随后写。 ----
+      const shell = probe.SHELL.map((rel) => new URL(rel, scope).href);
+      const keys = shell.map((u) => ({ url: u, destination: '' }));
+      // 页面重试时会给 extra / ch 加 ?v= 强制刷新，这些条目同样不是封面
+      ['data/light-novels-extra.js', 'data/light-novels-ch.js'].forEach((rel) => {
+        keys.push({ url: new URL(rel, scope).href + '?v=' + Date.now(), destination: '' });
+      });
+      const COVERS = probe.IMG_LIMIT + 220;
+      for (let i = 0; i < COVERS; i += 1) {
+        // 两个真实图源都放进去：相对路径拼出来的是 bgmimg，绝对路径全是 ranobedb
+        const host = i % 2 ? 'https://bgmimg.anibt.net/r/400/pic/cover/' : 'https://images.ranobedb.org/';
+        keys.push({ url: host + i + '.jpg', destination: '' });
+      }
+      const deleted = await run(keys);
+      const shellPaths = new Set(shell.concat(
+        ['data/light-novels-extra.js', 'data/light-novels-ch.js'].map((rel) => new URL(rel, scope).href),
+      ));
+      const lostShell = deleted.filter((u) => shellPaths.has(u.split('?')[0]));
+
+      // ---- 场景二已删除，理由值得记下来 ----
+      // 曾写过一个「壳文件带上 destination:'image' 也不许删」的守卫，想借此把
+      // 「判定只能靠 URL 主机名」这个决定锁住。反向验证时发现它虽然会 FAIL，
+      // 但**同时两条行为断言仍然全绿**——因为 destination 实测恒为空串，
+      // 加回 destination === 'image' 那个判断对真实行为毫无影响。
+      // 那它守的就不是行为，而是「代码里别出现某个写法」；将来一次无害重构
+      // 就会被它判红，而红的结果一旦掺进假警报，真缺陷也会被当成老毛病忽略。
+      // 实测结论记在 sw.js 的 IMG_RE 注释里（含 scripts/probe-cache-dest.mjs 的取证），
+      // 行为由上面两条正反断言守住，这里不再加第三道。
+
+      return {
+        shellCount: shell.length,
+        covers: COVERS,
+        deleted: deleted.length,
+        lostShell,
+        coversLeft: COVERS - (deleted.length - lostShell.length),
+        keepsLimit: probe.IMG_LIMIT,
+      };
+    })()`);
+    check('封面缓存回收不误删应用自身文件',
+      !trimProbe.error && trimProbe.shellCount > 0 && trimProbe.lostShell.length === 0,
+      trimProbe.error || (`${trimProbe.shellCount} 个壳文件 · 删除 ${trimProbe.deleted} 条 · ` +
+        `误删 ${trimProbe.lostShell.length} 条` +
+        (trimProbe.lostShell.length ? '：' + trimProbe.lostShell.slice(0, 4).join(', ') : '')));
+    // 上面只守「没多删」。这条守「也没少删」—— 正则若写得过窄（漏掉某个图源），
+    // 缓存会无限增长，而上面那条照样通过。两个方向都要有断言。
+    // 期望值取 sw.js 里的 IMG_LIMIT，不在测试里再写一个 400，否则上限一改就静默失配。
+    check('封面缓存回收仍把封面压到上限内',
+      !trimProbe.error && trimProbe.coversLeft === trimProbe.keepsLimit,
+      trimProbe.error || `剩余封面 ${trimProbe.coversLeft}（上限 ${trimProbe.keepsLimit}）`);
     const indexTxt = await (await fetch(`http://127.0.0.1:${PORT}/index.html`)).text();
+    // 上面两条守的是「sw.js 的判定对不对」，守不到「页面的判定跟它是不是同一套」。
+    // 这两处是同一语义的两份副本：sw.js 的 IMG_RE 决定回收谁，index.html 的
+    // IMG_CACHE_RE 决定「封面 N 张」数谁、以及「清理封面」删谁。两边分叉时
+    // 后果不对称也很难发现 —— 若页面那份少了某个图源，计数会偏小、点清理只删掉
+    // 一部分，而剩余那些仍在占用配额，界面上却已经显示「已清理 N 张」并归零。
+    // 所以比的是两份**取值集合**是否一致，而不是「某个字符串出现在文件里」。
+    const imgRes = (txt, name) => {
+      const m = txt.match(new RegExp('var ' + name + ' = /([^/]+)/;'));
+      return m ? m[1].split('|').map((s) => s.trim()).filter(Boolean).sort() : null;
+    };
+    const swHosts = imgRes(swTxt, 'IMG_RE');
+    const pageHosts = imgRes(indexTxt, 'IMG_CACHE_RE');
+    const sameHosts = !!swHosts && !!pageHosts &&
+      swHosts.length === pageHosts.length && swHosts.every((h, i) => h === pageHosts[i]);
+    check('封面统计与封面回收使用同一套图源判定',
+      sameHosts,
+      sameHosts ? (swHosts || []).join('|') : `sw.js=${JSON.stringify(swHosts)} / index.html=${JSON.stringify(pageHosts)}`);
+    check('图标文件存在', existsSync(path.join(ROOT, 'icons/icon-512.png')) && existsSync(path.join(ROOT, 'icons/icon-180.png')));
     check('包含安装引导', indexTxt.includes('beforeinstallprompt') && indexTxt.includes('添加到主屏幕'));
     check('安装完成后收起引导', indexTxt.includes("addEventListener('appinstalled'"));
     check('帮助面板写明高级搜索语法', indexTxt.includes('作者:米泽穗信') && indexTxt.includes('出版社:KADOKAWA'));

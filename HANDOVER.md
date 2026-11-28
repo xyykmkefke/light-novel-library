@@ -2254,6 +2254,102 @@ FAIL  详情「复制链接」不把本机主题偏好带给对方
 
 `importBtn`（只是触发文件选择框，数据层已由 `test-merge` 覆盖），以及一批筛选/展示开关（`onlyMineBtn`、`highScoreBtn`、`hideMineBtn`、`statusRow`、`groupBy`、`advFilterToggle`、`searchToggle`、`mineMore` 系列、`helpBtn`、`paletteMask`、`filterMask`）——这些改的是视图状态、不写数据，且互斥关系（`onlyMine` ↔ `hideMine`）已在代码层确认正确。
 
+## 9.67 v1.24.17 封面缓存的验收一直只查「有没有这个词」（2026-11-28）
+
+### 9.67.1 一条绿了很久但什么都没守住的断言
+
+`verify.mjs` 里关于封面缓存回收的全部验收，此前只有这一行：
+
+```js
+check('封面缓存带数量上限清理', swTxt.includes('trimImageCache') && swTxt.includes('IMG_LIMIT'));
+```
+
+纯文字存在性检查。把 `trimImageCache` 的函数体整个清空、或者把判断用的正则改成 `/./`（删光整个缓存）——它照样 PASS。
+
+这不是新发现的缺陷，而是**验收本身的缺陷**：功能是对的，但守它的那条断言是装饰品。对照 `../galgame/scripts/verify.mjs`，那边早就改成了执行式（取出源码、喂假 cache、看它删了什么），轻小说这一份一直没跟上。
+
+### 9.67.2 先把事实查清：`cache.keys()` 的 `destination` 恒为空
+
+`sw.js` 原来这样判断「这条缓存是不是封面」：
+
+```js
+return req.destination === 'image' || /bgmimg|anibt|ranobedb/.test(req.url);
+```
+
+前半个条件在这条路径上**恒为假**。`cache.keys()` 返回的不是当初存进去的那个 `Request`，而是从缓存条目重建的，只保留 url / method / headers / mode。
+
+新建了一次性诊断脚本 `scripts/probe-cache-dest.mjs`（自带静态服务器 + CDP，往真实 `yuc-ln-*` 缓存塞三条再读回，读完立即删除），实测三类：
+
+```
+{ "url": "/data/light-novels-lite.js",               "destination": "", "matchedByDest": false, "matchedByRegex": false }
+{ "url": "bgmimg.anibt.net/r/400/pic/cover/...",     "destination": "", "matchedByDest": false, "matchedByRegex": true  }
+{ "url": "images.ranobedb.org/x.jpg",                "destination": "", "matchedByDest": false, "matchedByRegex": true  }
+```
+
+全是 `""`，命中全部来自正则。与 galgame 的结论完全一致。
+
+于是删掉那个死条件，并把实测写进注释。理由不是「省一点 CPU」，而是：**「`destination` 能兜底」这个印象一旦成立，将来新增图源时就不会去改正则**，那些封面永远进不了回收范围，缓存一路涨到配额满，而界面上看不出来。
+
+注意区分：`fetch` 事件里那行 `if (req.destination === 'image')` 拿到的是**原始请求**，那个是真的有效，与 `cache.keys()` 不是一回事。注释里写明了这点，避免下次误删。
+
+同时把正则提成具名常量 `IMG_RE`，好让验收能按名字取出取值（见 9.67.4）。
+
+### 9.67.3 换成执行式断言（两个方向）
+
+移植 galgame 的做法：`fetch('sw.js')` 取源码 → `<script>` 标签注入沙箱执行（站点 CSP 是 `script-src 'self' 'unsafe-inline'`，不含 `unsafe-eval`，`new Function` 会报 `EvalError`）→ 拿回真正的 `trimImageCache` / `SHELL` / `IMG_LIMIT` → 喂一份真实形态的 key 列表（11 个壳文件 + 带 `?v=` 的重试条目 + `IMG_LIMIT + 220` 张双图源封面）→ 看它删了什么。
+
+不在测试里重写判断逻辑——重写的话测的是测试自己的实现。
+
+两条断言守两个相反方向：
+
+| 断言 | 守什么 | 写错过窄时会怎样 |
+|---|---|---|
+| 封面缓存回收不误删应用自身文件 | 没多删（`lostShell.length === 0`） | 抓不到 |
+| 封面缓存回收仍把封面压到上限内 | 也没少删（`coversLeft === IMG_LIMIT`） | 抓不到 |
+
+期望值取 `sw.js` 里的 `IMG_LIMIT`，不在测试里再写一个 400——否则上限一改就静默失配。
+
+### 9.67.4 顺带补上两份正则的分叉
+
+同一套语义在项目里有两份副本：
+
+| 文件 | 常量 | 用途 |
+|---|---|---|
+| `sw.js` | `IMG_RE` | 决定回收谁 |
+| `index.html` | `IMG_CACHE_RE`（9235 行） | 决定「封面 N 张」数谁、「清理封面」删谁 |
+
+分叉的后果不对称、也很难发现：若页面那份少了某个图源，计数偏小、点「清理封面」只删掉一部分，剩余那些仍在占用配额，而界面已经显示「已清理 N 张」并归零。
+
+新断言比的是两份的**取值集合**（按 `|` 拆开排序后逐项比），不是「某个字符串出现在文件里」。
+
+### 9.67.5 一条被自己删掉的断言
+
+初版还写了第三条：「壳文件带上 `destination:'image'` 也不许被删」，想借此把「判定只能靠 URL 主机名」这个决定锁住。
+
+反向验证时它确实 FAIL 了，**但另外两条行为断言同时全绿**——因为 `destination` 恒为空，把 `destination === 'image' ||` 加回去对真实行为毫无影响。
+
+那它守的就不是行为，而是「代码里别出现某个写法」。将来一次无害重构就会被它判红，而一旦红灯里掺进假警报，真缺陷也会被当成老毛病忽略。**删掉**，理由写进 `verify.mjs` 的注释，实测结论留在 `sw.js` 与本节。
+
+这是本项目第一次主动删掉一条自己刚加的断言，判据值得记下来：**反向验证时如果一条断言 FAIL 而所有行为断言仍全绿，先问它守的到底是行为还是写法。**
+
+### 9.67.6 反向验证（三组，各自独立）
+
+| 注入的缺陷 | 期望 | 实测 |
+|---|---|---|
+| `IMG_RE` 加上 `\|light-novels` | 误删壳文件 → 第 1 条 FAIL | `误删 5 条：light-novels-lite.js, -extra.js, -ch.js, -extra.js?v=...` ✅ 第 2 条仍 PASS |
+| `IMG_RE` 删掉 `\|ranobedb` | 漏删一个图源 → 第 2 条 FAIL | `剩余封面 620（上限 400）` ✅ 第 1 条仍 PASS |
+| `index.html` 的 `IMG_CACHE_RE` 删掉 `\|ranobedb` | 两份分叉 → 第 3 条 FAIL | `sw.js=["anibt","bgmimg","ranobedb"] / index.html=["anibt","bgmimg"]` ✅ 前两条仍 PASS |
+
+三组各自只有一条 FAIL、其余全绿，说明这三条守的是**三个独立性质**，不是同一件事的三种说法。
+
+### 9.67.7 验收
+
+`verify` **276 → 278/278**（删 1 条文字检查、增 3 条）。`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28。
+
+版本 **1.24.16 → 1.24.17**，SW `yuc-ln-shell-v67` → **`v68`**。
+
+`scripts/probe-cache-dest.mjs` 保留：它记录的是「`destination` 恒为空」这个平台事实的取证手段，将来换浏览器或改动缓存策略时值得重跑一次。它不参与 `verify`，不影响 CI。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -2320,6 +2416,6 @@ FAIL  详情「复制链接」不把本机主题偏好带给对方
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.16 已完成，后续按第 10 节风险与决策、第 9.66 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（276 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.17 已完成，后续按第 10 节风险与决策、第 9.67 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（278 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
