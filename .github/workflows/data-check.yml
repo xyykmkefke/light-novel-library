@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 手工触发：Git Data API 推送（scripts/gh-push.mjs）不会产生 push 事件，
+  # 没有这个入口时 CI 完全跑不起来，线上会静默停在旧版本。
+  workflow_dispatch:
 
 jobs:
   data-check:
