@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.10">
+<meta name="version" content="1.24.11">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.10</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.11</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4279,6 +4279,28 @@
   var PAGE_SIZE = 240;
   var FIRST_BATCH = 60;
   var renderSeq = 0;
+
+  // 「当前这一批已经渲染到第几条」的真值。
+  //
+  // 原来 loadMoreBtn 用 gridEl.querySelectorAll('.card').length 当成已渲染数量，
+  // 而 render() 首屏只建 FIRST_BATCH(60) 张，剩下的 180 张靠 requestIdleCallback
+  // 空闲时补。用户在补齐**完成前**点「显示更多」就会读到 60：
+  //   start=60 → slice(60, 300) 又插 240 张，与本体第 60..240 条完全重复，
+  //   卡片数变成 480（实测 180 张重复），按钮文字也倒退成更旧的数字。
+  // 所以「已渲染到哪」必须由渲染逻辑自己记账，不能数 DOM —— DOM 里可能有
+  // 迟到的补齐插入，也可能有批量删除留下的空洞。
+  var renderedCount = 0;
+  // 待执行的空间补齐句柄：一旦「显示更多」或重新 render，就要作废它，
+  // 否则它会把已经被新一批覆盖的内容再插一遍。
+  var pendingFill = null;
+
+  function cancelPendingFill() {
+    if (pendingFill == null) return;
+    if (typeof pendingFill === 'number' && window.cancelIdleCallback) {
+      try { window.cancelIdleCallback(pendingFill); } catch (e) { /* 已执行 */ }
+    }
+    pendingFill = null;
+  }
 
   function updateLoadMore(total, shown, paged) {
     var rest = paged && total > shown ? total - shown : 0;
@@ -6917,18 +6939,29 @@
       firstImgs[bi].setAttribute('fetchpriority', 'high');
     }
     updateLoadMore(list.length, shown.length, paged);
+    // 本批已渲染到哪，由这里记账（DOM 计数会被迟到的补齐或批量删除干扰）
+    renderedCount = grouped || board ? list.length : initial.length;
+    cancelPendingFill();
     if (paged && shown.length > initial.length) {
       var appendRest = function () {
+        pendingFill = null;
         if (currentRender !== renderSeq || !gridEl.isConnected) return;
-        var rest = shown.slice(initial.length);
+        // 只补「本批里还没渲染」的那段。用 renderedCount 而不是 initial.length：
+        // 万一执行时 renderedCount 已经被别处推进过，就什么都不做。
+        if (renderedCount >= shown.length) return;
+        var rest = shown.slice(renderedCount);
         if (!rest.length) return;
         gridEl.insertAdjacentHTML('beforeend', rest.map(cardHtml).join(''));
         var restLinks = gridEl.querySelectorAll('.card-link');
-        for (var ri = initial.length; ri < restLinks.length; ri += 1) restLinks[ri].tabIndex = -1;
-        updateLoadMore(list.length, shown.length, true);
+        for (var ri = renderedCount; ri < restLinks.length; ri += 1) restLinks[ri].tabIndex = -1;
+        renderedCount = shown.length;
+        updateLoadMore(list.length, renderedCount, true);
       };
-      if (window.requestIdleCallback) requestIdleCallback(appendRest, { timeout: 500 });
-      else setTimeout(appendRest, 120);
+      if (window.requestIdleCallback) {
+        pendingFill = requestIdleCallback(appendRest, { timeout: 500 });
+      } else {
+        pendingFill = setTimeout(appendRest, 120);
+      }
     }
     emptyEl.hidden = list.length > 0;
     emptyActions = [];
@@ -8336,7 +8369,13 @@
 
   $('loadMoreBtn').addEventListener('click', function () {
     var list = filteredList();
-    var start = gridEl.querySelectorAll('.card').length;
+    // 取消还没执行的补齐：它要插的那段已经被下面的 slice 覆盖，
+    // 再让它执行就会重复插入（实测会多出 180 张重复卡片）。
+    cancelPendingFill();
+    // 起点用渲染记账值，不用 DOM 卡片数：补齐未完成时 DOM 只有 60 张，
+    // 而逻辑上本批 240 张都是「已显示」的，从 60 开始会重复插入 240..60 那段。
+    var start = renderedCount;
+    if (start < 1) start = gridEl.querySelectorAll('.card').length;
     var next = list.slice(start, start + PAGE_SIZE);
     if (!next.length) { updateLoadMore(list.length, start, false); return; }
     gridEl.insertAdjacentHTML('beforeend', next.map(cardHtml).join(''));
@@ -8346,7 +8385,8 @@
       var link = cards[i].querySelector('.card-link');
       if (link) link.tabIndex = i === 0 ? 0 : -1;
     }
-    updateLoadMore(list.length, start + next.length, true);
+    renderedCount = start + next.length;
+    updateLoadMore(list.length, renderedCount, true);
   });
 
   // 空结果时一键清除筛选，回到最新年份的全量列表

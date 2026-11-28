@@ -3675,6 +3675,98 @@ async function main() {
       })()`);
       await setSearch('');
       await sleep(200);
+
+      // ---- 「显示更多」不能与首屏空闲补齐抢同一个位置 ----
+      //
+      // render() 首屏只建 FIRST_BATCH(60) 张，其余 180 张交给
+      // requestIdleCallback 补。原来 loadMoreBtn 用
+      // gridEl.querySelectorAll('.card').length 当「已渲染到第几条」，
+      // 用户抢在补齐之前点击就会读到 60：
+      //   start=60 → slice(60,300) 又插 240 张，
+      //   其中第 60..240 条与本体完全重复（实测卡片 480 张、180 张重复），
+      //   按钮文字还倒退成更旧的数字。
+      //
+      // 复现要点：必须构造「补齐回调已排队但尚未执行」的状态，
+      // 先点击、再执行那个回调。第一版把 requestIdleCallback 换成
+      // 永不执行（等于绕开竞态），结果 duplicated:0 一路 PASS —— 空跑。
+      const loadMoreProbe = await cdp.evaluate(`(async () => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const out = {};
+        const rawRIC = window.requestIdleCallback;
+        let pendingIdle = null;
+        // 抓住已排队的补齐回调，不让它立刻跑
+        window.requestIdleCallback = function (fn) { pendingIdle = fn; return 1; };
+        try {
+          // 回到全库、无筛选、网格视图
+          location.hash = '#tab=all&y=all&kd=all&hc=1&gn=0&dup=0&rn=0&gr=all&o=heat&st=all&om=0&hs=0&hm=0&v=grid&ms=recent&fmt=all&owd=0&t=dark';
+          await sleep(500);
+          const q = document.getElementById('q');
+          if (q) { q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); }
+          await sleep(700);
+
+          const grid = document.getElementById('grid');
+          const btn = document.getElementById('loadMoreBtn');
+          out.cardsBeforeClick = grid.querySelectorAll('.card').length;
+          out.idleQueued = typeof pendingIdle === 'function';
+          out.textBeforeClick = btn.textContent;
+
+          btn.click();
+          await sleep(350);
+          const afterClick = [...grid.querySelectorAll('.card')];
+          out.cardsAfterClick = afterClick.length;
+          out.dupAfterClick = afterClick.length - new Set(afterClick.map((c) => c.getAttribute('data-id'))).size;
+          out.textAfterClick = btn.textContent;
+
+          // 迟到的补齐回调现在才执行 —— 缺陷态下这里会插入重复卡片
+          if (pendingIdle) pendingIdle({ didTimeout: true, timeRemaining: () => 0 });
+          await sleep(350);
+          const ids = [...grid.querySelectorAll('.card')].map((c) => c.getAttribute('data-id'));
+          out.cardsFinal = ids.length;
+          out.uniqueFinal = new Set(ids).size;
+          out.dupFinal = ids.length - new Set(ids).size;
+          out.textFinal = btn.textContent;
+          // 按钮上的「还有 N 本」应当与 DOM 实际渲染数量自洽：
+          //   剩余 + 已渲染 == 当前筛选下的总数
+          // 缺陷态下 DOM 被迟到回调插到 480 张，按钮却仍按 240 算出 1786，
+          // 两个数加不到总数上。这才是有意义的判据 ——
+          // 只比「点击前后的数字没变大」是恒真的（迟到回调算出的值恰好等于
+          // 点击前的值），第一次反向验证时它就是 PASS，等于没测。
+          out.restNumbers = [out.textBeforeClick, out.textFinal]
+            .map((t) => Number((String(t).match(/还有\\s*(\\d+)/) || [])[1]))
+            .filter((n) => !Number.isNaN(n));
+          out.restShown = out.restNumbers.length === 2 ? out.restNumbers[1] : null;
+          out.renderedNow = out.cardsFinal;
+          // UI 自洽性判据：同一时刻取「按钮剩余 + DOM 卡片数」，总和应当恒定
+          // —— 两者只是把同一批数据切成「已显示 / 未显示」两段。
+          // 这里比较「点击后」与「迟到补齐执行后」两个时刻：
+          // 修复态 DOM 不变 → 和不变；缺陷态 DOM 被插到 480 而按钮仍按 240 算
+          // → 和从 2026 跳到 2206，暴露两次追加互不知情。
+          out.restAfterClick = Number((String(out.textAfterClick || '').match(/还有\\s*(\\d+)/) || [])[1]);
+          out.sumAfterClick = Number.isNaN(out.restAfterClick) ? null : out.restAfterClick + out.cardsAfterClick;
+          out.sumAfter = out.restShown == null ? null : out.restShown + out.renderedNow;
+          out.sumStable = out.sumAfterClick != null && out.sumAfter != null
+            ? out.sumAfterClick === out.sumAfter : null;
+        } finally {
+          window.requestIdleCallback = rawRIC;
+          // 复原：把补齐真的跑完，让后续断言看到完整首屏
+          location.hash = '#tab=all&y=all&kd=all&hc=1&gn=0&dup=0&rn=0&gr=all&o=heat&st=all&om=0&hs=0&hm=0&v=grid&ms=recent&fmt=all&owd=0&t=dark';
+          await sleep(900);
+        }
+        return out;
+      })()`);
+
+      check('首屏补齐未完成时点「显示更多」不产生重复卡片',
+        loadMoreProbe.idleQueued === true &&        // 前提：确实构造出了待执行的补齐
+        loadMoreProbe.dupAfterClick === 0 &&
+        loadMoreProbe.dupFinal === 0 &&
+        loadMoreProbe.cardsFinal === loadMoreProbe.uniqueFinal,
+        JSON.stringify(loadMoreProbe));
+
+      check('「显示更多」后按钮剩余数与 DOM 卡片数之和保持不变',
+        loadMoreProbe.sumStable === true &&
+        loadMoreProbe.sumAfterClick === loadMoreProbe.sumAfter,
+        JSON.stringify({ rest: loadMoreProbe.restNumbers, rendered: loadMoreProbe.renderedNow,
+          sumAfterClick: loadMoreProbe.sumAfterClick, sumAfter: loadMoreProbe.sumAfter }));
     }
 
 

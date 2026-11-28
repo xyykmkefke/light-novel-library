@@ -1718,6 +1718,112 @@ window.prompt = () => (names.length ? names.shift() : null);
 - `loadViews` 的 `filter` 已挡掉非对象项，`applyView` 复用 `applyStateMap` 的校验，损坏的视图不会写入非法 `year` / `kind`；
 - `renderViewsMenu` 用 `escapeHtml(v.name)` 输出，视图名里的 `<` `&` 不会破坏菜单结构。
 
+## 9.61 v1.24.11 「显示更多」与首屏补齐抢同一个位置（2026-11-28）
+
+### 9.61.1 这一轮怎么找到的
+
+前几轮都是「读代码 → 怀疑某处 → 验证」。这轮换了方法：**先统计哪些交互入口从未被断言点过**。
+
+```js
+// 提取 index.html 里所有 $('id').addEventListener 的 id，
+// 再看 verify.mjs 有没有提到过它
+```
+
+结果：**70 个绑定入口里有 26 个从未被 verify 提及**（`loadMoreBtn` / `copyViewBtn` / `detailShare` / `helpBtn` / `syncNowBtn` / `importBtn` / `moreMenu` …）。挑要写数据或动 DOM 结构的入口逐一看，`loadMoreBtn` 第一个就中了。
+
+**覆盖率统计本身比读代码有效**：代码读起来每条路径都「看起来对」，而「从没被点过」是个客观事实，不用猜。
+
+### 9.61.2 缺陷：两处追加互不知情
+
+`render()` 首屏只建 `FIRST_BATCH = 60` 张，其余 180 张交给空闲回调补：
+
+```js
+var initial = paged ? shown.slice(0, FIRST_BATCH) : shown;
+…
+if (paged && shown.length > initial.length) {
+  var appendRest = function () {
+    var rest = shown.slice(initial.length);   // 补 60..240
+    …
+  };
+  requestIdleCallback(appendRest, { timeout: 500 });
+}
+```
+
+「显示更多」则这样算起点：
+
+```js
+var start = gridEl.querySelectorAll('.card').length;   // ← 数 DOM
+var next = list.slice(start, start + PAGE_SIZE);
+```
+
+**用 DOM 卡片数当「已渲染到第几条」。** 用户抢在空闲补齐**执行前**点「显示更多」：
+
+1. 首屏 60 张已出，补齐回调已排队但没跑
+2. 点击 → `start = 60` → `slice(60, 300)` → 又插 240 张
+3. 这 240 张里，第 60..240 条与首屏本批内容**完全重复**
+4. 排队中的补齐回调随后执行 → 再插一遍 60..240
+
+实测（探针）：**卡片 480 张，其中 180 张重复**。按钮文字也从 1726 倒退成 1786。
+
+触发条件很现实：网络慢 / 主线程忙（首屏 240 张卡片 + 封面解码）/ 用户手快。而且重复卡片长得一模一样，用户会以为「这本书怎么出现了两次」。
+
+### 9.61.3 修法：记账取代数 DOM
+
+新增两个变量：
+
+```js
+var renderedCount = 0;   // 本批已渲染到第几条
+var pendingFill = null;  // 待执行的空间补齐句柄
+```
+
+三处配合：
+
+| 位置 | 改动 |
+|---|---|
+| `render()` | 渲染后记 `renderedCount = initial.length`；排队前先 `cancelPendingFill()` |
+| 补齐回调 | 开头清 `pendingFill`；用 `if (renderedCount >= shown.length) return` 守卫；按 `renderedCount` 切片；执行后更新 `renderedCount` |
+| `loadMoreBtn` | 先 `cancelPendingFill()`，起点用 `renderedCount`，完成后更新 |
+
+**为什么不数 DOM**：DOM 里既可能有迟到的补齐插入，也可能有批量删除留下的空洞。「已渲染到哪」是逻辑状态，必须由逻辑自己记账。
+
+### 9.61.4 反向验证（两次，第一次是假的）
+
+**第一次：完全回退到修复前 → 主断言 FAIL（`dupFinal:180`），但第二条「剩余数不会倒退」PASS。**
+
+那条断言是**恒真**的：迟到的回调把 DOM 插到 480，同时算出 `total - 240 = 1786`，而点击前也正好是 1786 —— 数字「没变大」，判据成立，可它根本没反映问题。
+
+改成**UI 自洽性**：同一时刻取「按钮剩余 + DOM 卡片数」，总和应恒定（两者只是把同一批数据切成已显示/未显示两段）。缺陷态下 DOM 被插到 480 而按钮仍按 240 算，和从 **2026 跳到 2206**，立刻 FAIL。
+
+第二次回退验证：
+
+```
+主断言：dupFinal:180          → FAIL
+自洽性：sumAfter:2206 ≠ 2026  → FAIL
+```
+
+### 9.61.5 又一个「两条守卫互相兜底」
+
+想单独撤 `renderedCount` 或单独撤 `cancelPendingFill` 来精确定位是哪条在起作用，结果**两次都 PASS** —— 因为另一条会兜住。只有同时撤掉三条改动（起点、取消、回调切片）才 FAIL。
+
+这与 v1.24.8 的墓碑用例同形。**遇到「拆一条测不出来」，不要以为那条是废代码**：先确认它是不是被另一条覆盖了；要判断某条是否真的必要，得单独隔离出「只有它能挡住」的场景，否则两份都留着（冗余但正确），并在注释里说明这是双保险。
+
+### 9.61.6 验收
+
+`verify` **261 → 263/263**（新增 2 条：不产生重复卡片、按钮与 DOM 之和恒定），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.10 → 1.24.11**，SW `yuc-ln-shell-v61` → **`v62`**。
+
+### 9.61.7 还没查的入口（下一轮候选）
+
+26 个未覆盖入口里，这轮只处理了 `loadMoreBtn`。剩下值得看的：
+
+- `copyViewBtn` / `detailShare` —— 都复制 `location.href`，依赖 hash 已实时同步（`writeHash` 有 9 处调用，看起来完备，但没验过「复制出来的链接真的能还原视图」）；
+- `importBtn` —— 导入 JSON，已有其他断言覆盖其数据层，但按钮本身没点过；
+- `syncNowBtn` / `syncDisconnectBtn` —— 云同步，只在 `test-merge` 里测过合并逻辑，UI 路径未测；
+- `helpBtn` / `moreMenu` / `paletteMask` —— 纯展示，优先级低。
+
+**方法论沉淀**：覆盖率统计（哪些 id 从未出现在 verify 里）可以随时重跑，是低成本找盲区的手段，比逐行读代码靠得住。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -1774,7 +1880,7 @@ window.prompt = () => (names.length ? names.shift() : null);
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 261/261、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 263/263、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -1784,6 +1890,6 @@ window.prompt = () => (names.length ? names.shift() : null);
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.10 已完成，后续按第 10 节风险与决策、第 9.60 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（261 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.11 已完成，后续按第 10 节风险与决策、第 9.61 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（263 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
