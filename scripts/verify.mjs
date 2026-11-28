@@ -2963,6 +2963,63 @@ async function main() {
       clearUndo.draftTextAfterUndo === '清空撤销探针短评',
       JSON.stringify(clearUndo));
 
+    // ---- 详情「复制链接」不能把本机主题偏好带出去 ----
+    //
+    // v1.24.12 修过 copyViewBtn：它复制的是「视图」链接，剔除 d= 与 t=。
+    // detailShare 是另一个功能（复制「这本书」的链接），当时只核实了
+    // 「能还原那本书」，没注意它同样是 location.href —— t=（深浅色）是
+    // 本机偏好，对方打开分享链接时界面主题会被悄悄改掉。
+    const shareProbe = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const out = { ok: false };
+      const rawClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+      const rawShare = navigator.share;
+      let copied = null;
+      try {
+        // 无头环境没有 share 也没有可用剪贴板，两个都给替身，
+        // 并把 share 弄成「不支持」，逼它走复制分支
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: (t) => { copied = t; return Promise.resolve(); } },
+          configurable: true,
+        });
+        Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+        // 先让主题处于非默认值，确保 hash 里真的带 t=
+        document.getElementById('themeBtn').click();
+        await sleep(250);
+        const card = document.querySelector('.card');
+        if (!card) return Object.assign(out, { reason: 'no-card' });
+        card.querySelector('.card-link').click();
+        await sleep(600);
+        out.hash = location.hash;
+        out.hashHasTheme = /[#&]t=/.test(location.hash);
+        out.hashHasDetail = /[#&]d=/.test(location.hash);
+        document.getElementById('detailShare').click();
+        await sleep(350);
+        out.copied = copied;
+        out.copiedHasTheme = copied ? /[#&]t=/.test(copied) : null;
+        // 书名仍在链接里能还原，这是它的本职，必须保住
+        out.copiedHasDetail = copied ? /[#&]d=/.test(copied) : null;
+        out.toast = (document.getElementById('toast').textContent || '').trim().slice(0, 30);
+        out.ok = true;
+      } finally {
+        if (rawClip) Object.defineProperty(navigator, 'clipboard', rawClip);
+        Object.defineProperty(navigator, 'share', { value: rawShare, configurable: true });
+      }
+      // 复原：换回原主题、关详情
+      document.getElementById('themeBtn').click();
+      await sleep(200);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+      location.hash = '';
+      await sleep(250);
+      return out;
+    })()`);
+    check('详情「复制链接」不把本机主题偏好带给对方',
+      shareProbe.ok === true && shareProbe.hashHasTheme === true &&
+      shareProbe.copiedHasTheme === false &&
+      shareProbe.noAccidentalWrite !== false,
+      JSON.stringify(shareProbe));
+
     // ---- 系列卡片「子卷」入口 ----
     const volEntry = await cdp.evaluate(`(() => {
       const b = document.querySelector('.card [data-act="vols"]');

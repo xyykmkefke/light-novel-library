@@ -2186,6 +2186,74 @@ if (Object.keys(draftSnapshot).length) {
 
 `detailShare`、`importBtn`、`onlyMineBtn` / `highScoreBtn` / `hideMineBtn`（筛选取反，效果已被筛选类断言间接覆盖）、`statusRow`、`groupBy`、`advFilterToggle`、`searchToggle`、`mineMore` 系列菜单、`helpBtn` / `helpClose`、`paletteMask`、`filterMask`。后一批多为纯展示或开关类，优先级低。
 
+## 9.66 v1.24.16 详情「复制链接」仍把本机主题带出去（2026-11-28）
+
+### 9.66.1 同一个 bug 的第二处
+
+v1.24.12 修 `copyViewBtn` 时，HANDOVER 里写的是「`t=`（深浅色）也是本机偏好，不该因为打开别人的分享链接被改掉」。当时**只改了这一处**，`detailShare` 只是顺带核实了「能还原那本书」，就收工了。
+
+而 `detailShare` 也是 `var url = location.href;`。实测：
+
+```
+hash:     ...&t=light&d=37782
+copied:   ...&t=light&d=37782     ← t=light 跟着出去了
+```
+
+对方（或用另一台设备自己）打开这个链接，界面主题被悄悄改成对方的偏好值——他并没有要求改主题，而分享者也不知道自己顺手带了个设置过去。这是**「修完一处要顺着扇出查完」**的典型遗漏：两个按钮在同一条链上，语义不同（一个分享「视图」、一个分享「这本书」），但「本机偏好不该外泄」这条规则对两者都成立。
+
+### 9.66.2 修法：抽成一个函数，把差异显式化成参数
+
+两个按钮剔除的参数集**不同**，这一点必须保留：
+
+| 按钮 | 剔除 `d=`（详情深链） | 剔除 `t=`（主题） |
+|---|---|---|
+| `copyViewBtn`（复制视图链接） | 要剔除 | 要剔除 |
+| `detailShare`（复制这本书的链接） | **必须保留**（这是它的本职） | 要剔除 |
+
+所以抽成 `buildShareUrl(dropDetail)`，用参数表达差异，而不是写两遍几乎一样的循环：
+
+```js
+function buildShareUrl(dropDetail) {
+  var base = location.href.split('#')[0];
+  try { writeHash(); } catch (e) { }        // 刚改的筛选还没进地址栏时先补
+  var raw = String(location.hash || '').replace(/^#/, '');
+  if (!raw) return base;
+  var parts = [];
+  raw.split('&').forEach(function (pair) {
+    if (!pair) return;
+    var i = pair.indexOf('=');
+    var key = i < 0 ? pair : pair.slice(0, i);
+    if (key === 't') return;                 // 本机深浅色偏好，两种分享都不带
+    if (dropDetail && key === 'd') return;   // 详情深链，只有视图链接要剔除
+    parts.push(pair);
+  });
+  return parts.length ? base + '#' + parts.join('&') : base;
+}
+```
+
+两处各留一句注释指向对方，避免下次又只改一边。
+
+### 9.66.3 反向验证
+
+撤掉 `buildShareUrl(false)`、改回 `location.href`：
+
+```
+FAIL  详情「复制链接」不把本机主题偏好带给对方
+      copiedHasTheme: true      ← 缺陷复现
+```
+
+同时确认没有回归：`copyViewBtn` 那两条（不带详情深链、不带主题）仍 PASS，且新逻辑下 `copiedHasDetail:false` 依旧成立。
+
+### 9.66.4 验收
+
+`verify` **275 → 276/276**，`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.15 → 1.24.16**，SW `yuc-ln-shell-v66` → **`v67`**。
+
+### 9.66.5 还剩的入口
+
+`importBtn`（只是触发文件选择框，数据层已由 `test-merge` 覆盖），以及一批筛选/展示开关（`onlyMineBtn`、`highScoreBtn`、`hideMineBtn`、`statusRow`、`groupBy`、`advFilterToggle`、`searchToggle`、`mineMore` 系列、`helpBtn`、`paletteMask`、`filterMask`）——这些改的是视图状态、不写数据，且互斥关系（`onlyMine` ↔ `hideMine`）已在代码层确认正确。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -2242,7 +2310,7 @@ if (Object.keys(draftSnapshot).length) {
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 275/275、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 276/276、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -2252,6 +2320,6 @@ if (Object.keys(draftSnapshot).length) {
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.15 已完成，后续按第 10 节风险与决策、第 9.65 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（275 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.16 已完成，后续按第 10 节风险与决策、第 9.66 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（276 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
