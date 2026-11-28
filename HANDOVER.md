@@ -1344,6 +1344,81 @@ Object.keys(snapshot).forEach(function (id) {
 3. **修一处的模式，要顺着同一模式查完所有同类点。** 修完 `bulkApply` 的整体替换，立刻 grep 了全部 `myMap[...] = ` 与快照构造点，逐个确认快照字段集是否完整 —— 这是 9.55「修根因要顺着扇出查完」的延续。
 4. **状态记账要按 key 粒度，别用一个全局布尔量。** 这条在 9.55 已经写进教训，本轮又验证了一遍：两个写入点共用一条提示时，全局标志会让「A 写失败、B 写成功」把提示撤掉，而 A 的数据其实已经丢了。
 
+## 9.57 v1.24.7 批量选择与可见范围对齐（2026-11-28）
+
+### 9.57.1 这一轮修的是什么
+
+沿着「数据已经写对了，有没有哪条路径会把它悄悄弄丢、弄坏、或者让用户误判状态」继续问，这轮盯的是**批量操作的作用范围**。查出一处，会让用户在完全看不见的情况下改到书。
+
+### 9.57.2 切换筛选后批量选择不清空 —— 会在视野外改书
+
+`bulkSel` 是一张「选中了哪些条目」的登记表。它的写入只有两处（点卡片、点选择框），清理也只有四类时机：进入/退出批量态、执行批量操作、切换 tab、应用保存的视图。**筛选条件变化时从来不清。**
+
+于是这条路径成立：用户在「我的阅读」进入批量态，选中 2 本 → 点「已读」把状态筛选切过去 → 这 2 本里可能有一本根本不是「已读」，它从视图里消失了 → 底栏仍然写着「已选 2 本」 → 用户点「标记为想读」→ **那本他看不见的书也被改了**。而操作完成的提示仍然是「已标记为想读 2 本」，他没有任何线索知道多改了一本。
+
+筛选入口有二十多处（`state.status` / `state.q` / `state.onlyMine` / `state.genre` / `state.fmt` / `state.ownedOnly` …），全部只改 `state` 再 `render()`，没有一处碰 `bulkSel`。逐处补清理不但要改二十几个地方，将来新增筛选条件时还会再漏一处。
+
+修法：在 `render()` 里按**当前可见集合**统一对齐 —— 看得见的留下，看不见的从选择集里移除。
+
+```js
+function pruneBulkSel(list) {
+  var keep = Object.create(null);
+  for (var i = 0; i < list.length; i += 1) {
+    keep[typeof list[i] === 'object' ? list[i].i : list[i]] = true;
+  }
+  var changed = false;
+  Object.keys(bulkSel).forEach(function (id) {
+    if (!keep[id]) { delete bulkSel[id]; changed = true; }
+  });
+  return changed;
+}
+```
+
+**关键点：用 `list` 而不是 `shown`。** 列表是分页渲染的（`shown = list.slice(0, PAGE_SIZE)`），若按 `shown` 裁剪，用户翻页选中第 3 页的条目、再翻回第 1 页，第 3 页的选择就会被误清。`list` 是完整筛选结果，语义正确。
+
+### 9.57.3 反向验证
+
+把 `pruneBulkSel(list)` 注掉（改成 `if (0)` 保留调用形式），该断言 FAIL：
+
+```
+FAIL  切换筛选后批量选择清空  → {"selectedBefore":"已选 1 本","selectedAfter":"已选 1 本","barHiddenAfter":false}
+```
+
+恢复后 PASS：`selectedAfter:"已选 0 本"`、`barHiddenAfter:true`。
+
+### 9.57.4 新断言污染了后续断言（第五次踩，这次自己抓到了）
+
+第一版探针只做了「选中 → 切筛选 → 读计数」，**没有复原**。结果筛选停在「想读」，批量态也没退出，紧接着的「继续阅读快捷条」直接崩：
+
+```
+FAIL  我的阅读显示继续阅读快捷条  → {"hidden":true,"n":0,"id":"","meta":""}
+Error: 页面脚本异常："TypeError: Cannot read properties of null (reading 'click')"
+```
+
+崩溃点是「继续阅读一键加一卷」找不到 `[data-cont="next"]` —— 因为筛选条件把那张卡过滤掉了。
+
+这正是 MEMORY 里记的「验收脚本的新断言会污染后续断言」。修法是把「状态复原」当成断言块的一部分来写：切回 `[data-status="all"]`、退出批量态，并且**额外加一条断言验证复原本身成功**：
+
+```js
+check('批量筛选探针事后复原了视图状态',
+  bulkStale.restoredStatus === true && bulkStale.restoredBulk === true, ...);
+```
+
+为什么复原也要断言：若复原失败，后面那批红是探针造成的**假红**，会把人引到完全错误的方向去排查。把「复原成功」显式写成一条断言，假红就会指向真正的原因。
+
+### 9.57.5 顺带核实（确认不需要改）
+
+- `setTab`、`applyStateMap`（应用视图）、`toggleBulk`、`bulkApply` 结束时都已显式清空 `bulkSel`，我的 `render()` 对齐是双保险，不冲突。
+- 无任何代码持有 `bulkSel` 的对象引用（全部是 `bulkSel[id]` 直接访问），因此重建对象安全。
+- 非批量态下只有在**确实有残留**时才重建对象（`Object.keys(bulkSel).length`），避免每次 render 无谓分配。
+- `filteredList()` 返回的 `list` 是完整结果而非分页子集，裁剪语义正确。
+
+### 9.57.6 验收
+
+`verify` **251 → 253/253**（新增 2 条：批量选择对齐、探针复原自检），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.6 → 1.24.7**，SW `yuc-ln-shell-v57` → **`v58`**（`index.html` 是运行时文件，按清单第 2 条升 SW）。版本六处一致。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -1400,7 +1475,7 @@ Object.keys(snapshot).forEach(function (id) {
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 251/251、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 253/253、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -1410,6 +1485,6 @@ Object.keys(snapshot).forEach(function (id) {
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.6 已完成，后续按第 10 节风险与决策、第 9.56 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（251 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.7 已完成，后续按第 10 节风险与决策、第 9.57 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（253 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。

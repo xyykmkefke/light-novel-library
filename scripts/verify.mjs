@@ -1489,6 +1489,67 @@ async function main() {
       bulkUndo.after?.rvU === bulkUndo.mid?.rvU,
       JSON.stringify(bulkUndo));
 
+    // ---- 切换筛选后，批量选择必须同步清空 ----
+    //
+    // 选中书目后改筛选条件（状态 / 搜索 / 只看已收藏…），被选中的书可能已经
+    // 不在当前视图里了。若 bulkSel 不清空，用户看着「已选 2 本」，实际上其中
+    // 有一本他根本看不见——接着点「标记为想读」，那本在视野外被悄悄改了状态。
+    // 总数提示仍然显示 2，用户没有任何线索知道多改了一本。
+    //
+    // 这不是理论：筛选入口有二十多处（state.status / state.q / state.onlyMine…），
+    // 全部只改 state 再 render()，没有任何一处碰 bulkSel。
+    const bulkStale = await cdp.evaluate(`(async () => {
+      // 确保在「我的阅读」且退出批量态，从一个干净状态开始
+      const out = { ok: false };
+      const tabMine = document.querySelector('#tabMine') || document.querySelector('[data-tab="mine"]');
+      if (tabMine) { tabMine.click(); await new Promise((r) => setTimeout(r, 350)); }
+      // 确保至少有一本书在收藏里
+      const mineNow = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      const mineIds = Object.keys(mineNow);
+      out.mineCount = mineIds.length;
+      if (mineIds.length < 1) return { ok: false, reason: 'no-mine' };
+      // 进入批量态
+      const bb = document.getElementById('bulkBtn');
+      if (bb && bb.textContent.indexOf('批量') >= 0) { bb.click(); await new Promise((r) => setTimeout(r, 300)); }
+      // 点第一张卡片选中它
+      const card = document.querySelector('#list .card, .card[data-id]');
+      if (!card) return { ok: false, reason: 'no-card' };
+      out.pickedId = card.dataset.id;
+      card.click();
+      await new Promise((r) => setTimeout(r, 250));
+      out.selectedBefore = (document.getElementById('bulkCount').textContent || '').trim();
+      out.barHiddenBefore = document.getElementById('bulkBar').hidden;
+      // 换一个筛选条件：切到「想读」状态（大概率与刚选中的书不同状态）
+      const pill = document.querySelector('[data-status="want"]');
+      if (pill) { pill.click(); await new Promise((r) => setTimeout(r, 400)); }
+      out.selectedAfter = (document.getElementById('bulkCount').textContent || '').trim();
+      out.barHiddenAfter = document.getElementById('bulkBar').hidden;
+      // 复原状态：这条探针改过状态筛选、也进过批量态，不收干净会把后面
+      // 「继续阅读快捷条」「按状态筛选」等断言全部带崩（隐藏恒为 true）。
+      const pillAll = document.querySelector('[data-status="all"]');
+      if (pillAll) { pillAll.click(); await new Promise((r) => setTimeout(r, 350)); }
+      const bb2 = document.getElementById('bulkBtn');
+      if (bb2 && bb2.textContent.indexOf('退出批量') >= 0) {
+        bb2.click();
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      out.restoredStatus = document.querySelector('[data-status="all"]')?.classList.contains('active') ?? null;
+      out.restoredBulk = (document.getElementById('bulkBtn').textContent || '').indexOf('退出批量') < 0;
+      out.ok = true;
+      return out;
+    })()`);
+    check('切换筛选后批量选择清空（否则会在视野外改书）',
+      bulkStale.ok === true &&
+      bulkStale.selectedBefore === '已选 1 本' &&
+      // 清空后要么底栏隐藏，要么计数归零——两者任一即说明选择没有残留
+      (bulkStale.barHiddenAfter === true || /已选 0 本/.test(bulkStale.selectedAfter || '')),
+      JSON.stringify(bulkStale));
+    // 复原是否真的成功也要验：没复原的话，后面断言的红是探针造成的假红，
+    // 会把人引到完全错误的方向上排查。
+    check('批量筛选探针事后复原了视图状态',
+      bulkStale.restoredStatus === true && bulkStale.restoredBulk === true,
+      JSON.stringify({ restoredStatus: bulkStale.restoredStatus, restoredBulk: bulkStale.restoredBulk }));
+
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
       const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && !v.gn && !v.ver && v.img && String(v.i) !== ${JSON.stringify(pick.id)});

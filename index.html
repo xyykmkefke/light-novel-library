@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.6">
+<meta name="version" content="1.24.7">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.6</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.7</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -6675,6 +6675,29 @@
     }, 500);
   }
 
+  // 批量选择只对「当前看得见的条目」有效。
+  //
+  // 用户选中几本之后改了筛选条件（状态 / 搜索 / 题材 / 只看已收藏…），被选中的
+  // 书可能已经不在视图里了。此前 bulkSel 从不清理，底栏照样写着「已选 2 本」，
+  // 用户点「标记为想读」时，那本他看不见的书也被改了 —— 而且总数提示仍然是 2，
+  // 他没有任何线索知道多改了一本。
+  //
+  // 筛选入口有二十多处（都只改 state 再 render），与其逐处补清理、将来新增
+  // 筛选时又漏一处，不如在 render 里按当前可见集合统一对齐：看得见的留下，
+  // 看不见的从选择集里移除。list 是完整筛选结果（不是分页后的 shown），
+  // 所以翻页翻到后面再选中、回头翻页时的已选项不会被误删。
+  function pruneBulkSel(list) {
+    var keep = Object.create(null);
+    for (var i = 0; i < list.length; i += 1) {
+      keep[typeof list[i] === 'object' ? list[i].i : list[i]] = true;
+    }
+    var changed = false;
+    Object.keys(bulkSel).forEach(function (id) {
+      if (!keep[id]) { delete bulkSel[id]; changed = true; }
+    });
+    return changed;
+  }
+
   function render() {
     renderSeq += 1;
     var currentRender = renderSeq;
@@ -6683,6 +6706,15 @@
     // 视图与 tab 不匹配时回退，避免看板在错误的数据集上显示空列
     if (state.tab === 'all' && state.view === 'board') state.view = 'grid';
     var list = filteredList();
+    // 选择集与当前可见集合对齐；不在批量态时清空，避免退出后残留
+    // 选择集与当前可见集合对齐。不在批量态（或不在「我的阅读」）时清空，
+    // 避免退出批量后残留一批看不见的选择，下次进批量态就带着走。
+    if (state.bulk && state.tab === 'mine') {
+      pruneBulkSel(list);
+    } else if (Object.keys(bulkSel).length) {
+      // 只有确实有残留时才重建对象，避免每次 render 都无谓分配
+      bulkSel = Object.create(null);
+    }
     // 云端可能带回当前数据里还没有的旧条目，计数与列表保持一致，只算能展示的
     var mineTotal = 0;
     Object.keys(myMap).forEach(function (id) { if (byId.has(id)) mineTotal += 1; });
