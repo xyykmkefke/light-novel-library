@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.12">
+<meta name="version" content="1.24.13">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.12</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.13</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -9921,9 +9921,16 @@
       : cfg.gistId ? 'Gist 已连接' : '首次同步将自动创建 Gist';
     $('syncLast').textContent = cfg.lastSync ? fmtTime(cfg.lastSync) : '—';
     $('syncDirty').textContent = String(dirtyCount());
-    $('syncLastMerge').textContent = last
-      ? (last.ok ? '最近合并：' + syncRunSummary(last) : '最近同步：失败（' + (last.error || '未知错误') + '）')
-      : '最近合并：暂无记录';
+    // 「最近合并」这一行描述的是**当前连接**的同步结果。断开（未配置）之后
+    // 还挂着「最近同步：失败（Token 无效或已过期）」，会让人以为同步仍在失败、
+    // 或者断开没生效 —— 实测断开后这条一直留着，关掉设置再打开也不消失。
+    // 日志本身不删（那是排查依据），只是不再当作当前状态展示。
+    var hasCfg = !!cfg.token;
+    $('syncLastMerge').textContent = !hasCfg
+      ? (last ? '已断开，下方是断开前的历史记录' : '最近合并：暂无记录')
+      : last
+        ? (last.ok ? '最近合并：' + syncRunSummary(last) : '最近同步：失败（' + (last.error || '未知错误') + '）')
+        : '最近合并：暂无记录';
     renderSyncLog();
   }
 

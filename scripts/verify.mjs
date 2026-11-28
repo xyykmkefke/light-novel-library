@@ -2324,8 +2324,12 @@ async function main() {
     await click('#themeBtn');
 
     // ---- 云同步状态面板 ----
+    // 这里必须带上 token：合并摘要描述的是「当前这条连接」的结果，
+    // 未配置时改为「已断开」提示（见下面「断开同步」那组断言）。
     await cdp.evaluate(`(() => {
-      localStorage.removeItem('yuc_ln_gist_v1');
+      localStorage.setItem('yuc_ln_gist_v1', JSON.stringify({
+        token: 'ghp_probe_token', gistId: '', lastSync: Date.now(),
+      }));
       localStorage.setItem('yuc_ln_synclog_v1', JSON.stringify([{
         t: Date.now(), ok: true, first: false, changed: 2, added: 0,
         remoteNewer: 2, localNewer: 0, sameTime: 0, volMerged: 0, tomb: 0,
@@ -2342,15 +2346,105 @@ async function main() {
       log: document.getElementById('syncLog').textContent,
     }))()`);
     check('云同步面板显示状态与最近合并',
-      syncPanel.open && syncPanel.pill === '未配置' && syncPanel.dirty === '3' &&
+      syncPanel.open && syncPanel.pill === '已连接' && syncPanel.dirty === '3' &&
       /远端较新 2/.test(syncPanel.merge) && /远端较新 2/.test(syncPanel.log),
       JSON.stringify(syncPanel));
     await cdp.evaluate(`(() => {
       document.getElementById('syncMask').click();
+      localStorage.removeItem('yuc_ln_gist_v1');
       localStorage.removeItem('yuc_ln_synclog_v1');
       localStorage.removeItem('yuc_ln_dirty_v1');
     })()`);
     await sleep(150);
+
+    // ---- 断开同步后，「最近合并」不能继续挂着历史失败 ----
+    // 真实场景：Token 过期 → 同步记一条失败 → 用户点「断开」断开。
+    // 此时 pill 变「未配置」，但 merge 那行原先仍写「最近同步：失败（…）」，
+    // 关掉弹窗再打开也不消失 —— 看起来像断开没生效、或者同步还在失败。
+    // 日志本身要保留（那是排查依据），所以这里同时校验日志没被删。
+    const syncDisconnect = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_gist_v1';
+      const LOGKEY = 'yuc_ln_synclog_v1';
+      const rawCfg = localStorage.getItem(KEY);
+      const rawLog = localStorage.getItem(LOGKEY);
+      const rawConfirm = window.confirm;
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const read = () => ({
+        pill: document.getElementById('syncPill').textContent,
+        text: document.getElementById('syncSummaryText').textContent,
+        merge: document.getElementById('syncLastMerge').textContent,
+      });
+      const out = {};
+      window.confirm = () => true;
+      try {
+        localStorage.setItem(KEY, JSON.stringify({
+          token: 'ghp_probe_token', gistId: 'probe123', lastSync: Date.now(),
+        }));
+        localStorage.setItem(LOGKEY, JSON.stringify([
+          { t: Date.now(), ok: false, error: 'Token 无效或已过期' },
+        ]));
+        document.getElementById('syncBtn').click();
+        await wait(80);
+        out.before = read();
+        document.getElementById('syncDisconnectBtn').click();
+        await wait(80);
+        out.after = read();
+        // 关掉再打开：状态必须保持一致，不能「一重开又变回失败」
+        document.getElementById('syncMask').click();
+        await wait(80);
+        document.getElementById('syncBtn').click();
+        await wait(80);
+        out.reopen = read();
+        out.logKept = document.getElementById('syncLog').textContent.indexOf('Token 无效') >= 0;
+        document.getElementById('syncMask').click();
+      } finally {
+        window.confirm = rawConfirm;
+        if (rawCfg === null) localStorage.removeItem(KEY);
+        else localStorage.setItem(KEY, rawCfg);
+        if (rawLog === null) localStorage.removeItem(LOGKEY);
+        else localStorage.setItem(LOGKEY, rawLog);
+      }
+      // 复原后重开一次，让面板 DOM 回到与存储一致的状态
+      document.getElementById('syncBtn').click();
+      await wait(60);
+      document.getElementById('syncMask').click();
+      return out;
+    })()`);
+    check('断开同步后不再把历史失败当作当前状态',
+      /失败/.test(syncDisconnect.before?.merge || '') &&
+      /已断开/.test(syncDisconnect.after?.merge || '') &&
+      !/失败/.test(syncDisconnect.after?.merge || '') &&
+      /已断开/.test(syncDisconnect.reopen?.merge || '') &&
+      !/失败/.test(syncDisconnect.reopen?.merge || ''),
+      JSON.stringify(syncDisconnect));
+    // 光看单个字段不够：缺陷态下 pill 本来就会变「未配置」，只有 merge 那一行是陈旧的。
+    // 所以这里测的是**同一块摘要内部是否自相矛盾** —— 标签说「未配置」，
+    // 底下却说「最近同步：失败」，等于同时宣称两件冲突的事。
+    const syncSelfConsistent = (s) => {
+      if (!s) return false;
+      const pill = s.pill || '';
+      const merge = s.merge || '';
+      if (pill === '未配置' && /失败/.test(merge)) return false;
+      if (pill === '未配置' && s.text !== '填写 Token 后开始同步') return false;
+      return true;
+    };
+    check('断开后同步摘要不再自相矛盾（未配置却挂着失败）',
+      syncSelfConsistent(syncDisconnect.before) &&
+      syncSelfConsistent(syncDisconnect.after) &&
+      syncSelfConsistent(syncDisconnect.reopen) &&
+      syncDisconnect.after?.pill === '未配置' &&
+      syncDisconnect.reopen?.pill === '未配置' &&
+      syncDisconnect.logKept === true,
+      JSON.stringify({ selfConsistent: syncDisconnect.after && syncSelfConsistent(syncDisconnect.after), ...syncDisconnect }));
+    // 自检：探针必须自己把存储与弹窗复原，否则后面依赖同步态与可见弹窗的断言会被带崩
+    const syncCleanup = await cdp.evaluate(`(() => ({
+      cfg: localStorage.getItem('yuc_ln_gist_v1'),
+      log: localStorage.getItem('yuc_ln_synclog_v1'),
+      closed: document.getElementById('syncModal').hidden,
+    }))()`);
+    check('同步断开探针事后复原了配置与弹窗',
+      syncCleanup.cfg === null && syncCleanup.log === null && syncCleanup.closed === true,
+      JSON.stringify(syncCleanup));
 
     // ---- 空结果恢复 ----
     await click('.tab[data-tab="all"]');

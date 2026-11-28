@@ -1916,6 +1916,83 @@ copiedHasTheme:  true   → FAIL
 
 `detailShare`（本轮只验了它的前置 hash 同步，按钮本身仍未被点过——因为无头环境下 `navigator.share` 与剪贴板都不可用，需要替身）、`importBtn`（`fileInput` 的数据层已被 `test-merge` 覆盖，提示也已完整）、`syncNowBtn` / `syncDisconnectBtn`（云同步 UI 路径）。纯展示类（`helpBtn` / `moreMenu` / `paletteMask`）优先级低。
 
+## 9.63 v1.24.13 断开同步后仍挂着「最近同步：失败」（2026-11-28）
+
+### 9.63.1 这一轮查的是 9.62.8 的 `syncDisconnectBtn`
+
+按老办法先做覆盖率统计，`syncDisconnectBtn` 与 `syncNowBtn` 在 `verify.mjs` 里只被 `#syncBtn` 间接带过（打开面板），两个按钮本体的 `addEventListener` 从没被点过。先看断开路径。
+
+### 9.63.2 缺陷：断开之后，历史失败继续冒充当前状态
+
+`syncDisconnectBtn` 的动作是 `localStorage.removeItem(GIST_KEY)` + 清空两个输入框 + `setSyncStatus('已断开', '')`。前两步没问题，问题出在第三步——它调到 `renderSyncSummary()`，而那个函数里「最近合并」这一行是**无条件按日志首条渲染**的：
+
+```js
+$('syncLastMerge').textContent = last
+  ? (last.ok ? '最近合并：' + syncRunSummary(last) : '最近同步：失败（' + (last.error || '未知错误') + '）')
+  : '最近合并：暂无记录';
+```
+
+于是真实场景是这样：Token 过期 → 某次自动同步失败 → 日志首条记下 `ok:false, error:'Token 无效或已过期'` → 用户看到失败，选择点「断开」。断开后 pill 变「未配置」、输入框清空、状态行写「已断开」，**但「最近合并」那一行仍然写着「最近同步：失败（Token 无效或已过期）」**，关掉弹窗再打开也不消失（`reopenLastMerge` 实测仍是该文案）。
+
+这意味着同一块摘要里同时说了两件冲突的事：标签说「未配置」，底下说「同步失败」。用户的解读只有两种，**都不对**：要么以为断开没生效，要么以为现在还在失败。而两者都不是——它只是一条历史记录。
+
+### 9.63.3 修法：把历史记录标明是历史
+
+关键是**不要删日志**（那是排查依据，用户也可能会想回看上次为什么失败），而是让这一行的措辞跟当前连接状态对齐：
+
+```js
+var hasCfg = !!cfg.token;
+$('syncLastMerge').textContent = !hasCfg
+  ? (last ? '已断开，下方是断开前的历史记录' : '最近合并：暂无记录')
+  : last
+    ? (last.ok ? '最近合并：' + syncRunSummary(last) : '最近同步：失败（' + (last.error || '未知错误') + '）')
+    : '最近合并：暂无记录';
+```
+
+未配置时说「已断开，下方是断开前的历史记录」，指向仍在展开区里的日志；有日志才这么说，没有就说「暂无记录」，不凭空承诺下面有东西。
+
+### 9.63.4 反向验证（第二条第一次是假的）
+
+撤掉 `hasCfg`、恢复成无条件渲染：
+
+```
+FAIL  断开同步后不再把历史失败当作当前状态
+      after.merge = "最近同步：失败（Token 无效或已过期）"   ← 断开后没变
+```
+
+但**第二条「断开后同步摘要的标签与提示同时回到未配置」在缺陷态下照样 PASS**——因为 pill 和 summaryText 本来就会正确变成「未配置」，只有 merge 那一行是陈旧的，而那条断言只查前两者。这正是「一条断言里塞了几个独立性质」的老问题：我写的性质，恰好是不受影响的那几个。
+
+改法是把断言从「各字段分别对不对」换成「**同一块摘要内部是否自相矛盾**」：
+
+```js
+const syncSelfConsistent = (s) => {
+  if (!s) return false;
+  const pill = s.pill || '';
+  const merge = s.merge || '';
+  if (pill === '未配置' && /失败/.test(merge)) return false;
+  if (pill === '未配置' && s.text !== '填写 Token 后开始同步') return false;
+  return true;
+};
+```
+
+改完再撤修复，两条都 FAIL（`selfConsistent:false`），装回去 268/268。**判据：当缺陷只污染一个字段时，断言必须写成跨字段的一致性判断，分别校验每个字段能不能对上，永远抓不到它。**
+
+### 9.63.5 顺带核实：设置弹窗与同步弹窗不会状态分叉
+
+排查初期怀疑「存在两个同步 UI，状态可能不同步」，实测**不成立**：`#settingsModal`（3229 行）里只有字号 / 卡片密度 / 动效 / 离线缓存四组，**没有同步区**；同步摘要（`syncPill` / `syncLast` / `syncDirty` / `syncLastMerge` / `syncLog`）只有 `#syncModal`（3270 行）一份。`openSettings()` 只调 `syncSettingsUI()`（处理 font/density/motion），不碰同步，因此不存在两处各算一遍的问题。
+
+同时确认了一件事：**「打开设置不回填 Token」是误判**。`openSync()`（9976 行）才回填 `gistToken` / `gistId`，它对应 `#syncModal`；探针当时打开的是 `#settingsModal`，取到的自然是空串。**这类「表格里没有这一项」和「这一项是空的」必须分开看，否则会把不存在的东西当成缺陷。**
+
+### 9.63.6 验收
+
+`verify` **265 → 268/268**（新增 3 条：断开后不再把历史失败当当前状态、摘要不再自相矛盾、探针复原自检），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.12 → 1.24.13**，SW `yuc-ln-shell-v63` → **`v64`**。
+
+### 9.63.7 还剩的入口
+
+`syncNowBtn`（保存并同步——需要替身 `fetch` 才能点，否则会真的打 api.github.com）、`detailShare`、`importBtn`。纯展示类优先级低。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -1972,7 +2049,7 @@ copiedHasTheme:  true   → FAIL
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 265/265、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 268/268、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -1982,6 +2059,6 @@ copiedHasTheme:  true   → FAIL
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.12 已完成，后续按第 10 节风险与决策、第 9.62 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（265 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.13 已完成，后续按第 10 节风险与决策、第 9.63 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（268 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
