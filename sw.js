@@ -1,5 +1,5 @@
 // 应用壳离线缓存：首页网络优先并带超时回退，其余同源资源缓存优先、后台更新
-var CACHE = 'yuc-ln-shell-v60';
+var CACHE = 'yuc-ln-shell-v61';
 // 索引包（pyf/rpy/au）故意不进预缓存：它们是按需加载的，进 SHELL 会让首次安装多下 152KB。
 // opencc 是搜索归一化的依赖，页面一打开就请求，所以放进预缓存保证离线时搜索仍然可用。
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './vendor/opencc-t2cn.js', './data/light-novels-lite.js', './data/light-novels-extra.js', './data/light-novels-ch.js'];

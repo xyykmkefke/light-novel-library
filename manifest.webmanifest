@@ -3,7 +3,7 @@
   "name": "轻小说库 · 我的阅读",
   "short_name": "轻小说库",
   "description": "本地优先的轻小说浏览与阅读记录",
-  "version": "1.24.9",
+  "version": "1.24.10",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",

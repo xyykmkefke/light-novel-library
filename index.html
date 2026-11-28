@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.9">
+<meta name="version" content="1.24.10">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.9</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.10</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -5999,6 +5999,11 @@
 
   // ---- 保存筛选视图 ----
   var VIEWS_KEY = 'yuc_ln_views_v1';
+  // 视图上限。这个值必须同时被「存储逻辑」和「用户提示」引用 ——
+  // 以前逻辑里写 slice(0, 12)、文案里什么也不写，保存第 13 个时
+  // 最早的那个视图被静默挤掉，而 toast 仍说「已保存视图」。
+  // 视图是用户自己命名的东西，挤掉一个就再也生成不出来。
+  var VIEWS_MAX = 12;
   function loadViews() {
     if (!canStore) return [];
     try {
@@ -6008,9 +6013,17 @@
         : [];
     } catch (e) { return []; }
   }
+  // 返回是否真的写进去了。调用方要靠它决定提示说什么 ——
+  // 存储满时写不进去，原来照样弹「已保存视图」，用户以为存上了。
   function saveViews(arr) {
-    if (!canStore) return;
-    try { localStorage.setItem(VIEWS_KEY, JSON.stringify(arr.slice(0, 12))); } catch (e) { /* 忽略 */ }
+    if (!canStore) return false;
+    try {
+      localStorage.setItem(VIEWS_KEY, JSON.stringify(arr.slice(0, VIEWS_MAX)));
+      return true;
+    } catch (e) {
+      reportStoreFailure(e, VIEWS_KEY);
+      return false;
+    }
   }
   function currentView(name) {
     return {
@@ -8072,9 +8085,15 @@
     if (del) {
       e.stopPropagation();
       var views = loadViews();
-      views.splice(Number(del.dataset.viewDel), 1);
-      saveViews(views);
-      renderViewsMenu();
+      var gone = views.splice(Number(del.dataset.viewDel), 1)[0];
+      if (saveViews(views)) {
+        renderViewsMenu();
+        toast('已删除视图：' + ((gone && gone.name) || ''));
+      } else {
+        // 写失败时不能重绘菜单：按磁盘内容重绘会把刚删的那个画回来，
+        // 看起来像「点了没反应」。保留旧菜单 + 常驻提示，状态至少自洽。
+        toast('视图未能删除，请导出备份后重试');
+      }
       return;
     }
     var apply = e.target.closest('[data-view-apply]');
@@ -8091,11 +8110,32 @@
     if (e.target.closest('[data-view-save]')) {
       var name = prompt('视图名称', '高分未读');
       if (!name || !name.trim()) return;
+      var trimmed = name.trim();
       var arr = loadViews();
-      arr.unshift(currentView(name.trim()));
-      saveViews(arr);
+      // 同名覆盖而不是又存一份：用户重复点保存，最容易发生的就是同一套
+      // 筛选被存成两条一模一样的视图，占掉两个名额还分不清哪个是新的。
+      var dupIdx = -1;
+      for (var i = 0; i < arr.length; i += 1) {
+        if (arr[i] && arr[i].name === trimmed) { dupIdx = i; break; }
+      }
+      var replaced = dupIdx >= 0;
+      if (replaced) arr.splice(dupIdx, 1);
+      arr.unshift(currentView(trimmed));
+      // 挤掉了谁要说明：slice 截断是静默的，而视图是用户自己命名的、丢了重造不出来。
+      var overflow = Math.max(0, arr.length - VIEWS_MAX);
+      var dropped = overflow ? arr[arr.length - 1] : null;
+      if (!saveViews(arr)) {
+        toast('视图未能保存（存储空间不足），请导出备份后重试');
+        return;
+      }
       renderViewsMenu();
-      toast('已保存视图：' + name.trim());
+      if (replaced) {
+        toast('已更新视图：' + trimmed);
+      } else if (overflow && dropped && dropped.name) {
+        toast('已保存视图：' + trimmed + '（已达上限 ' + VIEWS_MAX + ' 个，最早的「' + dropped.name + '」被移除）');
+      } else {
+        toast('已保存视图：' + trimmed);
+      }
     }
   });
 

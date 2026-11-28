@@ -1729,6 +1729,143 @@ async function main() {
       bulkStale.restoredStatus === true && bulkStale.restoredBulk === true,
       JSON.stringify({ restoredStatus: bulkStale.restoredStatus, restoredBulk: bulkStale.restoredBulk }));
 
+    // ---- 保存筛选视图：上限被挤掉时要说明，写失败时不能谎报成功 ----
+    //
+    // 视图（VIEWS_KEY）以前完全没有断言覆盖。三处缺陷：
+    //   ① 存储层 slice(0, 12)，保存第 13 个时最早那个被静默挤掉，
+    //      而 toast 照旧说「已保存视图」——视图是用户自己命名的东西，
+    //      挤掉一个就再也生成不出来，且要等到下次打开菜单才发现少了；
+    //   ② saveViews 的 catch 是空的，写失败（配额满）照样弹「已保存视图」；
+    //   ③ 重复点保存会把同一套筛选存成多条同名视图，白占名额还分不清。
+    //
+    // 走真实 UI 入口：点「视图」按钮开菜单 → 点「保存当前筛选为视图」→
+    // 由 prompt 返回名称。无头浏览器里原生 prompt 会阻塞且无法交互，用替身接管；
+    // 委托监听器挂在外层 #viewsMenu 上，不随 renderViewsMenu() 的 innerHTML
+    // 重建而丢失，所以同一个入口可以反复触发，不需要克隆节点。
+    const viewsProbe = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_views_v1';
+      const MAX = 12;
+      const wake = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      // prompt 替身：从队列取名，空了返回 null（等同用户取消）。
+      // 无头浏览器里原生 prompt 会阻塞且无法交互，必须替身。
+      const names = [];
+      const rawPrompt = window.prompt;
+      window.prompt = () => (names.length ? names.shift() : null);
+
+      const read = () => {
+        try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return null; }
+      };
+      const toastText = () => (document.getElementById('toast') || {}).textContent || '';
+
+      // 真实入口：点「视图」按钮开菜单，再点菜单里的「保存当前筛选为视图」。
+      // 菜单每次点保存都会 renderViewsMenu() 重设 innerHTML，委托监听器
+      // 挂在外层 #viewsMenu 上（不随 innerHTML 重建），所以可以反复触发。
+      const saveOne = async (name) => {
+        names.push(name);
+        const menu = document.getElementById('viewsMenu');
+        menu.hidden = true;                       // 复位成「关闭」，点按钮才是打开
+        document.getElementById('viewsBtn').click();
+        await wake(40);
+        const btn = menu.querySelector('[data-view-save]');
+        if (!btn) return 'NO-SAVE-BTN';
+        btn.click();
+        await wake(60);
+        menu.hidden = true;
+        return toastText();
+      };
+
+      const out = {};
+      try {
+        localStorage.removeItem(KEY);
+        // ---- ① 存满 MAX 个，再存第 MAX+1 个：要说清挤掉的是谁 ----
+        // 名字带前缀：'视图1' 是 '视图13' 的子串，会让「被挤掉的是谁」
+        // 这条判断恒真（第一次反向验证就踩到了，toastMentionsDropped 在
+        // 缺陷态下仍为 true）。加前缀后配合书名号精确匹配。
+        for (let i = 1; i <= MAX; i += 1) await saveOne('视图A' + i);
+        out.filledCount = (read() || []).length;
+        const overflowToast = await saveOne('视图A' + (MAX + 1));
+        const afterOverflow = read() || [];
+        out.afterOverflowCount = afterOverflow.length;
+        out.overflowToast = overflowToast;
+        out.oldestStillThere = afterOverflow.some((v) => v && v.name === '视图A1');
+        out.newestThere = afterOverflow.some((v) => v && v.name === '视图A' + (MAX + 1));
+        out.toastMentionsLimit = overflowToast.indexOf(String(MAX)) >= 0;
+        // 必须带书名号精确匹配：只查 '视图A1' 会被 '视图A13' 命中的子串骗过
+        out.toastMentionsDropped = overflowToast.indexOf('「视图A1」') >= 0;
+
+        // ---- ③ 同名保存应该覆盖，不是又存一份 ----
+        const before = (read() || []).length;
+        const dupToast = await saveOne('视图A' + (MAX + 1));
+        const afterDup = read() || [];
+        out.dupCountBefore = before;
+        out.dupCountAfter = afterDup.length;
+        out.dupSameNameTwice = afterDup.filter((v) => v && v.name === '视图A' + (MAX + 1)).length;
+        out.dupToast = dupToast;
+
+        // ---- ② 写失败时不能谎报成功 ----
+        // 只拦 KEY 这一个 key（现实原因：配额满），别顺带打断别的存储。
+        const rawSet = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (k) {
+          if (String(k) === KEY) {
+            const err = new Error('QuotaExceededError simulated');
+            err.name = 'QuotaExceededError';
+            throw err;
+          }
+          return rawSet.apply(this, arguments);
+        };
+        let failToast = '';
+        try {
+          failToast = await saveOne('写不进去的视图');
+        } finally {
+          Storage.prototype.setItem = rawSet;
+        }
+        out.failToast = failToast;
+        out.failToastSaysFail = /未能保存|失败/.test(failToast);
+        out.failToastNotSuccess = !/^已保存视图/.test(failToast);
+        out.failNotPersisted = !(read() || []).some((v) => v && v.name === '写不进去的视图');
+      } finally {
+        window.prompt = rawPrompt;
+        localStorage.removeItem(KEY);
+        const menu = document.getElementById('viewsMenu');
+        if (menu) { menu.innerHTML = ''; menu.hidden = true; }
+        if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
+      }
+      return out;
+    })()`);
+
+
+    check('视图达到上限时，被挤掉的是哪一个要告诉用户',
+      viewsProbe.filledCount === 12 &&
+      viewsProbe.afterOverflowCount === 12 &&
+      viewsProbe.newestThere === true &&
+      viewsProbe.oldestStillThere === false &&
+      viewsProbe.toastMentionsLimit === true &&
+      viewsProbe.toastMentionsDropped === true,
+      JSON.stringify(viewsProbe));
+
+    check('同名保存视图是覆盖而不是又存一份（否则白占名额）',
+      viewsProbe.dupCountAfter === viewsProbe.dupCountBefore &&
+      viewsProbe.dupSameNameTwice === 1 &&
+      /已更新视图/.test(viewsProbe.dupToast || ''),
+      JSON.stringify({ before: viewsProbe.dupCountBefore, after: viewsProbe.dupCountAfter, same: viewsProbe.dupSameNameTwice, toast: viewsProbe.dupToast }));
+
+    check('视图写不进去时不能谎报「已保存」',
+      viewsProbe.failNotPersisted === true &&
+      viewsProbe.failToastSaysFail === true &&
+      viewsProbe.failToastNotSuccess === true,
+      JSON.stringify({ toast: viewsProbe.failToast, notPersisted: viewsProbe.failNotPersisted }));
+
+    // 探针把 VIEWS_KEY 清空了，也要确认没留下别的痕迹（视图菜单不该常开）
+    const viewsClean = await cdp.evaluate(`(() => ({
+      stored: localStorage.getItem('yuc_ln_views_v1'),
+      menuEmpty: !document.getElementById('viewsMenu').innerHTML.trim(),
+      promptRestored: String(window.prompt).indexOf('native code') >= 0
+    }))()`);
+    check('视图探针事后复原了 prompt 与视图菜单',
+      viewsClean.stored === null && viewsClean.promptRestored === true,
+      JSON.stringify(viewsClean));
+
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
       const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && !v.gn && !v.ver && v.img && String(v.i) !== ${JSON.stringify(pick.id)});
