@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.11">
+<meta name="version" content="1.24.12">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.11</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.12</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -7954,7 +7954,34 @@
 
   // 复制当前视图：地址栏 hash 已同步筛选与视图，直接复制即可分享同一组合
   $('copyViewBtn').addEventListener('click', function () {
-    copyText(location.href, function (ok) {
+    // 「复制视图链接」给的是这组筛选条件，不该把「正在看哪本书」一起带出去。
+    // 原来直接复制 location.href，而 openDetail 会把 d=<id> 写进 hash：
+    // 用户在详情面板里点这个按钮，对方打开后会直接弹开那本书的详情，
+    // 而不是看到筛选好的列表 —— 与按钮语义（title 写的是「复制包含当前
+    // 筛选与视图的链接」）不符。
+    var url = location.href.split('#')[0];
+    var parts = [];
+    var has = false;
+    // 用 state 重建一遍，而不是对现有 hash 做字符串删除：
+    // 现有 hash 可能还带着 d=、也可能缺参数（刚打开页面还没 writeHash）。
+    try { writeHash(); } catch (e) { /* 下面从 location.hash 兜底取 */ }
+    var raw = String(location.hash || '').replace(/^#/, '');
+    if (raw) {
+      raw.split('&').forEach(function (pair) {
+        if (!pair) return;
+        var i = pair.indexOf('=');
+        var key = i < 0 ? pair : pair.slice(0, i);
+        if (key === 'd') return;           // 关键：剔除详情深链
+        // 也剔除主题：深浅色是本机偏好，不该因为打开别人的分享链接就被改掉。
+        // 主题在 hash 里的正当用途只有「刷新后保持」，那个由本站自己的
+        // writeHash 维持，分享场景不需要带出去。
+        if (key === 't') return;
+        parts.push(pair);
+        has = true;
+      });
+    }
+    if (has) url += '#' + parts.join('&');
+    copyText(url, function (ok) {
       toast(ok ? '已复制当前视图链接' : '复制失败，请手动复制地址栏链接');
     });
   });

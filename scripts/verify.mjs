@@ -1866,6 +1866,65 @@ async function main() {
       viewsClean.stored === null && viewsClean.promptRestored === true,
       JSON.stringify(viewsClean));
 
+    // ---- 「复制视图链接」不能把「正在看哪本书」一起带出去 ----
+    //
+    // copyViewBtn 原来直接复制 location.href，而 openDetail() 末尾会
+    // writeHash() 把 d=<id> 写进 hash。用户在详情面板里点这个按钮，
+    // 对方打开后**直接弹开那本书的详情**，而不是看到筛选好的列表 ——
+    // 与按钮 title「复制包含当前筛选与视图的链接」不符。
+    // 同时 t=（深浅色）也是本机偏好，不该因为打开别人的分享链接被改掉。
+    //
+    // 剪贴板在无头环境不可用，把 clipboard.writeText 换成捕获函数，
+    // 这样才能拿到真正写进剪贴板的内容（而不是「复制成功」的提示）。
+    const copyViewProbe = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const out = {};
+      const rawClip = navigator.clipboard;
+      let copied = null;
+      try {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: (t) => { copied = t; return Promise.resolve(); } },
+          configurable: true,
+        });
+        // 先打开一本书的详情，确保 hash 里有 d=
+        const card = document.querySelector('.card');
+        out.cardId = card ? card.getAttribute('data-id') : null;
+        if (card) card.querySelector('.card-link').click();
+        await sleep(600);
+        out.hashHasDetail = /[#&]d=/.test(location.hash);
+        out.hashHasTheme = /[#&]t=/.test(location.hash);
+
+        document.getElementById('copyViewBtn').click();
+        await sleep(350);
+        out.copied = copied;
+        // 精确到参数名：indexOf('d=') 会命中 kd=all 里的 d= 子串
+        out.copiedHasDetail = copied ? /[#&]d=/.test(copied) : null;
+        out.copiedHasTheme = copied ? /[#&]t=/.test(copied) : null;
+        out.toast = (document.getElementById('toast') || {}).textContent;
+        // 复制出来的链接必须仍然带着筛选参数（不能因为剔除 d 把别的也删了）
+        out.keepsFilters = copied ? /[#&]v=/.test(copied) && /[#&]o=/.test(copied) : null;
+      } finally {
+        Object.defineProperty(navigator, 'clipboard', { value: rawClip, configurable: true });
+        document.getElementById('detailClose');
+        const closeBtn = document.querySelector('#detailClose, [data-detail-close]');
+        if (closeBtn) closeBtn.click();
+        location.hash = '';
+        await sleep(400);
+      }
+      return out;
+    })()`);
+
+    check('「复制视图链接」不会把详情深链一起复制出去',
+      copyViewProbe.hashHasDetail === true &&     // 前提：hash 里确实有 d=
+      copyViewProbe.copiedHasDetail === false &&
+      copyViewProbe.keepsFilters === true,
+      JSON.stringify(copyViewProbe));
+
+    check('「复制视图链接」不会把本机深浅色偏好带给对方',
+      copyViewProbe.hashHasTheme === true &&      // 前提：hash 里确实有 t=
+      copyViewProbe.copiedHasTheme === false,
+      JSON.stringify({ hashHasTheme: copyViewProbe.hashHasTheme, copiedHasTheme: copyViewProbe.copiedHasTheme }));
+
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
       const x = (window.LN_DATA || []).find((v) => v.v > 1 && !v.c && !v.gn && !v.ver && v.img && String(v.i) !== ${JSON.stringify(pick.id)});

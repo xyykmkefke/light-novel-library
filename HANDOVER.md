@@ -1824,6 +1824,98 @@ var pendingFill = null;  // 待执行的空间补齐句柄
 
 **方法论沉淀**：覆盖率统计（哪些 id 从未出现在 verify 里）可以随时重跑，是低成本找盲区的手段，比逐行读代码靠得住。
 
+## 9.62 v1.24.12 「复制视图链接」把正在看的书也复制出去了（2026-11-28）
+
+### 9.62.1 这一轮查的是 9.61.7 的候选清单第一项
+
+上一轮统计出 26 个从未被断言点过的入口。这轮取 `copyViewBtn` / `detailShare`（都复制 `location.href`）。
+
+先做了一次 hash 往返测试：给一组非默认状态，看加载后能否还原——`view` / `theme` / `year` / 搜索词（含中文）都正确还原，`writeHash` 与 `parseHash` 参数表也对称（`ln` 有类型校验、`gb` 有白名单）。**往返本身没问题。**
+
+问题出在「复制」这一步：复制的不是「视图」，而是「当前完整 URL」。
+
+### 9.62.2 缺陷：视图链接里带着 d=<id>
+
+`copyViewBtn` 原来只有一句：
+
+```js
+copyText(location.href, function (ok) { … });
+```
+
+而 `openDetail()` 末尾会 `writeHash()`，把详情 id 写进 hash：
+
+```js
+var deepId = modalId || pendingDetail;
+if (deepId) parts.push('d=' + encodeURIComponent(deepId));
+```
+
+于是用户在详情面板里点「复制视图链接」，复制出来的是：
+
+```
+…/#tab=all&y=all&…&v=grid&t=dark&d=37782
+```
+
+对方打开后**直接弹开那本书的详情**，而不是看到筛选好的列表。按钮 `title` 写的是「复制包含当前筛选与视图的链接」——**视图里不含「我正在看哪本书」**。
+
+顺带发现同一条链上的第二个问题：`t=`（深浅色）也在里面。深浅色是本机偏好，不该因为打开别人的分享链接就被改掉。
+
+### 9.62.3 修法：重建参数表，剔除 d 与 t
+
+```js
+var url = location.href.split('#')[0];
+var parts = [];
+try { writeHash(); } catch (e) {}
+String(location.hash || '').replace(/^#/, '').split('&').forEach(function (pair) {
+  if (!pair) return;
+  var key = pair.slice(0, Math.max(0, pair.indexOf('=')) || pair.length);
+  if (key === 'd') return;   // 详情深链不属于「视图」
+  if (key === 't') return;   // 深浅色是本机偏好
+  parts.push(pair);
+});
+```
+
+先 `writeHash()` 再读，是为了保证参数是最新的（页面刚打开、还没写过 hash 时 `location.hash` 可能是空的，直接读会复制出一个没有筛选的链接）。
+
+### 9.62.4 反向验证
+
+回退成 `copyText(location.href, …)` 后：
+
+```
+copiedHasDetail: true   → FAIL（复制结果里真的有 d=666873）
+copiedHasTheme:  true   → FAIL
+```
+
+两条断言都带前提守卫：`hashHasDetail === true` / `hashHasTheme === true`。若 hash 里本来就没有这两个参数，用例考的是别的东西，等于空跑。
+
+### 9.62.5 探针自己踩了子串陷阱（第三次）
+
+第一版探针用 `copied.indexOf('d=') >= 0` 判断「有没有详情参数」。修复后的 URL 是：
+
+```
+…&kd=all&…
+```
+
+`'kd=all'.indexOf('d=')` —— **命中了**。于是修复态也报 `copiedContainsDetail: true`，差点误判「修复无效」。
+
+改成按参数名精确匹配 `/[#&]d=/` 才对。这是本项目第三次踩同一类坑（前两次：`视图13` 命中 `视图1`、`'视图1'` 判据恒真）。**判据：凡「A 是否出现在 B 里」，先确认 A 不是另一个合法值的子串；URL 参数必须带上前导 `#` 或 `&`。**
+
+### 9.62.6 顺带核实（确认无问题）
+
+- `openDetail()` 末尾有 `writeHash()`，所以详情打开后 hash 是同步的，`detailShare` 复制的链接**确实能还原那本书**，无需修改；
+- `copyText` 的三层降级（`navigator.clipboard` → `execCommand` → 失败提示）逻辑正确，失败时提示「复制失败，请手动复制地址栏链接」，不谎报成功；
+- `navigator.share` 的 `AbortError`（用户主动取消）静默、其他错误回退复制，处理得当；
+- hash 往返：`tab` / `y` / `kd` / `hc` / `gn` / `dup` / `rn` / `gr` / `o` / `st` / `om` / `hs` / `hm` / `v` / `ms` / `fmt` / `owd` / `q`（中文）/ `gb` 均可正确还原。
+
+### 9.62.7 验收
+
+`verify` **263 → 265/265**（新增 2 条：不带详情深链、不带主题），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.11 → 1.24.12**，SW `yuc-ln-shell-v62` → **`v63`**。
+
+### 9.62.8 还剩的入口
+
+`detailShare`（本轮只验了它的前置 hash 同步，按钮本身仍未被点过——因为无头环境下 `navigator.share` 与剪贴板都不可用，需要替身）、`importBtn`（`fileInput` 的数据层已被 `test-merge` 覆盖，提示也已完整）、`syncNowBtn` / `syncDisconnectBtn`（云同步 UI 路径）。纯展示类（`helpBtn` / `moreMenu` / `paletteMask`）优先级低。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -1880,7 +1972,7 @@ var pendingFill = null;  // 待执行的空间补齐句柄
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 263/263、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 265/265、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -1890,6 +1982,6 @@ var pendingFill = null;  // 待执行的空间补齐句柄
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.11 已完成，后续按第 10 节风险与决策、第 9.61 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（263 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.12 已完成，后续按第 10 节风险与决策、第 9.62 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（265 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
