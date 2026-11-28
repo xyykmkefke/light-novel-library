@@ -2095,6 +2095,97 @@ if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
 
 `detailShare`、`importBtn`。另外 `saveSyncLog` 的 catch 仍是空的（日志是流水账，丢了不影响数据），`markBackup` / `pushHist` 两处同理——都是可再生信息，已在注释里写明理由。
 
+## 9.65 v1.24.15 翻页抢焦点、清空撤销丢书评（2026-11-28）
+
+### 9.65.1 重新统计覆盖率，剩下 22 个入口
+
+跑了一遍「`index.html` 里所有 `addEventListener` 的 id」对「`verify.mjs` 是否提及」的差集，70 个入口里还有 22 个没被点过。按「动了会改数据」优先，先查 `detailNext` / `detailPrev` 与 `clearBtn`。
+
+### 9.65.2 缺陷一：翻页后焦点落在收藏按钮上
+
+`openDetail()` 末尾是无条件的：
+
+```js
+$('detailToggle').focus();
+```
+
+这在「从卡片点开第一本书」时是对的——收藏是主要动作。但 `shiftDetail()` 内部也是调 `openDetail()`，于是**用键盘点「下一本」之后，焦点被抢到收藏按钮上**。用户想继续往下翻，再按一次 Enter 就变成「把这本书加入我的阅读」——一次误触改了数据，而他完全没意识到。
+
+实测（真实点 `#detailNext`）：
+```
+focusId: "detailToggle"     ← 缺陷态
+focusIsNav: false
+```
+
+修法：`shiftDetail` 记下这次是哪个方向发起的（`navFocus`），`openDetail` 读一次就消费掉（不清会污染下一次从卡片打开），`focusDetailEntry(viaNav)` 据此决定焦点：
+
+```js
+var viaNav = navFocus;
+navFocus = null;          // 只对这一次打开生效
+...
+function focusDetailEntry(viaNav) {
+  var nav = $('detailNav');
+  if (viaNav && nav && !nav.hidden) {
+    var same  = viaNav === 'next' ? $('detailNext') : $('detailPrev');
+    var other = viaNav === 'next' ? $('detailPrev') : $('detailNext');
+    var target = (same && !same.disabled) ? same : ((other && !other.disabled) ? other : null);
+    if (target) { target.focus(); return; }
+  }
+  $('detailToggle').focus();
+}
+```
+
+边界也处理了：翻到最后一本时「下一本」已 disabled，焦点改停到「上一本」，不会掉到 `document.body`。
+
+### 9.65.3 缺陷二：清空「我的阅读」后撤销，书评草稿回不来
+
+`clearBtn` 的动作是「快照 myMap → 清空 → 给撤销」。但清空那一步里有 `persistDrafts({})`，把**所有**书评草稿一起清掉了，而快照只有 `myMap` 的 12 个字段——**没有草稿**。
+
+用户写了一下午的书评，点了「清空」，又点了「撤销」：书回到列表里，看着像全恢复了；打开详情，输入框是空的。这时已无从恢复。
+
+实测：
+```
+mineAfterClear: 0    → mineAfterUndo: 3      ← 书目恢复成功
+draftAfterClear: false → draftAfterUndo: false ← 草稿再也回不来
+draftTextAfterUndo: ""
+```
+
+修法是把草稿纳入快照，并只补回**被清空时丢掉的那些**：
+
+```js
+var draftSnapshot = loadDrafts();
+...
+// 撤销里
+if (Object.keys(draftSnapshot).length) {
+  var cur = loadDrafts();
+  Object.keys(draftSnapshot).forEach(function (id) {
+    if (!cur[id]) cur[id] = draftSnapshot[id];   // 不覆盖这期间新写的
+  });
+  persistDrafts(cur);
+}
+```
+
+判据：**撤销快照必须覆盖「这个动作实际改动的全部状态」**，而不只是「主要看起来变动的那部分」。同类风险点：`toggleMine` 的 `prev` 是完整引用（安全）、`setTab`/`applyStateMap` 都会清 `bulkSel`（安全）。
+
+### 9.65.4 反向验证
+
+| 断言 | 撤掉什么 | 缺陷态 |
+|---|---|---|
+| 详情翻页后焦点留在翻页按钮上 | `focusDetailEntry(viaNav)` 改回无条件 focus | `focusId:"detailToggle"` ✅ |
+| 清空「我的阅读」后用撤销能救回书评草稿 | `draftSnapshot` 与其补回逻辑 | `draftAfterUndo:false` ✅ |
+
+第一条的搭档断言「详情翻页用真实按钮走通前后两向」在缺陷态仍 PASS——它测的是翻页本身能否走通（两向、边界、hash、无副作用），与焦点是两个独立性质。这属于刻意拆分，不是漏判。
+
+### 9.65.5 验收
+
+`verify` **272 → 275/275**（新增 3 条：翻页两向走通、翻页焦点、清空撤销保草稿），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.14 → 1.24.15**，SW `yuc-ln-shell-v65` → **`v66`**。
+
+### 9.65.6 还剩的入口
+
+`detailShare`、`importBtn`、`onlyMineBtn` / `highScoreBtn` / `hideMineBtn`（筛选取反，效果已被筛选类断言间接覆盖）、`statusRow`、`groupBy`、`advFilterToggle`、`searchToggle`、`mineMore` 系列菜单、`helpBtn` / `helpClose`、`paletteMask`、`filterMask`。后一批多为纯展示或开关类，优先级低。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -2151,7 +2242,7 @@ if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 272/272、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 275/275、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -2161,6 +2252,6 @@ if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.14 已完成，后续按第 10 节风险与决策、第 9.64 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（272 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.15 已完成，后续按第 10 节风险与决策、第 9.65 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（275 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。

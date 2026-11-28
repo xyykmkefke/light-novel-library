@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.14">
+<meta name="version" content="1.24.15">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.14</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.15</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -7036,6 +7036,9 @@
   // 深链目标尚未进入当前数据（首屏仅最近一年）时暂存，全库补齐后自动打开
   var pendingDetail = null;
   var lastModalFocus = null;
+  // 这次打开详情是不是「翻页」发起的：'next' / 'prev' / null。
+  // 翻页时焦点要留在翻页按钮上，否则键盘用户再按 Enter 会误触收藏。
+  var navFocus = null;
 
   // 详情为模态弹窗：打开时把页面主体设为 inert，background 不再接收焦点与读屏
   var inertSupported = 'inert' in HTMLElement.prototype;
@@ -7495,6 +7498,10 @@
       if (!restLoaded && Number(id) < 800000000) loadRest().then(function () { openDetail(id); });
       return;
     }
+    // 翻页标志只对这一次打开生效，读完就消费掉 ——
+    // 否则下一次从卡片点开详情时焦点还会错误地落在翻页按钮上。
+    var viaNav = navFocus;
+    navFocus = null;
     // 切换到另一本书时回到顶部，避免沿用上一本的滚动位置
     var switched = modalId !== id;
     if (switched) {
@@ -7508,12 +7515,28 @@
     modalEl.hidden = false;
     // 模态弹窗：背景区域设为 inert，键盘与屏幕阅读器都不会穿透到列表（WAI-ARIA Dialog）
     setPageInert(true);
-    $('detailToggle').focus();
+    focusDetailEntry(viaNav);
     if (switched) {
       var panel = modalEl.querySelector('.modal-panel');
       if (panel) panel.scrollTop = 0;
     }
     writeHash();
+  }
+
+  // 详情打开后焦点落在哪，取决于「谁打开的、以及为什么打开」：
+  // 用户点「下一本」是想继续往下翻，焦点必须留在翻页按钮上 ——
+  // 否则键盘用户再按一次 Enter 就变成「加入我的阅读」，一次误触改了数据。
+  // 首次打开（从卡片 / 深链）才把焦点交给收藏按钮，那里是主要动作。
+  function focusDetailEntry(viaNav) {
+    var nav = $('detailNav');
+    if (viaNav && nav && !nav.hidden) {
+      // 优先停在同方向：翻到最后一本时「下一本」已 disabled，改停到「上一本」
+      var same = viaNav === 'next' ? $('detailNext') : $('detailPrev');
+      var other = viaNav === 'next' ? $('detailPrev') : $('detailNext');
+      var target = (same && !same.disabled) ? same : ((other && !other.disabled) ? other : null);
+      if (target) { target.focus(); return; }
+    }
+    $('detailToggle').focus();
   }
 
   function closeDetail() {
@@ -7543,7 +7566,10 @@
     }
     if (pos < 0) return;
     var target = seq[pos + delta];
+    // 记下是谁发起的翻页：openDetail 据此把焦点还给对应按钮
+    navFocus = delta > 0 ? 'next' : 'prev';
     if (target) openDetail(String(target.i));
+    else navFocus = null;
   }
 
   $('detailPrev').addEventListener('click', function () { shiftDetail(-1); });
@@ -9790,6 +9816,10 @@
         r: myMap[id].r || 0, rv: myMap[id].rv || '', nt: myMap[id].nt || '', rvU: myMap[id].rvU || 0,
         fm: myMap[id].fm || '', ow: myMap[id].ow ? 1 : 0, mu: myMap[id].mu || 0 };
     });
+    // 草稿必须一起进快照。清空时会 persistDrafts({}) 把**所有**未保存的书评一起清掉，
+    // 而原来这里只快照了 myMap —— 用户写了半天的书评，清空后再点撤销，书回到列表里、
+    // 书评却回不来了，且要等到打开详情发现输入框是空才知道，那时已无从恢复。
+    var draftSnapshot = loadDrafts();
     var ts = Date.now();
     ids.forEach(function (id) { myDeleted[id] = ts; });
     myMap = {};
@@ -9802,6 +9832,14 @@
       fn: function () {
         ids.forEach(clearDeleted);
         myMap = snapshot;
+        // 只补回被清空时丢掉的那些草稿，不覆盖这期间新写的（新写的更新更该留下）
+        if (Object.keys(draftSnapshot).length) {
+          var cur = loadDrafts();
+          Object.keys(draftSnapshot).forEach(function (id) {
+            if (!cur[id]) cur[id] = draftSnapshot[id];
+          });
+          persistDrafts(cur);
+        }
         persistDeleted();
         saveMine();
         render();

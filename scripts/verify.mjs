@@ -2823,6 +2823,146 @@ async function main() {
       (await cdp.evaluate(`(() => !document.querySelector('main').hasAttribute('inert'))()`)) === true);
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
 
+    // ---- 详情内「上一本 / 下一本」翻页 ----
+    //
+    // 这两个入口从未被点过。真要点进去才发现一个问题：openDetail() 末尾
+    // 无条件 $('detailToggle').focus()。点「下一本」之后焦点被抢到收藏按钮上，
+    // 键盘用户再按 Enter 就变成「把这本书加入我的阅读」—— 一次误触改了数据，
+    // 而他只是想继续往下翻。
+    const navProbe = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const out = { ok: false };
+      const KEY = 'yuc_ln_mine_v1';
+      // 用列表第一张卡作为起点，保证筛选结果里前后都有邻居
+      const cards = [...document.querySelectorAll('.card')];
+      if (cards.length < 3) return Object.assign(out, { reason: 'too-few-cards' });
+      const firstId = cards[0].dataset.id;
+      const before = JSON.parse(localStorage.getItem(KEY) || '{}');
+      out.firstId = firstId;
+      out.inMineBefore = !!before[firstId];
+
+      location.hash = 'd=' + firstId;
+      await sleep(450);
+      out.navVisible = !document.getElementById('detailNav').hidden;
+      out.prevDisabledAtFirst = document.getElementById('detailPrev').disabled;
+
+      // 用真实 click 入口翻页，不自己调 openDetail
+      const nextBtn = document.getElementById('detailNext');
+      out.nextDisabled = nextBtn.disabled;
+      nextBtn.click();
+      await sleep(500);
+      out.movedId = document.getElementById('modalTitle').textContent ? true : false;
+      out.hashChanged = /[#&]d=/.test(location.hash);
+      out.newHashId = (String(location.hash).match(/[#&]d=(\\d+)/) || [])[1] || '';
+      out.moved = out.newHashId !== String(firstId);
+      out.navStaysOpen = !document.getElementById('modal').hidden;
+      // 关键：点完之后焦点在哪。点它的人是想继续翻，焦点必须还在翻页按钮上
+      const ae = document.activeElement;
+      out.focusId = ae ? (ae.id || ae.tagName.toLowerCase()) : '';
+      out.focusIsNav = !!(ae && (ae.id === 'detailNext' || ae.id === 'detailPrev'));
+
+      // 回到起点，验「上一本」也可以反向走
+      const prevBtn = document.getElementById('detailPrev');
+      out.prevDisabledAfterMove = prevBtn.disabled;
+      if (!prevBtn.disabled) {
+        prevBtn.click();
+        await sleep(500);
+        out.backId = (String(location.hash).match(/[#&]d=(\\d+)/) || [])[1] || '';
+        out.backToFirst = out.backId === String(firstId);
+      }
+
+      // 复原：关详情、回列表、确保没有意外写入收藏
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+      location.hash = '';
+      await sleep(300);
+      const after = JSON.parse(localStorage.getItem(KEY) || '{}');
+      out.inMineAfter = !!after[firstId];
+      out.noAccidentalWrite = out.inMineBefore === out.inMineAfter;
+      out.ok = true;
+      return out;
+    })()`);
+    check('详情翻页用真实按钮走通前后两向',
+      navProbe.ok === true && navProbe.navVisible === true &&
+      navProbe.prevDisabledAtFirst === true && navProbe.nextDisabled === false &&
+      navProbe.moved === true && navProbe.navStaysOpen === true &&
+      navProbe.prevDisabledAfterMove === false && navProbe.backToFirst === true,
+      JSON.stringify(navProbe));
+    check('详情翻页后焦点留在翻页按钮上（否则 Enter 会误改收藏）',
+      navProbe.focusIsNav === true && navProbe.noAccidentalWrite === true,
+      JSON.stringify({ focusId: navProbe.focusId, focusIsNav: navProbe.focusIsNav,
+        inMineBefore: navProbe.inMineBefore, inMineAfter: navProbe.inMineAfter }));
+
+    // ---- 清空「我的阅读」后的撤销要能把草稿一起还原 ----
+    //
+    // clearBtn 的动作是「快照 myMap → 清空 → 提供撤销」。但同一段里还调了
+    // persistDrafts({})，把**所有**书评草稿一起清掉了 —— 而快照里只有 myMap 的
+    // 12 个字段，没有草稿。用户写了半天的书评，清空后再点撤销，书评回不来。
+    // 他要到打开那本书的详情、发现输入框是空的时候才知道，那时也无从恢复。
+    const clearUndo = await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const MINE = 'yuc_ln_mine_v1';
+      const DRAFT = 'yuc_ln_draft_v1';
+      const rawMine = localStorage.getItem(MINE);
+      const rawDraft = localStorage.getItem(DRAFT);
+      const rawConfirm = window.confirm;
+      const out = { ok: false };
+      window.confirm = () => true;
+      try {
+        const mine0 = JSON.parse(rawMine || '{}');
+        const ids = Object.keys(mine0);
+        if (ids.length < 1) return Object.assign(out, { reason: 'no-mine' });
+        const probeId = ids[0];
+        out.probeId = probeId;
+        // 造一份「写了一半的书评」：走真实草稿存储键，不直接改内存
+        const d = JSON.parse(rawDraft || '{}');
+        d[probeId] = { rv: '清空撤销探针短评', nt: '清空撤销探针笔记', t: Date.now() };
+        localStorage.setItem(DRAFT, JSON.stringify(d));
+        out.draftBefore = !!JSON.parse(localStorage.getItem(DRAFT) || '{}')[probeId];
+
+        // 真实入口：点「清空」
+        const clearBtn = document.getElementById('clearBtn');
+        if (!clearBtn) return Object.assign(out, { reason: 'no-clear-btn' });
+        clearBtn.click();
+        await sleep(400);
+        out.mineAfterClear = Object.keys(JSON.parse(localStorage.getItem(MINE) || '{}')).length;
+        out.draftAfterClear = !!JSON.parse(localStorage.getItem(DRAFT) || '{}')[probeId];
+        out.toastText = (document.getElementById('toast').textContent || '').trim().slice(0, 40);
+
+        // 点撤销
+        const act = document.getElementById('toastAct');
+        out.hasUndo = !!act && !act.hidden;
+        if (act) act.click();
+        await sleep(500);
+        out.mineAfterUndo = Object.keys(JSON.parse(localStorage.getItem(MINE) || '{}')).length;
+        const dAfter = JSON.parse(localStorage.getItem(DRAFT) || '{}')[probeId];
+        out.draftAfterUndo = !!dAfter;
+        out.draftTextAfterUndo = dAfter ? String(dAfter.rv || '') : '';
+        out.ok = true;
+      } finally {
+        window.confirm = rawConfirm;
+        // 复原：把清空前的两份存储原样写回，避免影响后续断言
+        if (rawMine === null) localStorage.removeItem(MINE);
+        else localStorage.setItem(MINE, rawMine);
+        if (rawDraft === null) localStorage.removeItem(DRAFT);
+        else localStorage.setItem(DRAFT, rawDraft);
+      }
+      // 存储恢复后让页面重新读一次，保证内存与磁盘一致
+      location.hash = '';
+      await sleep(200);
+      document.querySelector('.tab[data-tab="mine"]').click();
+      await sleep(300);
+      document.querySelector('.tab[data-tab="all"]').click();
+      await sleep(300);
+      return out;
+    })()`);
+    check('清空「我的阅读」后用撤销能救回书评草稿',
+      clearUndo.ok === true && clearUndo.draftBefore === true &&
+      clearUndo.hasUndo === true &&
+      clearUndo.draftAfterUndo === true &&
+      clearUndo.draftTextAfterUndo === '清空撤销探针短评',
+      JSON.stringify(clearUndo));
+
     // ---- 系列卡片「子卷」入口 ----
     const volEntry = await cdp.evaluate(`(() => {
       const b = document.querySelector('.card [data-act="vols"]');
