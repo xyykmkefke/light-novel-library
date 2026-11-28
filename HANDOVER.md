@@ -1993,6 +1993,108 @@ const syncSelfConsistent = (s) => {
 
 `syncNowBtn`（保存并同步——需要替身 `fetch` 才能点，否则会真的打 api.github.com）、`detailShare`、`importBtn`。纯展示类优先级低。
 
+## 9.64 v1.24.14 存不下令牌却说「请先填写访问令牌」（2026-11-28）
+
+### 9.64.1 这一轮查的是 9.63.7 的第一项 `syncNowBtn`
+
+`syncNowBtn` 的 handler 很短：读输入框 → 写进配置 → `syncNow(false)`。问题出在中间那步的静默上。
+
+### 9.64.2 缺陷一：`saveSyncCfg` 空 catch，失败后指着一个填好的输入框说它是空的
+
+```js
+function saveSyncCfg(cfg) {
+  syncCfg = cfg || {};
+  if (!canStore) return;
+  try {
+    localStorage.setItem(GIST_KEY, JSON.stringify(syncCfg));
+  } catch (e) { /* 忽略存储失败 */ }
+}
+```
+
+`syncNowBtn` 的顺序是「存配置 → `syncNow()`」，而 `syncNow()` **重新从磁盘读配置**（`var cfg = loadSyncCfg()`）。存储满时这条链是这样走完的：
+
+1. 用户填好 Token，点「保存并同步」；
+2. `saveSyncCfg` 写盘失败，静默吞掉，不记账、不亮横幅；
+3. `syncNow` 重新读盘 → 读到空 → 走 `if (!cfg.token)` 分支；
+4. 界面显示 **「请先填写访问令牌」**，并把光标放回输入框。
+
+用户看着一个**明明有内容**的输入框，被告知「请先填写」。他唯一能想到的动作是再输一遍——而真正的原因是存储写失败，重输多少次都一样。而且即使这次硬同步成功了，`lastSync` 同样写不进去，下次打开还是「未配置」，等于给了一次不会被记住的成功。
+
+实测（探针拦住 `GIST_KEY` 的写入）：
+```
+status: "未配置"        ← 缺陷态
+stored: null
+fetchCalls: []          ← 连请求都没发出去
+```
+
+### 9.64.3 修法：写不进去就停下来说清原因
+
+`saveSyncCfg` 改为返回布尔，失败时走 `reportStoreFailure(e, GIST_KEY)`（与其他写入点同一套记账 + 横幅）；`syncNowBtn` 见 false 就停：
+
+```js
+if (!saveSyncCfg(cfg)) {
+  setSyncStatus('令牌没能保存到本机（存储已满或被禁用），本次未同步。请先导出备份、清理空间后重试', 'err');
+  return;
+}
+syncNow(false);
+```
+
+**不是「失败也照样同步」**：能连上也没意义——`lastSync`、`gistId`（首次同步会新建 Gist 并写回）全都写不进去，下次打开仍是未配置，用户会以为「同步过但数据没了」。
+
+### 9.64.4 缺陷二：`saveViews` 写成功时不销账，横幅永远不收
+
+顺着上面那条探针，发现 `yuc_ln_views_v1` 一直挂在 `storeFailed` 里。查下去是 `saveViews` 的成功分支少了一行：
+
+```js
+localStorage.setItem(VIEWS_KEY, ...);
+return true;        // ← 缺 clearStoreFailure(VIEWS_KEY)
+```
+
+其余写入点（收藏 `STORAGE_KEY` / 墓碑 `DEL_KEY` / 草稿 `DRAFT_KEY` / 纠错 `META_KEY`）成功时都有这一行，只有视图漏了。后果是：用户看到「本地存储已满，有改动没能保存」→ 按提示导出备份、清掉些收藏腾出空间 → 再存一次视图，**视图确实存上了，横幅却一直挂着**。他无法判断到底救回来没有，只会以为导出备份这件事也不管用。
+
+修法就是补上 `clearStoreFailure(VIEWS_KEY)`。
+
+### 9.64.5 一个「测试里从来没生效过」的清理代码
+
+排查过程中发现视图探针（v1.24.10 写的）里有这一行：
+
+```js
+if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
+```
+
+`clearStoreFailure` 是 IIFE 私有的，`typeof` 在页面全局作用域里恒为 `'undefined'`（探针内实测 `canClear: "undefined"`）。**这行从写下的那天起就没执行过**，于是 VIEWS_KEY 的失败记账一路挂到测试结束，把所有「横幅该收起」的断言都带成了假失败。
+
+这也解释了为什么 v1.24.13 那两条横幅断言要加 `bannerBefore` 守卫——当时只当是「前置状态不干净」，实际是这个 bug 的副作用。
+
+**判据：`if (typeof X === 'function') X()` 这种「防御式调用」如果 X 在作用域里根本不存在，它永远静默跳过，看上去很像「已处理」。探针里不要写这种代码——要么确定能调到，要么一开始就别写。**
+
+为了让验收能按 key 核对（而不是只看全局横幅这个汇总态），新增只读出口 `window.__lnStoreFailed()`，只返回快照、不提供销账后门（销账必须走真实写入路径）。
+
+### 9.64.6 反向验证（四条，全部 FAIL）
+
+| 断言 | 撤掉什么 | 缺陷态 |
+|---|---|---|
+| 同步配置存不进本机时，不能把「存储失败」说成「没填令牌」 | `saveSyncCfg` 的记账 + `syncNowBtn` 的分支 | `status:"未配置"` ✅ |
+| 同步配置存不进本机时亮出常驻横幅 | 同上 | `failedAfter` 里没有 `yuc_ln_gist_v1` ✅ |
+| 同步配置写入恢复后横幅收起 | 同上 | `failedAfterRecover` 仍有残留 ✅ |
+| 视图写失败后重新存成功，失败记账要销掉 | `clearStoreFailure(VIEWS_KEY)` | `failedAfterRecover:true` / 横幅仍亮 ✅ |
+
+### 9.64.7 又一个「横幅是汇总态」的坑
+
+新写的横幅断言第一版是 `bannerHidden === false`，结果**缺陷态和修复态都通过**——因为 `yuc_ln_views_v1` 的残留让横幅一直亮着，那行断言恒真。加 `bannerBefore` 守卫后仍不够（`bannerBefore:false` 表示「之前就亮着」）。最终改成按 key 核对 `__lnStoreFailed()`：`failedBefore` 里没有、`failedAfter` 里有，才是本次造成的。
+
+**判据：全局汇总态的显示（横幅、角标、未读数）不能用来证明「某一次操作产生了影响」——它只能证明「至少有一处还没解决」。要归因就必须按 key / 按条目核对。**
+
+### 9.64.8 验收
+
+`verify` **268 → 272/272**（新增 4 条），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.13 → 1.24.14**，SW `yuc-ln-shell-v64` → **`v65`**。
+
+### 9.64.9 还剩的入口
+
+`detailShare`、`importBtn`。另外 `saveSyncLog` 的 catch 仍是空的（日志是流水账，丢了不影响数据），`markBackup` / `pushHist` 两处同理——都是可再生信息，已在注释里写明理由。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -2049,7 +2151,7 @@ const syncSelfConsistent = (s) => {
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 268/268、`check-shards` 27/27、`audit-search` 17/17。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 272/272、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -2059,6 +2161,6 @@ const syncSelfConsistent = (s) => {
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.13 已完成，后续按第 10 节风险与决策、第 9.63 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（268 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.14 已完成，后续按第 10 节风险与决策、第 9.64 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（272 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。

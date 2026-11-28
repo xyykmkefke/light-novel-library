@@ -1825,11 +1825,19 @@ async function main() {
         out.failToastNotSuccess = !/^已保存视图/.test(failToast);
         out.failNotPersisted = !(read() || []).some((v) => v && v.name === '写不进去的视图');
       } finally {
-        window.prompt = rawPrompt;
+        // 销账必须走真实写入路径。原来这里写的是
+        //   if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
+        // 但 clearStoreFailure 是 IIFE 私有的，typeof 恒为 'undefined'，
+        // 那行从来没生效过 —— 于是 VIEWS_KEY 的失败记账一路挂到测试结束，
+        // 把后面所有「横幅该收起」的断言带崩。
+        // 现在交给后面那条「视图写失败后重新存成功」的用例去销账，
+        // 这里只做本分的事：还原 prompt、清视图、收起菜单。
+        // 注意 saveOne 依赖 window.prompt 替身，所以顺序不能反。
+        names.length = 0;
         localStorage.removeItem(KEY);
+        window.prompt = rawPrompt;
         const menu = document.getElementById('viewsMenu');
         if (menu) { menu.innerHTML = ''; menu.hidden = true; }
-        if (typeof clearStoreFailure === 'function') clearStoreFailure(KEY);
       }
       return out;
     })()`);
@@ -1865,6 +1873,72 @@ async function main() {
     check('视图探针事后复原了 prompt 与视图菜单',
       viewsClean.stored === null && viewsClean.promptRestored === true,
       JSON.stringify(viewsClean));
+
+    // ---- 视图写失败后再存成功，那条失败记账必须销掉 ----
+    // 横幅是常态提示，不是一次性 toast：用户按提示导出备份、腾出空间、
+    // 再存一次，视图确实存上了，横幅却一直喊「有改动没能保存」——
+    // 他无法判断到底救回来没有，只会以为导出不管用。
+    // 其余写入点（收藏 / 墓碑 / 草稿 / 纠错）都有销账，只有 saveViews 漏了。
+    // 注意要用「本次新建的 key」做判据：横幅是全局汇总态，别的用例
+    // 留下的残留会让它一直亮着，「之后还亮着」什么也证明不了。
+    const viewsRecover = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_views_v1';
+      const rawSet = Storage.prototype.setItem;
+      const rawPrompt = window.prompt;
+      const names = [];
+      window.prompt = () => (names.length ? names.shift() : null);
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const menu = document.getElementById('viewsMenu');
+      const saveOne = async (name) => {
+        names.push(name);
+        menu.hidden = true;
+        document.getElementById('viewsBtn').click();
+        await wait(40);
+        const btn = menu.querySelector('[data-view-save]');
+        if (!btn) return false;
+        btn.click();
+        await wait(60);
+        menu.hidden = true;
+        return true;
+      };
+      const failed = (window.__lnStoreFailed && window.__lnStoreFailed()) || {};
+      const out = { failedBefore: !!failed[KEY] };
+      try {
+        // 先让写入失败一次，制造「欠账」
+        Storage.prototype.setItem = function (k) {
+          if (String(k) === KEY) {
+            const err = new Error('QuotaExceededError simulated');
+            err.name = 'QuotaExceededError';
+            throw err;
+          }
+          return rawSet.apply(this, arguments);
+        };
+        await saveOne('视图恢复探针甲');
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      const mid = (window.__lnStoreFailed && window.__lnStoreFailed()) || {};
+      out.failedAfterFail = !!mid[KEY];
+      // 写入恢复，再存一次（等价于用户腾出空间后重试）
+      await saveOne('视图恢复探针乙');
+      const after = (window.__lnStoreFailed && window.__lnStoreFailed()) || {};
+      out.failedAfterRecover = !!after[KEY];
+      out.bannerHiddenAfterRecover = document.getElementById('storageWarn').hidden;
+      out.stored = (() => {
+        try { return JSON.parse(localStorage.getItem(KEY) || '[]').length; } catch (e) { return -1; }
+      })();
+      // 复原：清视图、还原 prompt、清菜单
+      localStorage.removeItem(KEY);
+      window.prompt = rawPrompt;
+      menu.innerHTML = '';
+      menu.hidden = true;
+      return out;
+    })()`);
+    check('视图写失败后重新存成功，失败记账要销掉（否则横幅永远不收）',
+      viewsRecover.failedAfterFail === true &&
+      viewsRecover.failedAfterRecover === false &&
+      viewsRecover.stored > 0,
+      JSON.stringify(viewsRecover));
 
     // ---- 「复制视图链接」不能把「正在看哪本书」一起带出去 ----
     //
@@ -2445,6 +2519,93 @@ async function main() {
     check('同步断开探针事后复原了配置与弹窗',
       syncCleanup.cfg === null && syncCleanup.log === null && syncCleanup.closed === true,
       JSON.stringify(syncCleanup));
+
+    // ---- 同步配置写不进本机时，不能把「存储失败」说成「没填令牌」 ----
+    // saveSyncCfg 的 catch 是空的：存不进去既不记账也不亮横幅。
+    // 而 syncNowBtn 存完就调 syncNow()，后者**重新从 localStorage 读配置** ——
+    // 读不到 token，于是走「请先填写访问令牌」分支，指着一个明明有内容的输入框
+    // 说它是空的。用户只会去重输令牌，而真正的原因是存储写失败。
+    const syncCfgFail = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_gist_v1';
+      const LOGKEY = 'yuc_ln_synclog_v1';
+      const rawSet = Storage.prototype.setItem;
+      const rawFetch = window.fetch;
+      const rawCfg = localStorage.getItem(KEY);
+      const rawLog = localStorage.getItem(LOGKEY);
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const calls = [];
+      const out = {};
+      // 探针绝不能真打 api.github.com；错误文案带「Token」是为了让它被
+      // syncErrorIsFatal 判成致命错误，从而不排退避重试、不干扰后续断言。
+      window.fetch = function (u) {
+        calls.push(String(u));
+        return Promise.reject(new Error('Token 无效或已过期（探针模拟）'));
+      };
+      try {
+        localStorage.removeItem(KEY);
+        localStorage.removeItem(LOGKEY);
+        document.getElementById('syncBtn').click();
+        await wait(60);
+        // 横幅的「之前」状态必须记下来：如果它本来就亮着（前面存储类断言
+        // 留下的残留），那「之后亮着」什么也证明不了 —— 恒真。
+        out.bannerBefore = document.getElementById('storageWarn').hidden;
+        out.bannerTextBefore = (document.getElementById('storageWarn').textContent || '').slice(0, 30);
+        // 按 key 核对，而不是只看全局横幅：横幅是汇总态，别的用例的残留
+        // 会让它一直亮着，「之后还亮着」便什么也证明不了。
+        out.failedBefore = (window.__lnStoreFailed ? window.__lnStoreFailed() : null);
+        Storage.prototype.setItem = function (k) {
+          if (String(k) === KEY) {
+            const err = new Error('QuotaExceededError simulated');
+            err.name = 'QuotaExceededError';
+            throw err;
+          }
+          return rawSet.apply(this, arguments);
+        };
+        document.getElementById('gistToken').value = 'ghp_probe_token_blocked';
+        document.getElementById('gistId').value = 'probeGistBlocked';
+        document.getElementById('syncNowBtn').click();
+        await wait(250);
+        out.status = document.getElementById('syncStatus').textContent;
+        out.bannerHidden = document.getElementById('storageWarn').hidden;
+        out.stored = localStorage.getItem(KEY);
+        out.fetchCalls = calls.slice();
+        out.failedAfter = (window.__lnStoreFailed ? window.__lnStoreFailed() : null);
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      // 收尾：写入恢复后再存一次，横幅必须自己收起，否则后面所有
+      // 依赖「横幅已隐藏」的断言都会被这次探针带崩。
+      document.getElementById('syncNowBtn').click();
+      await wait(250);
+      out.bannerHiddenAfterRecover = document.getElementById('storageWarn').hidden;
+      out.failedAfterRecover = (window.__lnStoreFailed ? window.__lnStoreFailed() : null);
+      localStorage.removeItem(KEY);
+      localStorage.removeItem(LOGKEY);
+      window.fetch = rawFetch;
+      if (rawCfg !== null) localStorage.setItem(KEY, rawCfg);
+      if (rawLog !== null) localStorage.setItem(LOGKEY, rawLog);
+      document.getElementById('syncMask').click();
+      await wait(60);
+      return out;
+    })()`);
+    check('同步配置存不进本机时，不能把「存储失败」说成「没填令牌」',
+      /存储|未能保存/.test(syncCfgFail.status || '') &&
+      !/请先填写访问令牌/.test(syncCfgFail.status || '') &&
+      syncCfgFail.stored === null && (syncCfgFail.fetchCalls || []).length === 0,
+      JSON.stringify(syncCfgFail));
+    check('同步配置存不进本机时亮出常驻横幅',
+      !!(syncCfgFail.failedAfter && syncCfgFail.failedAfter.yuc_ln_gist_v1) &&
+      !(syncCfgFail.failedBefore && syncCfgFail.failedBefore.yuc_ln_gist_v1) &&
+      syncCfgFail.bannerHidden === false,
+      JSON.stringify({ failedBefore: syncCfgFail.failedBefore, failedAfter: syncCfgFail.failedAfter,
+        bannerHidden: syncCfgFail.bannerHidden, status: syncCfgFail.status }));
+    // 写入恢复后再存一次，这个 key 的失败记账必须销掉、横幅必须收起。
+    // 只注销账不销横幅（或反过来）都会让用户无法判断数据是否救回。
+    check('同步配置写入恢复后横幅收起',
+      !!(syncCfgFail.failedAfterRecover && !syncCfgFail.failedAfterRecover.yuc_ln_gist_v1) &&
+      syncCfgFail.bannerHiddenAfterRecover === true,
+      JSON.stringify({ failedAfterRecover: syncCfgFail.failedAfterRecover,
+        bannerHiddenAfterRecover: syncCfgFail.bannerHiddenAfterRecover }));
 
     // ---- 空结果恢复 ----
     await click('.tab[data-tab="all"]');
