@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.5">
+<meta name="version" content="1.24.6">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.5</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.6</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -4402,6 +4402,8 @@
   function persistDrafts(drafts) {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts));
+      // 写成功了就要销掉自己的账，否则横幅会一直挂着。
+      clearStoreFailure(DRAFT_KEY);
       return true;
     } catch (e) {
       // 书评草稿是「输入即存」的，用户看不到任何保存动作。写失败却静默返回时，
@@ -4433,6 +4435,12 @@
   function saveMine(opts) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(myMap));
+      // 必须销账：上面 reportStoreFailure 给这个 key 记了一笔失败，
+      // 用户腾出空间后重新操作，这一次真的写进去了，界面却仍在喊
+      // 「有改动没能保存，刷新后会丢失」——他无法判断数据到底救回来没有，
+      // 只能反复导出、反复清理，最后干脆不信这个横幅。
+      // 销账后横幅由 clearStoreFailure 统一判断：别的 key 还欠着就继续留着。
+      clearStoreFailure(STORAGE_KEY);
     } catch (e) {
       // 区分两种失败，否则用户被指向错误方向：
       //   QuotaExceededError —— 存满了（浏览器一般给 5MB），收藏本身没坏，
@@ -5834,6 +5842,13 @@
       toast('先选择要操作的书目');
       return;
     }
+    // 快照只记「批量操作会改到的字段」，撤销时也只写回这些字段。
+    //
+    // 原来撤销是用 `myMap[id] = snapshot[id]` 整体替换，而 snapshot 只有
+    // s/t/vol/u/f/fm/ow/mu 八个字段，于是评分 r、短评 rv、笔记 nt、rvU
+    // 会被整个对象替换掉——用户先写了书评，再批量标记为「读完」，
+    // 点一下「撤销」就永久丢了书评，而且没有任何提示。
+    // 批量操作本身完全不碰 r/rv/nt/rvU，撤销当然也不该碰。
     var snapshot = {};
     ids.forEach(function (id) {
       if (myMap[id]) snapshot[id] = { s: myMap[id].s, t: myMap[id].t, vol: myMap[id].vol, u: myMap[id].u, f: myMap[id].f,
@@ -5868,7 +5883,13 @@
       label: '撤销',
       fn: function () {
         ids.forEach(function (id) { clearDeleted(id); });
-        Object.keys(snapshot).forEach(function (id) { myMap[id] = snapshot[id]; });
+        Object.keys(snapshot).forEach(function (id) {
+          if (!myMap[id]) myMap[id] = {};
+          // 逐字段写回，保留 r / rv / nt / rvU 等批量操作从未触碰的字段
+          Object.keys(snapshot[id]).forEach(function (k) {
+            myMap[id][k] = snapshot[id][k];
+          });
+        });
         ids.forEach(function (id) {
           if (!snapshot[id]) delete myMap[id];
         });
@@ -9300,7 +9321,11 @@
     var s = String(v == null ? '' : v);
     // 防止表格软件把以 = + - @ 开头的标题当成公式执行
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    // 必须把 \r 也算进「需要引号」的字符里。只判 \",\n 时，含裸 \r 的单元格
+    // 不会被引号包裹，而整行是用 \r\n 拼接的——表格软件读到单元格里的 \r
+    // 就当作行结束，一条记录被拆成两行、后面全部错列。
+    // \r 的来源很现实：从 Windows 记事本 / 某些网页复制文本粘进笔记框。
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
   $('exportBtn').addEventListener('click', function () {

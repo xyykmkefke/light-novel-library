@@ -1183,6 +1183,129 @@ async function main() {
       exportedItem?.rating === 9 && exportedItem?.review === '测试短评',
       JSON.stringify({ r: exportedItem?.rating, rv: exportedItem?.review }));
 
+    // CSV 单元格里的裸 \r 必须被引号包裹，否则一条记录会被拆成两行、后面全部错列。
+    //
+    // \r 从哪来：不是手打的——textarea 的 value 会把 \r\n / \r 归一成 \n，用户
+    // 敲不进裸 \r。真实来源是**导入的 JSON**与**云同步拉回的远端记录**，这两处
+    // 都是 String(entry.note).slice(...) 直接落地，JSON 里写 "\\r" 就原样保留。
+    // 所以走导入入口注入（等价于「用户从别的客户端把这条同步过来」）。
+    //
+    // 不新增条目、也不改动条目数：后面的「导入跳过未知条目」断言写死了
+    // `Object.keys(mine).length === 2`。
+    //
+    // 必须先走 UI 把本地笔记清空，再导入。只改 localStorage 是不够的：
+    // 导入逻辑判的是**内存里的 myMap[id].nt**（`if (entry.note && !cur.nt)`），
+    // 内存里还留着旧笔记时，远端那份带 \r 的笔记会被直接忽略，probe 写不进去，
+    // 于是导出出来的 CSV 根本不含 \r —— 断言看着 PASS，其实什么都没验到。
+    // 这正是「测试没打中靶心」的典型形态，注释留在这里防复发。
+    await cdp.evaluate(`(async () => {
+      location.hash = 'd=' + ${JSON.stringify(pick.id)};
+      await new Promise((r) => setTimeout(r, 400));
+      const nt = document.getElementById('reviewNote');
+      const rv = document.getElementById('reviewShort');
+      // 只清笔记，短评必须留着 —— 下面还有「评: 搜索书评正文」要搜「测试短评」
+      if (nt) nt.value = '';
+      if (rv) rv.value = '测试短评';
+      const save = document.getElementById('reviewSave');
+      if (save) save.click();
+      await new Promise((r) => setTimeout(r, 350));
+      return true;
+    })()`);
+    await sleep(300);
+    const csvProbe = await cdp.evaluate(`(async () => {
+      const id = ${JSON.stringify(pick.id)};
+      const payload = {
+        app: 'yuc-light-novel-list', version: 4, exportedAt: new Date().toISOString(),
+        items: [{ id: Number(id), status: 'done', note: '第一行\\r第二行' }],
+      };
+      const dt = new DataTransfer();
+      dt.items.add(new File([JSON.stringify(payload)], 'probe.json', { type: 'application/json' }));
+      const input = document.getElementById('fileInput');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 1000));
+      const map = JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}');
+      return {
+        ok: true,
+        id: id,
+        note: map[id] ? map[id].nt : null,
+        count: Object.keys(map).length,
+      };
+    })()`);
+    check('导入的笔记里的裸回车原样保留（CSV 用例的前置条件）',
+      csvProbe.ok === true && csvProbe.note === '第一行\r第二行', JSON.stringify(csvProbe));
+
+    if (csvProbe.ok === true) {
+      // 先把扩展包加载好：否则第一次点 exportCsv 只会触发 loadExtra 并在 then 里
+      // 再点一次，那一次点击不在 Blob 拦截范围内，拿不到内容
+      await cdp.evaluate(`(() => { document.getElementById('exportCsv').click(); })()`);
+      await sleep(1200);      const csvText = await cdp.evaluate(`(async () => {
+        window.__lnCsv = null;
+        const orig = URL.createObjectURL;
+        URL.createObjectURL = function (blob) { window.__lnCsv = blob; return 'blob:verify-csv'; };
+        document.getElementById('exportCsv').click();
+        URL.createObjectURL = orig;
+        await new Promise((r) => setTimeout(r, 250));
+        return window.__lnCsv ? await window.__lnCsv.text() : '';
+      })()`);
+      const csvCheck = (() => {
+        const body = String(csvText || '').replace(/^\ufeff/, '');
+        if (!body) return { ok: false, reason: '未拿到 CSV 内容' };
+        // 按 RFC 4180 解析：只有「引号外」的换行才算行结束。
+        // 不能简单 split(/\r\n|\n|\r/)——那样即使单元格已被引号正确包裹，
+        // 也会把引号内的 \r 当换行切出来，于是「修好了」照样判失败。
+        // 反过来说，缺陷态（\r 裸露在引号外）解析出来必然是「多一行、且引号成对性被破坏」。
+        const records = [];
+        let cur = '';
+        let inQ = false;
+        for (let i = 0; i < body.length; i += 1) {
+          const ch = body[i];
+          if (inQ) {
+            if (ch === '"') {
+              if (body[i + 1] === '"') { cur += '""'; i += 1; }
+              else { inQ = false; cur += ch; }
+            } else cur += ch;
+          } else if (ch === '"') {
+            inQ = true; cur += ch;
+          } else if (ch === '\r' || ch === '\n') {
+            if (ch === '\r' && body[i + 1] === '\n') i += 1;
+            records.push(cur); cur = '';
+          } else cur += ch;
+        }
+        if (cur) records.push(cur);
+        const rows = records.filter((l) => l.length);
+        // 缺陷态下 probe 的 \r 在引号外，会被切出来 → 出现一行只含「第二行」
+        const split = rows.some((l) => l.indexOf('第二行') >= 0 && l.indexOf('第一行') < 0);
+        const badQuotes = rows.filter((l) => (l.match(/"/g) || []).length % 2 !== 0).length;
+        return {
+          ok: true, rows: rows.length, split: split, badQuotes: badQuotes,
+          // 诊断：probe 是否真的进了导出内容（否则断言是空跑）
+          hasProbe: body.indexOf('第一行') >= 0,
+          crCount: (body.match(/\r/g) || []).length,
+          lineLens: rows.map((l) => l.length),
+        };
+      })();
+      check('导出 CSV 时单元格内的回车不会把记录拆成两行',
+        csvCheck.ok === true && csvCheck.hasProbe === true &&
+        csvCheck.split === false && csvCheck.badQuotes === 0,
+        JSON.stringify(csvCheck));
+
+      // 清掉探测笔记（走 UI，让内存与磁盘一致），短评保留给下面的搜索断言
+      await cdp.evaluate(`(async () => {
+        location.hash = 'd=' + ${JSON.stringify(pick.id)};
+        await new Promise((r) => setTimeout(r, 400));
+        const nt = document.getElementById('reviewNote');
+        if (nt) nt.value = '';
+        const save = document.getElementById('reviewSave');
+        if (save) save.click();
+        await new Promise((r) => setTimeout(r, 350));
+        location.hash = '';
+        await new Promise((r) => setTimeout(r, 200));
+        return true;
+      })()`);
+      await sleep(200);
+    }
+
     // 评: 字段搜索短评与笔记正文
     await setSearch('评:测试短评');
     const reviewSearch = await cdp.evaluate(`(() => ({
@@ -1312,6 +1435,59 @@ async function main() {
     await click('[data-bulk="doing"]');
     const bulkEntry = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[${JSON.stringify(pick.id)}])()`);
     check('批量标记为在读', bulkEntry?.s === 'doing', bulkEntry?.s);
+
+    // 撤销批量操作不能顺手把书评抹掉。
+    // 原来的撤销是 `myMap[id] = snapshot[id]` 整体替换，而快照只存了
+    // s/t/vol/u/f/fm/ow/mu 八个字段，评分 r、短评 rv、笔记 nt、rvU 会被
+    // 整个对象替换掉 —— 用户先写书评再批量标记，一点撤销书评就永久没了。
+    //
+    // 书评通过**详情面板**写入（走真实 UI，内存与磁盘同时更新），
+    // 撤销按钮 #toastAct 是单例元素，必须紧接着批量操作立刻点，
+    // 隔一会儿就会点到后续别的提示上（这里踩过一次）。
+    const bulkUndo = await cdp.evaluate(`(async () => {
+      const id = ${JSON.stringify(pick.id)};
+      const read = () => (JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[id] || null);
+      // 1) 用详情面板写上明确的探针书评（此时 pick 已有一条收藏记录）
+      location.hash = 'd=' + id;
+      await new Promise((r) => setTimeout(r, 420));
+      const short = document.getElementById('reviewShort');
+      const note = document.getElementById('reviewNote');
+      if (short) short.value = '批量撤销探针短评';
+      if (note) note.value = '批量撤销探针笔记';
+      const saveReview = document.getElementById('reviewSave');
+      if (saveReview) saveReview.click();
+      await new Promise((r) => setTimeout(r, 350));
+      location.hash = '';
+      await new Promise((r) => setTimeout(r, 300));
+      const before = read();
+      // 2) 批量标记为在读
+      document.getElementById('bulkBtn').click();
+      await new Promise((r) => setTimeout(r, 250));
+      const box = document.querySelector('.card .selbox');
+      if (box) box.click();
+      await new Promise((r) => setTimeout(r, 200));
+      const doing = document.querySelector('[data-bulk="doing"]');
+      if (doing) doing.click();
+      await new Promise((r) => setTimeout(r, 350));
+      const mid = read();
+      // 3) 立刻点撤销（同一帧之后的第一个 toast 就是批量操作的）
+      const act = document.getElementById('toastAct');
+      const actLabel = act ? act.textContent : '';
+      if (act) act.click();
+      await new Promise((r) => setTimeout(r, 400));
+      const after = read();
+      const pick2 = (o) => (o ? { s: o.s, r: o.r, rv: o.rv, nt: o.nt, rvU: o.rvU } : null);
+      return { before: pick2(before), mid: pick2(mid), after: pick2(after), actLabel: actLabel };
+    })()`);
+    check('撤销批量操作后书评与笔记仍在',
+      /撤销/.test(bulkUndo.actLabel || '') &&
+      // 撤销回批量前的状态；若批量前本来就是 doing 则不变，不能断言「必须变化」
+      bulkUndo.after?.s === bulkUndo.before?.s &&
+      bulkUndo.after?.r === bulkUndo.mid?.r &&
+      bulkUndo.after?.rv === '批量撤销探针短评' &&
+      bulkUndo.after?.nt === '批量撤销探针笔记' &&
+      bulkUndo.after?.rvU === bulkUndo.mid?.rvU,
+      JSON.stringify(bulkUndo));
 
     // ---- 导入 JSON ----
     const importTarget = await cdp.evaluate(`(() => {
@@ -2423,6 +2599,68 @@ async function main() {
       if (t && t.textContent.indexOf('加入') >= 0) t.click();
     })()`);
     await sleep(250);
+    await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+    await sleep(200);
+
+    // ---- 收藏写入失败后，恢复写入能否撤掉横幅 ----
+    //
+    // 横幅按 key 粒度记账，靠 clearStoreFailure(key) 逐个销账，全部销完才收起。
+    // 光「能亮」不够：如果失败那条路径没有对应的销账调用，横幅就永远挂着。
+    // 用户按提示导出备份、腾出空间、再操作一次，界面仍然喊「有改动没能保存」——
+    // 他无法判断到底救回来没有，只会以为导出也不管用。
+    // 更糟的是横幅文案把两种原因混在一起，永久挂着会让人以为站点坏了。
+    //
+    // 这条独立于上面的纠错（META_KEY）用例：META 路径本来就有销账，
+    // 只测 META 的话，STORAGE_KEY 完全没有销账这个问题永远暴露不出来。
+    const mineRecover = await cdp.evaluate(`(async () => {
+      const id = ${JSON.stringify(editPick.id)};
+      const warn = document.getElementById('storageWarn');
+      const rawSet = Storage.prototype.setItem;
+      let out = { ok: false };
+      // 先让收藏写入失败一次（只拦收藏的 key，墓碑要能正常写）
+      Storage.prototype.setItem = function (k) {
+        if (String(k).indexOf('mine') >= 0) {
+          const err = new Error('QuotaExceededError simulated');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+        return rawSet.apply(this, arguments);
+      };
+      try {
+        location.hash = 'd=' + id;
+        await new Promise((r) => setTimeout(r, 400));
+        const box = document.getElementById('detailMetaEdit');
+        if (box && !box.hidden) {
+          const c = document.querySelector('#detailMetaEdit [data-meta-act="cancel"]');
+          if (c) c.click();
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        const t = document.getElementById('detailToggle');
+        // 保证是「移出」动作，否则不会写收藏
+        if (t && t.textContent.indexOf('移出') < 0) {
+          if (t.textContent.indexOf('加入') >= 0) { t.click(); await new Promise((r) => setTimeout(r, 300)); }
+        }
+        const t2 = document.getElementById('detailToggle');
+        if (t2) t2.click();
+        await new Promise((r) => setTimeout(r, 350));
+        out.failedShown = warn.hidden === false;
+        out.failedText = (warn.textContent || '').slice(0, 24);
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      // 写入已恢复：再做一次收藏写入（这次成功），横幅应当销账收起
+      const t3 = document.getElementById('detailToggle');
+      if (t3) t3.click();
+      await new Promise((r) => setTimeout(r, 400));
+      out.mineSaved = !!JSON.parse(localStorage.getItem('yuc_ln_mine_v1') || '{}')[id];
+      out.bannerHiddenAfter = warn.hidden;
+      out.ok = true;
+      return out;
+    })()`);
+    check('收藏写入恢复后横幅要收起（否则用户无法判断数据是否救回）',
+      mineRecover.ok === true && mineRecover.failedShown === true &&
+      mineRecover.mineSaved === true && mineRecover.bannerHiddenAfter === true,
+      JSON.stringify(mineRecover));
     await cdp.evaluate(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
     await sleep(200);
 

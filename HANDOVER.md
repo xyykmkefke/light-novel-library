@@ -1272,6 +1272,78 @@ toast('已标记为「' + STATUS[status] + '」：' + item.cn);   // 下一行
 
 版本 **1.24.4 → 1.24.5**，SW `yuc-ln-shell-v55` → **`v56`**（`index.html` 是运行时文件，按清单第 2 条升 SW）。版本五处一致：`index.html` meta + 页脚、`package.json`、`package-lock.json` 两处、`manifest.webmanifest`。
 
+## 9.56 v1.24.6 导出安全、撤销不吞字段、横幅能销账（2026-11-27/28）
+
+### 9.56.1 这一轮修的是什么
+
+上一轮（9.55）解决的是「写失败不吭声」。这一轮顺着同一条线继续往下走，换了个问法：**数据已经写对了，有没有哪条路径会把它悄悄弄丢、弄坏、或者让用户误判状态？** 一共查出并修掉三处，全部做了反向验证。
+
+### 9.56.2 CSV 导出：单元格里的裸 `\r` 会把一条记录拆成两行
+
+`csvCell()` 本来已经防了公式注入（`^[=+\-@\t\r]` 前缀加 `'`），但「是否需要加引号」的判据是 `/["，\n]/` —— **漏了 `\r`**。而整行是用 `\r\n` 拼接的，于是含裸 `\r` 的单元格不会被引号包裹，表格软件读到单元格里的 `\r` 就当作行结束：一条记录被拆成两行，**后面所有列全部错位**。用户导出的备份表看起来还在，但已经不能用了。
+
+`\r` 的来源不是手打 —— `textarea.value` 会把 `\r\n` / `\r` 归一成 `\n`，用户敲不进裸 `\r`。真实入口是**导入的 JSON** 和**云同步拉回的远端记录**，两处都是 `String(entry.note).slice(0, 1000)` 直接落地。所以这不是理论问题：一台 Windows 机器导出的备份，换到另一台再导入，笔记里的回车就变成了能拆行的字符。
+
+修法：`return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;`
+
+### 9.56.3 断言第一版是恒真的 —— `split('\r\n')` 抓不到裸 `\r`
+
+诊断器最初写的是 `rows = body.split('\r\n')`，再判断「有没有哪一行含『第二行』却不含『第一行』」。这条判据**恒为 false**：`split('\r\n')` 只在 `\r\n` 序列处切分，裸 `\r` 后面不是 `\n`，根本切不开。缺陷态下实测 `rows:2 / split:false`，断言照样 PASS —— 典型的装饰性断言。
+
+改成 `split(/\r\n|\n|\r/)` 后反向验证成功（缺陷态 `rows:3 / split:true`），但**修复态也 FAIL**（`badQuotes:2`）：引号内的 `\r` 也被切了。来回三次才对，最终改成按 RFC 4180 逐字符解析（引号内的分隔符不算行结束、`""` 转义）。
+
+断言还加了 `hasProbe` 守卫生。第一版是空跑：探针只写 `localStorage`，而导出读的是内存 `myMap[id].nt`，CSV 里根本没有 `\r`，`hasProbe:false` 才把它暴露出来。修法是先走详情面板 UI 清空笔记（让内存与磁盘一致），再走导入写入探针。
+
+### 9.56.4 批量操作撤销会永久吞掉书评与笔记
+
+`bulkApply()` 撤销用的是 `myMap[id] = snapshot[id]` **整体替换**，而 `snapshot` 只存了 `s/t/vol/u/f/fm/ow/mu` 八个字段。于是 `r`（评分）、`rv`（短评）、`nt`（笔记）、`rvU`（短评时间）会被整个对象替换掉 —— 用户先写了几百字书评，再批量标记为「读完」，点一下「撤销」，**书评永久消失，没有任何提示**。
+
+而批量操作本身完全不碰这四个字段，撤销当然也不该碰。修法改为逐字段写回：
+
+```js
+Object.keys(snapshot).forEach(function (id) {
+  if (!myMap[id]) myMap[id] = {};
+  Object.keys(snapshot[id]).forEach(function (k) {
+    myMap[id][k] = snapshot[id][k];
+  });
+});
+```
+
+顺带核实了 `clearBtn`（清空我的阅读）的快照含全部 12 个字段，`toggleMine` 的 `prev` 是完整对象引用，云同步合并构造的 `next` 也是全字段 —— 这三处都没有同类问题，**不需要改**。
+
+反向验证：把撤销改回整体替换，该断言 FAIL，诊断器输出 `after:{"s":"doing"}` —— `r/rv/nt/rvU` 全部消失。同时「按评分排序」和「统计页评分分布」两条断言也一起红了，说明数据是真的丢了，不是断言空跑。
+
+### 9.56.5 失败横幅只会亮，不会收
+
+`clearStoreFailure(key)` 按 key 粒度销账、全部销完才收起横幅 —— 设计是对的，但**只被 `META_KEY`（本地纠错）和 `DEL_KEY`（删除墓碑）两处调用**。`saveMine`（`STORAGE_KEY`）和 `persistDrafts`（`DRAFT_KEY`）完全没有销账调用。
+
+后果：存储满时用户看到「有改动没能保存，刷新后会丢失」，按提示导出备份、清掉旧收藏、重新操作一次 —— 这一次**真的写进去了**（实测 `mineSaved:true`），但界面仍在喊「有改动没能保存」。用户无法判断数据到底救回来没有，只能反复导出、反复清理，最后干脆不信这个横幅。
+
+修法：在 `saveMine` 与 `persistDrafts` 的 `setItem` 成功后各加一句 `clearStoreFailure(KEY)`。**不能用全局布尔量** —— 那正是 9.55 里已经踩过的坑：纠错写失败、收藏写成功，全局标志会把横幅撤掉，而纠错那份数据其实已经丢了。销账必须按 key 粒度。
+
+新断言独立于既有的纠错用例（META 路径本来就有销账，只测它永远暴露不出 STORAGE_KEY 的问题）。反向验证：把 `clearStoreFailure(STORAGE_KEY)` 注掉，断言 FAIL（`bannerHiddenAfter:false`）；恢复后 PASS。
+
+`SETTINGS_KEY` / `BACKUP_KEY` / `VIEWS_KEY` 属于偏好类配置，写失败不影响数据完整性，不纳入横幅记账。
+
+### 9.56.6 已排查但确认无问题的方向
+
+`escapeHtml` 唯一缺失的单引号转义未用于任何单引号属性；动态拼 `href` 仅 `#d=<数字ID>`；`highlightHtml` 用 `indexOf` + 分段转义、不构造 `RegExp`（无正则注入）；`metaFieldHtml` 全部转义；`parsePayload` 后 `mergeRemoteState` 有完整边界（id 正则、`Math.min/max` 夹取、`slice` 截长、`STATUS`/`FORMAT_KEYS` 白名单）；导入逻辑同样有边界与去重；14 处 `JSON.parse` 全部有 `try`；`textarea` 的 `maxlength` 与 `slice(0,140)/(0,1000)` 一致，不会静默截断。
+
+已知但**未修**（评估后优先级低）：Markdown 导出中书名含 `]` 会提前闭合链接标签，属渲染问题、不丢数据。
+
+### 9.56.7 验收
+
+`verify` **247 → 251/251**（新增 4 条：CSV 裸回车前置条件、CSV 不拆行、撤销保留书评笔记、横幅销账），`check-shards` 27/27，`audit-search` 17/17，`check-data` 0 问题，`test-merge` 28/28，`check-deploy` 21 项排除 / 17 个运行时文件 / 10 个数据包。
+
+版本 **1.24.5 → 1.24.6**，SW `yuc-ln-shell-v56` → **`v57`**（`index.html` 是运行时文件，按清单第 2 条升 SW）。版本五处一致：`index.html` meta + 页脚、`package.json`、`package-lock.json` 两处、`manifest.webmanifest`。
+
+### 9.56.8 这一轮的方法论沉淀
+
+1. **「断言绿了」不等于「断言在守护东西」。** `split('\r\n')` 那版在缺陷态下全绿，是靠反向验证才抓出来的。凡是新写的断言，必须把代码退回缺陷态重跑一次，确认它真的会 FAIL。
+2. **筛样本再统计的断言必须加空跑守卫。** `hasProbe` 是后补的 —— 没有它，探针没进导出时断言会因为「没找到坏样本」而 PASS。判据：用例数为 0 就 FAIL。
+3. **修一处的模式，要顺着同一模式查完所有同类点。** 修完 `bulkApply` 的整体替换，立刻 grep 了全部 `myMap[...] = ` 与快照构造点，逐个确认快照字段集是否完整 —— 这是 9.55「修根因要顺着扇出查完」的延续。
+4. **状态记账要按 key 粒度，别用一个全局布尔量。** 这条在 9.55 已经写进教训，本轮又验证了一遍：两个写入点共用一条提示时，全局标志会让「A 写失败、B 写成功」把提示撤掉，而 A 的数据其实已经丢了。
+
 ## 10. 已知风险与决策
 
 ### 10.0 验收基建：profile 隔离与等待上限（2026-11-27，三站对齐）
@@ -1328,7 +1400,7 @@ toast('已标记为「' + STATUS[status] + '」：' + item.cn);   // 下一行
 
 1. **版本五处**：`index.html` meta + 页脚、`package.json`、`package-lock.json`（两处）、`manifest.webmanifest`，与 README / HANDOVER 当前状态一致。
 2. **SW 缓存**：有数据或壳文件变化时把 `yuc-ln-shell-vN` 升一版；只改文档或 CI 不需要升。
-3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 240/240、`check-shards` 23/23、`audit-search` 16/16。
+3. **验收**：`check-data` 0 问题、`test-merge` 28/28、`check-deploy` 通过（21 项排除 / 17 个运行时文件 / 10 个运行时数据包）、`verify` 251/251、`check-shards` 27/27、`audit-search` 17/17。
 4. **CI**：commit → push `main`，六项自动验收（`check-data`、`test-merge`、`check-deploy`、`verify`、`check-shards`、`audit-search`）全绿。
 5. **线上复核**：Pages 构建后确认 meta / 页脚版本、数据条数与 SW 缓存名。
 6. **收尾**：更新 README / HANDOVER / 会话日志，打 `vN` tag。
@@ -1338,6 +1410,6 @@ toast('已标记为「' + STATUS[status] + '」：' + item.cn);   // 下一行
 
 ## 11. 交接提示词
 
-> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.5 已完成，后续按第 10 节风险与决策、第 9.55 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（247 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
+> 接手 `c:\Users\ASUS\Desktop\collection project\轻小说`。先读 `README.md`、`HANDOVER.md`、`reports/session-log-2026-11-23.md`，再读 `../番剧/README.md` 和 `../番剧/index.html` 的对应区段。当前 v1.24.6 已完成，后续按第 10 节风险与决策、第 9.56 节最新记录推进；任何改动后运行 `check-data` / `test-merge` / `check-deploy` / `verify`（251 项）/ `check-shards`（27 项）/ `audit-search`（17 项），push/PR 由 CI 自动跑六项，不要修改 `../番剧`。分片加载失败的处理必须连到 UI 才算修完——只给 `onerror` 赋值、没有事件监听者或没有文案/重试入口，等于没修（v1.23.2 就犯过这个错，见 9.50）。搜索相关改动必须同时过「全角 / 繁体 / 全拼 / 罗马字 / 作者 / 省略标点」六类写法，另加 v1.24.1 的平假名 ↔ 片假名与长音符两种写法，见 9.51 / 9.52；`verify` 的搜索断言是抽样，判断覆盖率必须另跑 `audit-search`（对全库逐条，见 9.52）。`verify` 在机器负载高时可能因首屏卡片未渲染而大面积假失败（失败项集中在「卡片数量」类断言），先重跑一次再怀疑代码。完成后汇报：数据统计、verify 通过数、桌面与移动端截图、线上 URL。若数据字段与本文不符，先停下来说明差异再改。
 >
 > **子代理授权**：任务中可以分派适量子代理以加快进度，不必再问（可独立并行的调研、代码审计、多文件排查、批量验证、独立模块实现）。数量 **2–3 个**为宜，不为凑数硬拆；**禁止多个子代理同时修改同一文件**（会互相覆盖），同一文件的改动由主线串行完成。分工上子代理只做「读取 / 分析 / 出结论」或各自负责互不重叠的文件，主线负责整合、验证、提交与最终汇报。交给子代理的提示必须自包含（目标、已知事实、已排除项、具体文件路径或行号、验收标准），不要写「根据你的发现去修复」这类放权式指令。子代理产出只回到主线，**必须核验真实文件改动后**才对用户汇报。完整准则见工作区 `../.workbuddy/memory/MEMORY.md`。
