@@ -1306,6 +1306,95 @@ async function main() {
       await sleep(200);
     }
 
+    // ---- 导出时跳过的条目必须如实告知 ----
+    //
+    // CSV / Markdown 的每一行都要书名、作者，只能从书目数据里取。而收藏里
+    // 可能有些条目在当前书目数据中不存在 —— mergeRemoteState 明确保留远端
+    // 旧 ID（「必须保留并原样回写，否则会丢数据」），所以这是真实可达的状态。
+    // 原来这些条目被 `if (!x || !e) return;` 静默跳过，提示仍说「已导出 N 本」，
+    // 用户以为那就是全部。JSON 导出是完整的，但用户未必知道要去导 JSON。
+    //
+    // 这里往 localStorage 直接塞一条「收藏里有、书目里没有」的记录，
+    // 然后走真实按钮导出，看提示里有没有把差额说出来。
+    const exportSkip = await cdp.evaluate(`(async () => {
+      const KEY = 'yuc_ln_mine_v1';
+      const ghostId = '6652';
+      const out = { ok: false };
+      const saved = localStorage.getItem(KEY) || '{}';
+      const map = JSON.parse(saved);
+      out.realCount = Object.keys(map).length;
+      map[ghostId] = { s: 'done', t: 9999999999999, vol: 1, u: 9999999999999, f: 9999999999999,
+        r: 0, rv: '', nt: '', rvU: 0, fm: '', ow: 0, mu: 0 };
+      localStorage.setItem(KEY, JSON.stringify(map));
+      // 让页面内存也认这条：刷新会丢掉内存里的选择态，但这里只需要导出读内存 myMap，
+      // 所以必须让 myMap 里也有 —— 走 saveMine 的 adoptForeignState 即可：
+      // 随便触发一次真实写入（点当前评分），它会把磁盘上多的条目并进内存。
+      location.hash = 'd=' + ${JSON.stringify(pick.id)};
+      await new Promise((r) => setTimeout(r, 400));
+      const curRate = (JSON.parse(localStorage.getItem(KEY) || '{}')[${JSON.stringify(pick.id)}] || {}).r || 0;
+      const btn = curRate > 0
+        ? document.querySelector('#detailReview [data-rate="' + curRate + '"]')
+        : document.querySelector('#detailReview [data-rate="1"]');
+      if (btn) { btn.click(); await new Promise((r) => setTimeout(r, 350)); }
+      if (curRate === 0) {
+        const c = document.querySelector('#detailReview [data-rate="0"]');
+        if (c) { c.click(); await new Promise((r) => setTimeout(r, 300)); }
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      // 去「我的阅读」点导出 CSV，拦下 toast 文案
+      const tabMine = document.querySelector('.tab[data-tab="mine"]');
+      if (tabMine) { tabMine.click(); await new Promise((r) => setTimeout(r, 400)); }
+      const toastEl = document.getElementById('toast');
+      document.getElementById('exportCsv').click();
+      await new Promise((r) => setTimeout(r, 700));
+      out.csvToast = (toastEl.textContent || '').trim();
+      // Markdown 导出把差额写进正文，直接从生成结果里找
+      let mdText = '';
+      const origCreate = URL.createObjectURL;
+      try {
+        URL.createObjectURL = function (blob) {
+          // 同步读不了 blob，改用 FileReader 的替代：先记下 blob，稍后读
+          out._blob = blob;
+          return origCreate.call(URL, blob);
+        };
+        document.getElementById('exportMd').click();
+        await new Promise((r) => setTimeout(r, 500));
+        if (out._blob) mdText = await out._blob.text();
+      } finally {
+        URL.createObjectURL = origCreate;
+        delete out._blob;
+      }
+      out.mdMentions = /另有 \\d+ 本/.test(mdText);
+      out.ok = true;
+      // 收尾：清磁盘上的 ghost。注意它此刻仍在页面**内存**里，而内存里
+      // 没有删除入口（它不对应任何真实书目、渲染不出来），所以断言之后
+      // 必须重载一次页面让内存按磁盘重建 —— 否则下一次 saveMine 会把它
+      // 写回磁盘（实测集合里多出 6652，把「导入跳过未知条目」断言搞挂）。
+      const clean = JSON.parse(localStorage.getItem(KEY) || '{}');
+      delete clean[ghostId];
+      localStorage.setItem(KEY, JSON.stringify(clean));
+      return out;
+    })()`);
+    check('导出 CSV / Markdown 时把跳过的条目如实说出来',
+      exportSkip.ok === true && /另有 \d+ 本/.test(exportSkip.csvToast || '') &&
+      exportSkip.mdMentions === true,
+      JSON.stringify(exportSkip));
+    // ghost 已从磁盘删掉，但它仍在页面内存的 myMap 里（渲染不出来、也没有
+    // 删除入口）。刷新能清掉它，但会把后面几条断言依赖的搜索态、面板态一起
+    // 重置（实测把「清除筛选后恢复列表」搞挂）。
+    // 这里改为「刷新 + 重建那几条断言需要的最小状态」：刷新后页面回到
+    // tab=all、搜索为空 —— 这正是「清除筛选后恢复列表」之前那段所依赖的起点。
+    await cdp.send('Page.reload', { ignoreCache: false });
+    await sleep(1400);
+    await cdp.evaluate(`(() => {
+      location.hash = 'tab=all';
+      const el = document.getElementById('search');
+      if (el && el.value) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
+      return true;
+    })()`);
+    await sleep(500);
+
     // 评: 字段搜索短评与笔记正文
     await setSearch('评:测试短评');
     const reviewSearch = await cdp.evaluate(`(() => ({
@@ -1342,6 +1431,96 @@ async function main() {
     await sleep(300);
     const draftAfterSave = await cdp.evaluate(`(() => JSON.parse(localStorage.getItem('yuc_ln_draft_v1') || '{}')[${JSON.stringify(pick.id)}])()`);
     check('保存书评后清除草稿', !draftAfterSave);
+
+    // ---- 保存书评失败时不能把草稿也清掉 ----
+    //
+    // 点「保存书评」的代码顺序是：写内存字段 → clearDraft(id) → saveMine()
+    //  → toast('书评已保存')。
+    // 问题在 clearDraft 排在 saveMine 前面：一旦 saveMine 写失败（存储满、
+    // 隐私模式），正式字段没落盘、草稿已经被删干净 —— 用户在文本域里写的
+    // 那几百字**两份都没了**，而 toast 还说「书评已保存」。
+    // 草稿本来就该死掉，但它该死在自己的内容安全落地之后，不是之前。
+    const saveFailDraft = await cdp.evaluate(`(async () => {
+      const id = ${JSON.stringify(pick.id)};
+      const DKEY = 'yuc_ln_draft_v1';
+      const MKEY = 'yuc_ln_mine_v1';
+      const out = { ok: false };
+      location.hash = 'd=' + id;
+      await new Promise((r) => setTimeout(r, 400));
+      // 先写一段草稿（正常路径，能落盘）
+      const rv = document.getElementById('reviewShort');
+      const nt = document.getElementById('reviewNote');
+      if (!rv || !nt) return { ok: false, reason: 'no-textarea' };
+      rv.value = '存满时写的短评';
+      nt.value = '存满时写的笔记';
+      rv.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      out.draftBefore = (JSON.parse(localStorage.getItem(DKEY) || '{}')[id] || {}).rv || null;
+      // 让收藏写入失败（只拦 mine 这个 key，草稿要能正常写/删）
+      const rawSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k) {
+        if (String(k).indexOf('mine') >= 0) {
+          const err = new Error('QuotaExceededError simulated');
+          err.name = 'QuotaExceededError';
+          throw err;
+        }
+        return rawSet.apply(this, arguments);
+      };
+      try {
+        document.getElementById('reviewSave').click();
+        await new Promise((r) => setTimeout(r, 400));
+      } finally {
+        Storage.prototype.setItem = rawSet;
+      }
+      const draftNow = JSON.parse(localStorage.getItem(DKEY) || '{}')[id] || null;
+      const saved = JSON.parse(localStorage.getItem(MKEY) || '{}')[id] || {};
+      out.draftAfterFail = draftNow ? draftNow.rv : null;
+      out.savedRv = saved.rv || '';
+      out.textareaStill = (document.getElementById('reviewShort') || {}).value || '';
+      // 关键判据：内容得在**至少一个**能活过刷新的地方
+      out.contentSurvives = out.draftAfterFail === '存满时写的短评' || out.savedRv === '存满时写的短评';
+      out.ok = true;
+      // 收尾有三件事，每一件都曾经出过问题：
+      //  ① 草稿键要**直接从 localStorage 删**。走「清空 textarea + dispatch input」
+      //    会顺手写进一个 { rv:'', nt:'' } 的空草稿对象，下一个探针读到的
+      //    draftWritten 就成了 true，把「草稿写失败」那条断言搞挂。
+      //  ② STORAGE_KEY 的失败标记还挂着（reportStoreFailure 记的账），
+      //    必须靠一次**真正成功**的写入来销账，否则横幅一直亮着影响后续断言。
+      //    点一下当前评分值即可：setRate 没有「值相同就 return」的短路，
+      //    一定会走 saveMine。
+      //  ③ 清空输入框且不触发 input，避免再把空草稿写回去。
+      const d = JSON.parse(localStorage.getItem(DKEY) || '{}');
+      delete d[id];
+      localStorage.setItem(DKEY, JSON.stringify(d));
+      const curRate = (JSON.parse(localStorage.getItem(MKEY) || '{}')[id] || {}).r || 0;
+      const ratePick = curRate > 0
+        ? document.querySelector('#detailReview [data-rate="' + curRate + '"]')
+        : document.querySelector('#detailReview [data-rate="1"]');
+      if (ratePick) {
+        ratePick.click();
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      // 把评分还原成原值（上面 0 时会误设成 1）
+      if (curRate === 0) {
+        const clearRate = document.querySelector('#detailReview [data-rate="0"]');
+        if (clearRate) { clearRate.click(); await new Promise((r) => setTimeout(r, 300)); }
+      }
+      const rv2 = document.getElementById('reviewShort');
+      const nt2 = document.getElementById('reviewNote');
+      if (rv2) rv2.value = '';
+      if (nt2) nt2.value = '';
+      const d2 = JSON.parse(localStorage.getItem(DKEY) || '{}');
+      delete d2[id];
+      localStorage.setItem(DKEY, JSON.stringify(d2));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      out.bannerCleared = document.getElementById('storageWarn').hidden;
+      return out;
+    })()`);
+    check('保存书评写不进去时，草稿不能跟着被清掉（否则几百字两份都没了）',
+      saveFailDraft.ok === true && saveFailDraft.draftBefore === '存满时写的短评' &&
+      saveFailDraft.savedRv !== '存满时写的短评' && saveFailDraft.contentSurvives === true,
+      JSON.stringify(saveFailDraft));
     await cdp.evaluate(`(() => { location.hash = ''; })()`);
     await sleep(300);
 

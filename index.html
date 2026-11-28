@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://bgmimg.anibt.net" crossorigin>
 <link rel="dns-prefetch" href="https://bgmimg.anibt.net">
 <meta name="theme-color" content="#0a0b0d">
-<meta name="version" content="1.24.8">
+<meta name="version" content="1.24.9">
 <style>
   :root {
     --bg: #0d0f14;
@@ -3166,7 +3166,7 @@
 </main>
 
 <footer class="wrap">
-  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.8</span>
+  数据来源 <a href="https://bgm.tv" target="_blank" rel="noreferrer">Bangumi 番组计划</a> · 扩展书目 <a href="https://ranobedb.org" target="_blank" rel="noreferrer">RanobeDB</a>（ODbL） · 封面版权归原作者所有 · 数据更新于 <span id="dataUpdated" title="数据快照生成时间">—</span> · <span title="项目版本">v1.24.9</span>
 </footer>
 
 <div class="modal" id="modal" hidden>
@@ -9020,12 +9020,27 @@
     entry.nt = String(($('reviewNote') || {}).value || '').slice(0, 1000).trim();
     entry.u = Date.now();
     entry.rvU = entry.u;
-    clearDraft(id);
     markDay();
-    saveMine();
+    // 顺序很重要：先 saveMine，确认写进去了再清草稿。
+    //
+    // 原来是 clearDraft(id) 在前、saveMine() 在后。saveMine 写失败时
+    //（存储满 / 隐私模式），正式字段没落盘、草稿已经被删干净 ——
+    // 用户在文本域里写的那几百字**两份都没了**，而下面那句 toast 还在说
+    //「书评已保存」。草稿本来就该死掉，但它得死在自己的内容安全落地之后。
+    //
+    // saveMine 返回 false 表示这次写入失败。此时保留草稿，让用户下次打开
+    // 详情还能拿回内容；横幅与 toast 已由 reportStoreFailure 负责告知。
+    var saved = saveMine();
+    if (saved) clearDraft(id);
     render();
     renderDetail(id);
-    toast('书评已保存：' + (byId.get(id).cn || byId.get(id).n));
+    if (saved) {
+      toast('书评已保存：' + (byId.get(id).cn || byId.get(id).n));
+    } else {
+      // 不能说「已保存」：数据确实没写进去。草稿还在，所以提示该说的是
+      //「没存上，但内容还在草稿里」，而不是让用户以为白写了。
+      toast('书评未能保存，内容已留在草稿里，请导出备份后重试');
+    }
   });
 
   $('detailShare').addEventListener('click', function () {
@@ -9476,10 +9491,16 @@
   $('exportCsv').addEventListener('click', function () {
     if (!extraLoaded) { loadExtra().then(function () { $('exportCsv').click(); }); return; }
     var rows = [['条目ID', '中文名', '原名', '作者', '出版社', '书系', '题材', '发售日', '册数', '状态', '已读卷', '格式', '藏书', '我的评分', '短评', '笔记', '读完日期', '加入时间']];
+    // 有些条目只在收藏里、当前书目数据里却没有（云同步会保留远端旧 ID，
+    // 见 mergeRemoteState 的「必须保留并原样回写」）。它们进不了 CSV ——
+    // 因为书名、作者这些列没有来源。但必须**说出来跳过了几条**：
+    // 用户导 CSV 就是为了看全部，少几条却显示「已导出 N 本」，
+    // 他会以为那就是全部，过后核对时才发现对不上。
+    var csvMissing = 0;
     sortedMine().forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
-      if (!x || !e) return;
+      if (!x || !e) { if (e) csvMissing += 1; return; }
       var genres = (x.tg || []).map(function (gid) { return GENRE_LABEL[gid]; })
         .filter(Boolean).join('/');
       rows.push([
@@ -9494,7 +9515,8 @@
     }).join('\r\n');
     download('我的轻小说-' + stamp() + '.csv', csv, 'text/csv;charset=utf-8');
     markBackup();
-    toast('已导出 CSV：' + (rows.length - 1) + ' 本');
+    toast('已导出 CSV：' + (rows.length - 1) + ' 本' +
+      (csvMissing ? '（另有 ' + csvMissing + ' 本缺书目信息，未列出；JSON 导出含全部记录）' : ''));
   });
 
   $('exportMd').addEventListener('click', function () {
@@ -9508,10 +9530,11 @@
       '| 书名 | 状态 | 进度 | 格式 | 藏书 | 我的评分 | 发售日 | 题材 |',
       '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
+    var mdMissing = 0;
     ids.forEach(function (id) {
       var x = byId.get(id);
       var e = myMap[id];
-      if (!x || !e) return;
+      if (!x || !e) { if (e) mdMissing += 1; return; }
       var name = '[' + String(x.cn || x.n || '未知').replace(/\|/g, '\\|') + '](https://bgm.tv/subject/' + id + ')';
       var prog = (e.vol || 0) + (x.v ? ' / ' + x.v : '');
       var genres = (x.tg || []).map(function (gid) { return GENRE_LABEL[gid]; })
@@ -9533,6 +9556,12 @@
     }).filter(Boolean);
     if (notes.length) {
       lines.push('', '## 短评与笔记', '', notes.join('\n\n'));
+    }
+    // 表格里少了条目就要说清楚，否则「共 N 本」与表格行数对不上，
+    // 用户只会怀疑导出坏了或数据丢了。
+    if (mdMissing) {
+      lines.push('', '> 另有 ' + mdMissing + ' 本在收藏里，但当前书目数据中没有对应条目' +
+        '（多为云同步保留的旧 ID），未能列出。完整记录见 JSON 导出。');
     }
     download('我的轻小说-' + stamp() + '.md', lines.join('\n'), 'text/markdown;charset=utf-8');
     markBackup();
